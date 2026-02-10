@@ -1,0 +1,79 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // FCM Tokens - users can read/write their own tokens
+    match /fcm_tokens/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // --- YOUR TRACKING APP COLLECTIONS ---
+    match /sr_drivers/{doc} { allow read, write: if true; }
+    match /sr_students/{doc} { allow read, write: if true; }
+    match /sr_tracking/{doc} { allow read, write: if true; }
+    match /sr_last_seen/{doc} { allow read, write: if true; }
+    
+    // --- NEW ERP SYSTEM COLLECTIONS ---
+    match /students/{doc} { allow read, write: if true; }
+    match /fees/{doc} { allow read, write: if true; }
+    match /fee_collections/{doc} { allow read, write: if true; }
+    match /fee_types/{doc} { allow read, write: if true; }
+    match /fee_structures/{doc} { allow read, write: if true; }
+    match /fee_amounts/{doc} { allow read, write: if true; }
+    match /attendance/{doc} { allow read, write: if true; }
+    match /teacherAttendance/{doc} { allow read, write: if true; }
+    match /teachers/{doc} { allow read, write: if true; }
+    match /teachingLogs/{doc} { allow read, write: if true; }
+    match /ledger_masters/{doc} { allow read, write: if true; }
+    match /transactions/{doc} { allow read, write: if true; }
+    // --- ACADEMIC & LMS COLLECTIONS ---
+    match /homework/{doc} { allow read, write: if true; }
+    match /homework_completion/{doc} { allow read, write: if true; }
+    match /homeworkSubmissions/{doc} { allow read, write: if true; }
+    match /timetables/{doc} { allow read, write: if true; }
+    match /exam_timetables/{doc} { allow read, write: if true; }
+    match /exams/{doc} { allow read, write: if true; }
+    match /exam_marks/{doc} { allow read, write: if true; }
+    match /events/{doc} { allow read, write: if true; }
+    match /master_holidays/{doc} { allow read, write: if true; }
+    
+    // --- EXAM MANAGEMENT COLLECTIONS ---
+    match /academic_years/{doc} { allow read, write: if true; }
+    match /assessment_types/{doc} { allow read, write: if true; }
+    match /grading_systems/{doc} { allow read, write: if true; }
+    match /exam_slots/{doc} { allow read, write: if true; }
+    match /exam_syllabus/{doc} { allow read, write: if true; }
+    match /exam_templates/{doc} { allow read, write: if true; }
+    match /marks_entries/{doc} { allow read, write: if true; }
+    
+    
+    // --- COMMUNICATION & SUPPORT ---
+    match /notices/{doc} { allow read, write: if true; }
+    match /messages/{doc} { allow read, write: if true; }
+    match /library/{doc} { allow read, write: if true; }
+    match /gallery/{doc} { allow read, write: if true; }
+    match /transport/{doc} { allow read, write: if true; }
+    match /drivers/{doc} { allow read, write: if true; }
+    
+    // --- SYSTEM & AUTH ---
+    match /settings/{doc} { allow read, write: if true; }
+    match /users/{doc} { allow read, write: if true; }
+    match /managers/{doc} { allow read, write: if true; }
+    match /registrations/{doc} { allow read, write: if true; }
+    match /schools/{schoolId} { 
+      allow read, write: if true; 
+      
+      // Allow public read access to settings (for public registration form)
+      match /settings/{settingDoc} {
+        allow read: if true;  // Public can read settings
+        allow write: if true; // Admins can write (you can make this more restrictive later)
+      }
+      
+      // Allow all access to other school subcollections
+      match /{document=**} {
+        allow read, write: if true;
+      }
+    }
+  }
+}

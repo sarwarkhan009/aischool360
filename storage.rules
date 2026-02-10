@@ -1,0 +1,18 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow public read access to all files
+    // Allow authenticated users to write to school logos
+    match /schools/{schoolId}/{allPaths=**} {
+      allow read: if true;  // Anyone can view logos
+      allow write: if true; // Allow writes for now (you can restrict to authenticated users later)
+    }
+    
+    // Default: deny all other operations
+    match /{allPaths=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

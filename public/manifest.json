@@ -1,0 +1,27 @@
+{
+    "name": "AI School 360 - AI-Based ERP System",
+    "short_name": "AI School 360",
+    "description": "India's First AI-Based School Management ERP System",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#6366f1",
+    "gcm_sender_id": "103953800507",
+    "permissions": [
+        "notifications"
+    ],
+    "icons": [
+        {
+            "src": "/logo.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
