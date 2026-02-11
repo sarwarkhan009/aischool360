@@ -135,6 +135,36 @@ const StudentManagement: React.FC = () => {
         }
     };
 
+    const handleGeneratePins = async () => {
+        const studentsWithoutPin = allFilteredStudents.filter(s => !s.pin);
+        if (studentsWithoutPin.length === 0) {
+            alert('All currently filtered students already have a PIN.');
+            return;
+        }
+
+        const confirmMsg = `Are you sure you want to generate unique PINs for ${studentsWithoutPin.length} students who don't have one? Existing PINs will not be changed.`;
+        if (!window.confirm(confirmMsg)) return;
+
+        try {
+            const generateUniquePin = () => Math.floor(1000 + Math.random() * 9000).toString();
+
+            // Use batch for efficiency
+            for (let i = 0; i < studentsWithoutPin.length; i += 500) {
+                const chunk = studentsWithoutPin.slice(i, i + 500);
+                const batch = writeBatch(db);
+                chunk.forEach(student => {
+                    batch.update(doc(db, 'students', student.id), { pin: generateUniquePin() });
+                });
+                await batch.commit();
+            }
+
+            alert(`Successfully generated PINs for ${studentsWithoutPin.length} students.`);
+        } catch (error) {
+            console.error('Error generating PINs:', error);
+            alert('An error occurred while generating PINs: ' + (error as Error).message);
+        }
+    };
+
     const allFilteredStudents = students.filter(s => {
         // Robust filtering: match if filter is empty OR property includes selection (to handle "Class VI" vs "VI")
         const matchesSession = !selectedSession || (s.session && s.session.includes(selectedSession)) || !s.session;
@@ -480,6 +510,13 @@ const StudentManagement: React.FC = () => {
                     <div className="filters-bar" style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', background: '#f8f9fa' }}>
                         <div className="filter-group" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', flex: 1 }}>
                             <button className="btn-success-small hover-lift" onClick={handleAssignRoll} style={{ background: '#22c55e', padding: '0.625rem 1.25rem', height: '40px' }}>ASSIGN NEW ROLL</button>
+                            <button
+                                className="btn hover-lift"
+                                onClick={handleGeneratePins}
+                                style={{ background: '#3b82f6', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                            >
+                                <Settings size={14} /> GENERATE PIN
+                            </button>
                             <button
                                 className="btn hover-lift"
                                 onClick={handleCleanData}

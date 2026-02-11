@@ -161,7 +161,7 @@ export const convertToStudents = (
 
         // Normalize Date (expecting common formats like DD-MM-YYYY or DD/MM/YYYY)
         let dob = row['Date of Birth']?.toString().trim() || '';
-        if (dob && dob.includes('-') || dob.includes('/')) {
+        if (dob && (dob.includes('-') || dob.includes('/'))) {
             const parts = dob.split(/[-/]/);
             if (parts.length === 3) {
                 // If it's DD-MM-YYYY, convert to YYYY-MM-DD
@@ -171,11 +171,23 @@ export const convertToStudents = (
             }
         }
 
+        let admissionDate = row['Date of Admission']?.toString().trim() || new Date().toISOString().split('T')[0];
+        if (admissionDate && (admissionDate.includes('-') || admissionDate.includes('/'))) {
+            const parts = admissionDate.split(/[-/]/);
+            if (parts.length === 3) {
+                // If it's DD-MM-YYYY, convert to YYYY-MM-DD
+                if (parts[2].length === 4) {
+                    admissionDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                }
+            }
+        }
+
         return {
             // Student Details
             fullName: name,
             name: name,
             dob: dob,
+            admissionDate: admissionDate,
             gender: gender,
             studentCategory: (row['Category']?.toString().trim() || 'GENERAL').toUpperCase(),
             permanentAddress: address,
@@ -427,6 +439,7 @@ export const generateStudentTemplate = (): void => {
         'Mother Phone': '9876543210',
         'Address': 'Sample Address, City',
         'Date of Birth': '01-01-2015',
+        'Date of Admission': '10-02-2026',
         'Gender': 'Male',
         'Category': 'General',
         'Mobile Number': '9876543210',

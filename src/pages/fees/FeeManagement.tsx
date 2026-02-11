@@ -8,11 +8,14 @@ import {
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, Timestamp, query, where, getDocs, doc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, addDoc, Timestamp, query, where, getDocs, doc, updateDoc, orderBy, runTransaction } from 'firebase/firestore';
 import { useSchool } from '../../context/SchoolContext';
 import FeeReceipt from '../../components/fees/FeeReceipt';
 import { getActiveClasses } from '../../constants/app';
 import { formatClassName } from '../../utils/formatters';
+import { getAcademicYearMonths, getMonthIndexMap } from '../../utils/academicYear';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+
 
 // Helper function to format date with time
 const formatDateTime = (date: any): string => {
@@ -34,6 +37,10 @@ type ViewState = 'SEARCH' | 'PAY' | 'LEDGER' | 'SALE' | 'RECEIPT';
 
 const FeeManagement: React.FC = () => {
     const { currentSchool } = useSchool();
+    const { schoolId } = useParams();
+    const navigate = useNavigate();
+    const location = useLocation();
+
     const [view, setView] = useState<ViewState>('SEARCH');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedStudent, setSelectedStudent] = useState<any>(null);
@@ -68,6 +75,58 @@ const FeeManagement: React.FC = () => {
         paymentDate: new Date().toISOString().split('T')[0]
     });
 
+    // Handle incoming Form Sale data
+    useEffect(() => {
+        if (location.state?.formSaleData) {
+            const data = location.state.formSaleData;
+
+            // Synthesize a temporary student object
+            const tempStudent = {
+                id: 'FS-' + Date.now(),
+                admissionNo: 'FORM-SALE',
+                fullName: data.studentName,
+                class: data.studentClass,
+                section: '',
+                mobileNo: data.whatsappNumber,
+                financeType: 'GENERAL',
+                isFormSale: true
+            };
+
+            setSelectedStudent(tempStudent);
+
+            // Pre-select Form Sale fee
+            const newMonths = {
+                'Additional': {
+                    'Form Sale': Number(data.formAmount)
+                }
+            };
+            setSelectedMonths(newMonths);
+            setDynamicFees({ 'Form Sale': Number(data.formAmount) });
+
+            // Pre-populate payment details
+            setFeeDetails({
+                admissionFee: 0,
+                annualFee: 0,
+                transportFee: 0,
+                tuitionFee: 0,
+                miscellaneousFee: 0,
+                previousDues: 0,
+                discount: 0,
+                amountReceived: Number(data.formAmount),
+                paymentMode: 'Cash',
+                remarks: 'Form Sale Payment',
+                sendSMS: false,
+                paymentDate: new Date().toISOString().split('T')[0]
+            });
+
+            // Set view to PAY
+            setView('PAY');
+
+            // Clear location state to prevent re-triggering on refresh
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
+
     // Keyboard Shortcuts
     useEffect(() => {
         const handleKeyPress = (e: KeyboardEvent) => {
@@ -80,10 +139,9 @@ const FeeManagement: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyPress);
     }, []);
 
-    const months = [
-        "April", "May", "June", "July", "August", "September",
-        "October", "November", "December", "January", "February", "March"
-    ];
+    // Dynamic months based on academic year start month (excluding Admission_month for fee collection)
+    const allMonths = getAcademicYearMonths(currentSchool?.academicYearStartMonth || 'April');
+    const months = allMonths.filter(m => m !== 'Admission_month');
 
     const filteredStudents = students.filter(stu => {
         const matchesSearch = !searchTerm || (
@@ -105,16 +163,16 @@ const FeeManagement: React.FC = () => {
 
         if (!students || !feeCollections || !feeTypes || !feeAmounts) return duesMap;
 
-        const MONTH_MAP: Record<string, number> = {
-            'April': 3, 'May': 4, 'June': 5, 'July': 6, 'August': 7, 'September': 8,
-            'October': 9, 'November': 10, 'December': 11, 'January': 0, 'February': 1, 'March': 2
-        };
+        // Dynamic month index mapping
+        const MONTH_MAP = getMonthIndexMap();
 
         const today = new Date();
         const currentYear = today.getFullYear();
         const currentMonth = today.getMonth();
-        const sessionStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
-        const sessionStartDate = new Date(sessionStartYear, 3, 1);
+        // Get academic year start month index (default April = 3)
+        const academicStartMonth = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];
+        const sessionStartYear = currentMonth >= academicStartMonth ? currentYear : currentYear - 1;
+        const sessionStartDate = new Date(sessionStartYear, academicStartMonth, 1);
 
         students.forEach(student => {
             const admType = student.admissionType || 'NEW';
@@ -127,7 +185,7 @@ const FeeManagement: React.FC = () => {
                 startMonthIdx = admDateRaw.getMonth();
                 startYear = admDateRaw.getFullYear();
             } else {
-                startMonthIdx = 3;
+                startMonthIdx = academicStartMonth;
                 startYear = sessionStartYear;
             }
 
@@ -158,7 +216,8 @@ const FeeManagement: React.FC = () => {
                         } else {
                             const targetMonthIdx = MONTH_MAP[monthName];
                             if (targetMonthIdx !== undefined) {
-                                const targetYear = targetMonthIdx < 3 ? sessionStartYear + 1 : sessionStartYear;
+                                // If month is before academic start month, it belongs to next calendar year
+                                const targetYear = targetMonthIdx < academicStartMonth ? sessionStartYear + 1 : sessionStartYear;
                                 const dueDate = new Date(targetYear, targetMonthIdx, 5);
 
                                 if (today >= dueDate) {
@@ -368,7 +427,29 @@ const FeeManagement: React.FC = () => {
         const currentDues = totalAmount - feeDetails.discount - paidAmount;
 
         try {
-            const receiptNo = `R${Date.now().toString().slice(-6)}`;
+            // Sequential Receipt Number Generation using Firestore Transaction
+            const receiptNo = await runTransaction(db, async (transaction) => {
+                const prefix = currentSchool?.admissionNumberPrefix ||
+                    (currentSchool?.fullName || currentSchool?.name || 'SCH').substring(0, 3).toUpperCase();
+
+                // Use a unified money_receipt_counter for all collections to avoid conflicts
+                const counterDocRef = doc(db, 'settings', `money_receipt_counter_${schoolId}`);
+                const counterSnap = await transaction.get(counterDocRef);
+
+                let nextNumber = 1;
+                if (counterSnap.exists()) {
+                    nextNumber = (counterSnap.data().lastNumber || 0) + 1;
+                }
+
+                transaction.set(counterDocRef, {
+                    lastNumber: nextNumber,
+                    updatedAt: Timestamp.now(),
+                    schoolId: schoolId,
+                    type: 'money_receipt_counter'
+                }, { merge: true });
+
+                return `${prefix}-${nextNumber.toString().padStart(4, '0')}`;
+            });
 
             // Prepare fee breakdown
             const feeBreakdown: Record<string, number> = {};
@@ -387,6 +468,7 @@ const FeeManagement: React.FC = () => {
                 studentName: selectedStudent.fullName,
                 class: selectedStudent.class,
                 section: selectedStudent.section,
+                mobileNo: selectedStudent.mobileNo || '',
                 date: Timestamp.now(), // Use Firestore Timestamp
                 paymentDate: feeDetails.paymentDate,
                 paidFor: Object.keys(selectedMonths).join(', '),
@@ -406,8 +488,8 @@ const FeeManagement: React.FC = () => {
 
             await addDoc(collection(db, 'fee_collections'), collectionData);
 
-            // 2. Update Student's Current Dues in their record
-            if (selectedStudent.id) {
+            // 2. Update Student's Current Dues in their record (skip for Form Sale temporary students)
+            if (selectedStudent.id && !selectedStudent.isFormSale) {
                 await updateDoc(doc(db, 'students', selectedStudent.id), {
                     basicDues: currentDues
                 });
@@ -447,7 +529,29 @@ const FeeManagement: React.FC = () => {
         const total = cart.reduce((acc, curr) => acc + (curr.price * curr.qty), 0);
 
         try {
-            const receiptNo = `S${Date.now().toString().slice(-6)}`;
+            // Sequential Sale Receipt Number Generation using Firestore Transaction
+            const receiptNo = await runTransaction(db, async (transaction) => {
+                const prefix = currentSchool?.admissionNumberPrefix ||
+                    (currentSchool?.fullName || currentSchool?.name || 'SCH').substring(0, 3).toUpperCase();
+
+                // Use the same unified counter as fees
+                const counterDocRef = doc(db, 'settings', `money_receipt_counter_${schoolId}`);
+                const counterSnap = await transaction.get(counterDocRef);
+
+                let nextNumber = 1;
+                if (counterSnap.exists()) {
+                    nextNumber = (counterSnap.data().lastNumber || 0) + 1;
+                }
+
+                transaction.set(counterDocRef, {
+                    lastNumber: nextNumber,
+                    updatedAt: Timestamp.now(),
+                    schoolId: schoolId,
+                    type: 'money_receipt_counter'
+                }, { merge: true });
+
+                return `${prefix}-${nextNumber.toString().padStart(4, '0')}`;
+            });
             const saleData = {
                 admissionNo: selectedStudent.admissionNo,
                 studentName: selectedStudent.fullName,
@@ -842,17 +946,16 @@ const FeeManagement: React.FC = () => {
                                                     color: isSelected ? '#8b5cf6' : '#475569',
                                                     fontWeight: isSelected ? 800 : 600,
                                                     fontSize: '0.875rem',
-                                                    cursor: amount > 0 ? 'pointer' : 'not-allowed',
+                                                    cursor: 'pointer',
                                                     transition: 'all 0.2s',
                                                     display: 'flex',
                                                     flexDirection: 'column',
                                                     alignItems: 'center',
                                                     gap: '0.5rem',
                                                     textAlign: 'center',
-                                                    opacity: amount > 0 ? 1 : 0.5
+                                                    opacity: 1
                                                 }}
-                                                disabled={amount === 0}
-                                                title={amount === 0 ? 'Not configured for this class' : `Click to add ₹${amount}`}
+                                                title={`Click to add ₹${amount}`}
                                             >
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                                     {isSelected && <Check size={16} />}

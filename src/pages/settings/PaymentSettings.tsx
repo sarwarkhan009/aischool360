@@ -20,6 +20,7 @@ import {
 import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { compressImage } from '../../utils/imageUtils';
+import { useSchool } from '../../context/SchoolContext';
 
 const DEFAULT_TEMPLATES = [
     {
@@ -40,6 +41,7 @@ const DEFAULT_TEMPLATES = [
 ];
 
 const PaymentSettings: React.FC = () => {
+    const { currentSchool } = useSchool();
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [paymentInfo, setPaymentInfo] = useState({
@@ -62,9 +64,14 @@ const PaymentSettings: React.FC = () => {
 
     useEffect(() => {
         const fetchPaymentInfo = async () => {
+            if (!currentSchool?.id) {
+                setLoading(false);
+                return;
+            }
+
             setLoading(true);
             try {
-                const docRef = doc(db, 'settings', 'payment_info');
+                const docRef = doc(db, 'schools', currentSchool.id, 'settings', 'payment_info');
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
                     const data = docSnap.data();
@@ -86,7 +93,7 @@ const PaymentSettings: React.FC = () => {
         };
 
         fetchPaymentInfo();
-    }, []);
+    }, [currentSchool?.id]);
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -102,10 +109,16 @@ const PaymentSettings: React.FC = () => {
     };
 
     const handleSave = async () => {
+        if (!currentSchool?.id) {
+            alert('School not found!');
+            return;
+        }
+
         setIsSaving(true);
         try {
-            await setDoc(doc(db, 'settings', 'payment_info'), {
+            await setDoc(doc(db, 'schools', currentSchool.id, 'settings', 'payment_info'), {
                 ...paymentInfo,
+                schoolId: currentSchool.id,
                 updatedAt: new Date().toISOString()
             });
             alert('Payment settings updated successfully!');
@@ -178,7 +191,7 @@ const PaymentSettings: React.FC = () => {
                                     className="input-field"
                                     value={paymentInfo.accountHolder}
                                     onChange={e => setPaymentInfo({ ...paymentInfo, accountHolder: e.target.value })}
-                                    placeholder="e.g. Millat Public School"
+                                    placeholder="e.g. ABC School"
                                 />
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>

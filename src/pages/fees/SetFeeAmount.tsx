@@ -114,9 +114,9 @@ const SetFeeAmount: React.FC = () => {
         }
 
         // Validate fee rows
-        const validRows = feeRows.filter(row => row.feeTypeId && row.amount > 0);
+        const validRows = feeRows.filter(row => row.feeTypeId && row.amount >= 0);
         if (validRows.length === 0) {
-            alert('Please add at least one fee type with a valid amount');
+            alert('Please add at least one fee type');
             return;
         }
 
@@ -195,9 +195,9 @@ const SetFeeAmount: React.FC = () => {
         if (!editingClass) return;
 
         // Validate fee rows
-        const validRows = feeRows.filter(row => row.feeTypeId && row.amount > 0);
+        const validRows = feeRows.filter(row => row.feeTypeId && row.amount >= 0);
         if (validRows.length === 0) {
-            alert('Please add at least one fee type with a valid amount');
+            alert('Please add at least one fee type');
             return;
         }
 
@@ -508,10 +508,10 @@ const SetFeeAmount: React.FC = () => {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
                         <button
                             onClick={handleSave}
-                            disabled={saving || selectedClasses.length === 0 || feeRows.every(row => !row.feeTypeId || row.amount <= 0)}
+                            disabled={saving || selectedClasses.length === 0 || feeRows.every(row => !row.feeTypeId || row.amount < 0)}
                             className="btn btn-primary"
                             style={{
-                                background: (saving || selectedClasses.length === 0 || feeRows.every(row => !row.feeTypeId || row.amount <= 0)) ? '#94a3b8' : '#10b981',
+                                background: (saving || selectedClasses.length === 0 || feeRows.every(row => !row.feeTypeId || row.amount < 0)) ? '#94a3b8' : '#10b981',
                                 color: 'white',
                                 padding: '0.875rem 2rem',
                                 fontSize: '1rem',
@@ -520,7 +520,7 @@ const SetFeeAmount: React.FC = () => {
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.5rem',
-                                cursor: (saving || selectedClasses.length === 0 || feeRows.every(row => !row.feeTypeId || row.amount <= 0)) ? 'not-allowed' : 'pointer',
+                                cursor: (saving || selectedClasses.length === 0 || feeRows.every(row => !row.feeTypeId || row.amount < 0)) ? 'not-allowed' : 'pointer',
                                 border: 'none',
                                 boxShadow: '0 4px 15px rgba(16, 185, 129, 0.3)',
                                 transition: 'all 0.3s'

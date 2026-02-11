@@ -12,6 +12,7 @@ const MODULE_STRUCTURE = [
         icon: '🧑‍🎓',
         children: [
             { id: '/students/admission', label: 'Add Student' },
+            { id: '/students/form-sale', label: 'Form Sale' },
             { id: '/students/registrations', label: 'Registration Requests' },
             { id: '/students', label: 'Manage Students' },
             { id: '/students/report', label: 'Student Report' },

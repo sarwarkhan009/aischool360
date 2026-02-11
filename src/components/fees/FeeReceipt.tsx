@@ -24,7 +24,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
     const schoolAddress = currentSchool?.address || schoolInfo?.address || schoolInfo?.schoolAddress || 'Near Moti Nagar, Vickhara, PO-Tarwer, PS-Amnour, Saran Bihar';
     const schoolPhone = currentSchool?.phone || currentSchool?.contactNumber || schoolInfo?.phone || schoolInfo?.contact || schoolInfo?.mobile || '9570656404';
     const schoolWebsite = currentSchool?.website || schoolInfo?.website || schoolInfo?.web || currentSchool?.web || 'www.millatschool.co.in';
-    const schoolLogo = currentSchool?.logoUrl || currentSchool?.logo || schoolInfo?.logo || '/logo.png';
+    const schoolLogo = currentSchool?.logoUrl || currentSchool?.logo || schoolInfo?.logoUrl || schoolInfo?.logo || '/logo.png';
 
     const handlePrint = () => {
         window.print();
@@ -36,11 +36,60 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
             const receiptElement = document.querySelector('.printable-receipt') as HTMLElement;
             if (!receiptElement) return;
 
+            // Debug: Log logo information
+            console.log('WhatsApp Share - School Logo:', schoolLogo);
+            console.log('WhatsApp Share - currentSchool:', currentSchool);
+            console.log('WhatsApp Share - schoolInfo:', schoolInfo);
+
+            // Try to preload the logo to ensure it's available for canvas
+            const logoImg = receiptElement.querySelector('img[alt="Logo"]') as HTMLImageElement;
+            if (logoImg && logoImg.src) {
+                console.log('WhatsApp Share - Logo img src:', logoImg.src);
+                console.log('WhatsApp Share - Logo complete:', logoImg.complete);
+                console.log('WhatsApp Share - Logo naturalWidth:', logoImg.naturalWidth);
+
+                // Convert relative URL to absolute if needed
+                if (logoImg.src.startsWith('/')) {
+                    const absoluteUrl = window.location.origin + logoImg.src;
+                    console.log('Converting relative URL to absolute:', absoluteUrl);
+                    logoImg.src = absoluteUrl;
+                }
+
+                try {
+                    // Wait for image to be fully loaded
+                    if (!logoImg.complete || logoImg.naturalWidth === 0) {
+                        console.log('Waiting for logo to load...');
+                        await new Promise((resolve) => {
+                            logoImg.onload = () => {
+                                console.log('Logo loaded successfully');
+                                resolve(null);
+                            };
+                            logoImg.onerror = (e) => {
+                                console.error('Logo failed to load:', e);
+                                resolve(null);
+                            };
+                            // Timeout after 3 seconds
+                            setTimeout(() => {
+                                console.warn('Logo load timeout');
+                                resolve(null);
+                            }, 3000);
+                        });
+                    } else {
+                        console.log('Logo already loaded');
+                    }
+                } catch (e) {
+                    console.error('Logo load wait failed:', e);
+                }
+            } else {
+                console.warn('Logo img element not found or no src');
+            }
+
+
             const canvas = await html2canvas(receiptElement, {
                 scale: 2,
                 backgroundColor: '#ffffff',
                 logging: false,
-                useCORS: true,
+                useCORS: false,
                 allowTaint: true
             });
 
@@ -60,6 +109,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                 }
             }, 'image/png');
         } catch (error) {
+            console.error('WhatsApp receipt error:', error);
             alert('Failed to generate receipt image.');
         }
     };
@@ -131,7 +181,6 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                             <img
                                 src={schoolLogo}
                                 alt="Logo"
-                                crossOrigin="anonymous"
                                 style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%', border: '2px solid #000' }}
                             />
                         </div>
@@ -171,7 +220,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                             <tr>
                                 <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Class</strong></td>
                                 <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
-                                    {receipt.class}-{receipt.section} <span style={{ float: 'right' }}><strong>Mode:</strong> {receipt.paymentMode || 'CASH'}</span>
+                                    {receipt.class}{receipt.section ? `-${receipt.section}` : ''} <span style={{ float: 'right' }}><strong>Mode:</strong> {receipt.paymentMode || 'CASH'}</span>
                                 </td>
                             </tr>
                         </tbody>

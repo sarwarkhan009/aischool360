@@ -852,7 +852,8 @@ export function InstitutionInfo() {
         logoUrl: '',
         customTitle: '',
         admissionNumberPrefix: '',
-        admissionNumberStartNumber: ''
+        admissionNumberStartNumber: '',
+        academicYearStartMonth: 'April'
     });
     const [isSaving, setIsSaving] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -872,7 +873,8 @@ export function InstitutionInfo() {
                 logoUrl: currentSchool.logoUrl || currentSchool.logo || '',
                 customTitle: currentSchool.customTitle || '',
                 admissionNumberPrefix: currentSchool.admissionNumberPrefix || '',
-                admissionNumberStartNumber: currentSchool.admissionNumberStartNumber || ''
+                admissionNumberStartNumber: currentSchool.admissionNumberStartNumber || '',
+                academicYearStartMonth: currentSchool.academicYearStartMonth || 'April'
             });
             setLoading(false);
         }
@@ -897,6 +899,7 @@ export function InstitutionInfo() {
                 customTitle: info.customTitle,
                 admissionNumberPrefix: info.admissionNumberPrefix,
                 admissionNumberStartNumber: info.admissionNumberStartNumber,
+                academicYearStartMonth: info.academicYearStartMonth,
                 updatedAt: new Date().toISOString()
             });
 
@@ -911,6 +914,8 @@ export function InstitutionInfo() {
                 phone: info.phone,
                 website: info.website,
                 web: info.website, // legacy field name
+                logo: info.logoUrl,
+                logoUrl: info.logoUrl,
                 admissionNumberPrefix: info.admissionNumberPrefix,
                 admissionNumberStartNumber: info.admissionNumberStartNumber,
                 type: 'school_info',
@@ -964,6 +969,30 @@ export function InstitutionInfo() {
                         />
                         <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             This will be shown in the browser tab title
+                        </small>
+                    </div>
+                    <div className="input-group">
+                        <label>Academic Year Start Month</label>
+                        <select
+                            className="input-field"
+                            value={info.academicYearStartMonth}
+                            onChange={e => setInfo({ ...info, academicYearStartMonth: e.target.value })}
+                        >
+                            <option value="January">January (Jan - Dec)</option>
+                            <option value="February">February (Feb - Jan)</option>
+                            <option value="March">March (Mar - Feb)</option>
+                            <option value="April">April (Apr - Mar)</option>
+                            <option value="May">May (May - Apr)</option>
+                            <option value="June">June (Jun - May)</option>
+                            <option value="July">July (Jul - Jun)</option>
+                            <option value="August">August (Aug - Jul)</option>
+                            <option value="September">September (Sep - Aug)</option>
+                            <option value="October">October (Oct - Sep)</option>
+                            <option value="November">November (Nov - Oct)</option>
+                            <option value="December">December (Dec - Nov)</option>
+                        </select>
+                        <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            This determines the months shown in fee collection (e.g., if March is selected, months will show March to February)
                         </small>
                     </div>
                     <div className="grid-2" style={{ gap: '1rem' }}>

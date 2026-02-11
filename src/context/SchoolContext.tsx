@@ -28,6 +28,7 @@ interface SchoolData {
     selectedReportCardTemplateId?: string;
     principalSignatureUrl?: string; // Principal signature image
     enableWatermark?: boolean; // Enable/disable watermark
+    academicYearStartMonth?: string; // Academic year start month (e.g., "April", "March")
 }
 
 interface SchoolContextType {

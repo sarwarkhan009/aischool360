@@ -43,6 +43,7 @@ const defaultFields: RegistrationField[] = [
     { id: 'fatherContactNo', label: "Father's Contact No", enabled: true, required: true, category: 'father' },
     { id: 'fatherWhatsappNo', label: "Father's WhatsApp No", enabled: true, required: false, category: 'father' },
     { id: 'fatherEmailId', label: "Father's Email ID", enabled: true, required: false, category: 'father' },
+    { id: 'fatherAge', label: "Father's Age", enabled: true, required: false, category: 'father' },
 
     // Step 3: Mother's Details
     { id: 'motherName', label: "Mother's Name", enabled: true, required: true, category: 'mother' },
@@ -54,6 +55,7 @@ const defaultFields: RegistrationField[] = [
     { id: 'motherContactNo', label: "Mother's Contact No", enabled: true, required: false, category: 'mother' },
     { id: 'motherWhatsappNo', label: "Mother's WhatsApp No", enabled: true, required: false, category: 'mother' },
     { id: 'motherEmailId', label: "Mother's Email ID", enabled: true, required: false, category: 'mother' },
+    { id: 'motherAge', label: "Mother's Age", enabled: true, required: false, category: 'mother' },
 
     // Step 4: Guardian Details (Optional)
     { id: 'guardianName', label: "Guardian's Name", enabled: false, required: false, category: 'guardian' },

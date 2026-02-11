@@ -209,6 +209,7 @@ const menuItems = [
         moduleId: 'students',
         children: [
             { to: '/students/admission', label: 'Add Student', permission: Permission.ADMIT_STUDENT, moduleId: '/students/admission' },
+            { to: '/students/form-sale', label: 'Form Sale', permission: Permission.ADMIT_STUDENT, moduleId: '/students/form-sale' },
             { to: '/students/bulk-upload', label: 'Bulk Student Upload', permission: Permission.ADMIT_STUDENT, moduleId: '/students/bulk-upload' },
             { to: '/students/registrations', label: 'Registration Requests', permission: Permission.VIEW_REGISTRATIONS, moduleId: '/students/registrations' },
             { to: '/students', label: 'Manage Students', permission: Permission.VIEW_STUDENTS, moduleId: '/students' },

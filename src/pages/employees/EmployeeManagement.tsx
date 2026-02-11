@@ -17,7 +17,8 @@ interface Employee {
     mobile: string;
     email: string;
     status: 'ACTIVE' | 'INACTIVE';
-    pin: string;
+    pin?: string;
+    loginPin?: string;
     baseSalary: number;
     joiningDate: string;
     subjects?: string[];
@@ -104,6 +105,7 @@ const EmployeeManagement: React.FC = () => {
                 joiningDate: employee.joiningDate || new Date().toISOString().split('T')[0],
                 subjects: employee.subjects || [],
                 teachingClasses: employee.teachingClasses || (employee.fromClass ? [employee.fromClass, employee.toClass].filter(Boolean) as string[] : []),
+                pin: employee.pin || employee.loginPin || '',
                 fromClass: employee.fromClass || '',
                 toClass: employee.toClass || ''
             });
@@ -171,6 +173,7 @@ const EmployeeManagement: React.FC = () => {
                 alert(`Employee registered successfully!\nGenerated PIN: ${pin}`);
             }
 
+            // The list will update automatically via Firestore listeners
             setShowModal(false);
         } catch (error) {
             alert('Failed to save employee: ' + (error as Error).message);
@@ -389,7 +392,7 @@ Thank you!`;
                                                 {formatDate(emp.joiningDate)}
                                             </div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.875rem', fontWeight: 700, color: 'var(--primary)' }}>
-                                                <Key size={14} /> PIN: {emp.pin}
+                                                <Key size={14} /> PIN: {emp.pin || emp.loginPin || '----'}
                                             </div>
                                         </div>
                                     </td>

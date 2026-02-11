@@ -86,6 +86,7 @@ const PublicRegistration: React.FC = () => {
         fatherContactNo: '',
         fatherWhatsappNo: '',
         fatherEmailId: '',
+        fatherAge: '',
 
         // Mother's Details
         motherName: '',
@@ -97,6 +98,7 @@ const PublicRegistration: React.FC = () => {
         motherContactNo: '',
         motherWhatsappNo: '',
         motherEmailId: '',
+        motherAge: '',
 
         // Guardian's Details
         guardianName: '',
@@ -341,7 +343,7 @@ const PublicRegistration: React.FC = () => {
                 'dob', 'gender', 'bloodGroup', 'photo', 'state', 'district', 'pinCode',
                 'aadharNo', 'appaarNo', 'studentPenNo', 'classRequested',
                 'fatherContactNo', 'fatherWhatsappNo', 'motherContactNo', 'motherWhatsappNo',
-                'fatherEmailId', 'motherEmailId'
+                'fatherEmailId', 'motherEmailId', 'fatherAge', 'motherAge'
             ];
 
             (Object.keys(transformedData) as Array<keyof typeof formData>).forEach(key => {
@@ -744,6 +746,12 @@ const PublicRegistration: React.FC = () => {
                                             <input type="email" name="fatherEmailId" required={isFieldRequired('fatherEmailId')} className="form-input" value={formData.fatherEmailId} onChange={handleChange} />
                                         </div>
                                     )}
+                                    {isFieldEnabled('fatherAge') && (
+                                        <div className="form-group">
+                                            <label className="form-label">Father's Age {isFieldRequired('fatherAge') && <span className="required">*</span>}</label>
+                                            <input type="number" name="fatherAge" required={isFieldRequired('fatherAge')} className="form-input" value={formData.fatherAge} onChange={handleChange} placeholder="Years" />
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="form-actions two-buttons">
@@ -837,7 +845,12 @@ const PublicRegistration: React.FC = () => {
                                             <input type="email" name="motherEmailId" required={isFieldRequired('motherEmailId')} className="form-input" value={formData.motherEmailId} onChange={handleChange} />
                                         </div>
                                     )}
-
+                                    {isFieldEnabled('motherAge') && (
+                                        <div className="form-group">
+                                            <label className="form-label">Mother's Age {isFieldRequired('motherAge') && <span className="required">*</span>}</label>
+                                            <input type="number" name="motherAge" required={isFieldRequired('motherAge')} className="form-input" value={formData.motherAge} onChange={handleChange} placeholder="Years" />
+                                        </div>
+                                    )}
                                     <div className="form-group full-width">
                                         <label className="form-label">Additional Remarks</label>
                                         <textarea name="remarks" className="form-textarea" value={formData.remarks} onChange={handleChange} rows={2} placeholder="Any other information..."></textarea>

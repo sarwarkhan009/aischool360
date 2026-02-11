@@ -24,6 +24,7 @@ import StaffAttendanceReport from './pages/StaffAttendanceReport';
 import LibraryManagement from './pages/library/LibraryManagement';
 import AcademicCalendar from './pages/Calendar';
 import StudentAdmission from './pages/students/StudentAdmission';
+import FormSale from './pages/students/FormSale';
 import BulkStudentUpload from './pages/students/BulkStudentUpload';
 import BulkMarksUpload from './pages/exams/BulkMarksUpload';
 import FeeStructure from './pages/fees/FeeStructure';
@@ -169,6 +170,7 @@ const AuthWrapper = () => {
             {/* Student Routes */}
             <Route path="students" element={<ProtectedRoute requiredPermission={Permission.VIEW_STUDENTS}><StudentManagement /></ProtectedRoute>} />
             <Route path="students/admission" element={<ProtectedRoute requiredPermission={Permission.ADMIT_STUDENT}><StudentAdmission /></ProtectedRoute>} />
+            <Route path="students/form-sale" element={<ProtectedRoute requiredPermission={Permission.ADMIT_STUDENT}><FormSale /></ProtectedRoute>} />
             <Route path="students/bulk-upload" element={<ProtectedRoute requiredPermission={Permission.ADMIT_STUDENT}><BulkStudentUpload /></ProtectedRoute>} />
             <Route path="students/registrations" element={<ProtectedRoute requiredPermission={Permission.VIEW_REGISTRATIONS}><RegistrationRequests /></ProtectedRoute>} />
             <Route path="students/report" element={<ProtectedRoute requiredPermission={Permission.VIEW_STUDENT_REPORTS}><StudentReport /></ProtectedRoute>} />

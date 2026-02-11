@@ -18,6 +18,7 @@ export interface StudentExcelRow {
     'Mother Phone'?: string | number;
     'Address'?: string;
     'Date of Birth'?: string;
+    'Date of Admission'?: string;
     'Gender'?: string;
     'Category'?: string;
     'Mobile Number'?: string | number;
@@ -32,6 +33,7 @@ export interface ParsedStudent {
     rollNo: string;
     classRollNo: string;
     dob: string;
+    admissionDate: string;
     gender: string;
     studentCategory: string;
     permanentAddress: string;

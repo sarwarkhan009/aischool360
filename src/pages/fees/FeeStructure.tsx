@@ -17,8 +17,11 @@ import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
 import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { getActiveClasses } from '../../constants/app';
+import { useSchool } from '../../context/SchoolContext';
+import { getAcademicYearMonths } from '../../utils/academicYear';
 
 const FeeStructure: React.FC = () => {
+    const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
     const { data: feeTypes, add: addFeeType, update: updateFeeType, remove: removeFeeType } = useFirestore<any>('fee_types');
     const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []).map(c => c.name);
@@ -40,10 +43,8 @@ const FeeStructure: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
 
     const studentTypesList = ['GENERAL', 'TRANSPORT', 'HOSTELER'];
-    const monthsList = [
-        "Admission_month", "April", "May", "June", "July", "August", "September",
-        "October", "November", "December", "January", "February", "March"
-    ];
+    // Dynamic months based on academic year start month
+    const monthsList = getAcademicYearMonths(currentSchool?.academicYearStartMonth || 'April');
     const financeTypesList = ['NORMAL', 'BPL', 'FREE', 'WARD'];
     const admissionTypesList = ['NEW', 'OLD'];
 

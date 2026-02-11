@@ -2,21 +2,36 @@ import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { CreditCard, Loader2, QrCode, Copy, CheckCircle } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { useSchool } from '../../context/SchoolContext';
 
 const ParentFeeInfo: React.FC = () => {
+    const { user } = useAuth();
+    const { currentSchool } = useSchool();
     const [bankDetails, setBankDetails] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [copiedField, setCopiedField] = useState<string | null>(null);
 
     useEffect(() => {
         fetchBankDetails();
-    }, []);
+    }, [currentSchool?.id]);
 
     const fetchBankDetails = async () => {
+        if (!currentSchool?.id && !user?.schoolId) {
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         try {
-            // Try payment_info first (new system)
-            let d = await getDoc(doc(db, 'settings', 'payment_info'));
+            const schoolId = currentSchool?.id || user?.schoolId;
+            if (!schoolId) {
+                setLoading(false);
+                return;
+            }
+
+            // Try school-specific payment_info first (new system)
+            let d = await getDoc(doc(db, 'schools', schoolId, 'settings', 'payment_info'));
             if (d.exists()) {
                 const data = d.data();
                 setBankDetails({
@@ -28,9 +43,23 @@ const ParentFeeInfo: React.FC = () => {
                     qrCodeUrl: data.qrCodeUrl
                 });
             } else {
-                // Fallback to old bank_details
-                d = await getDoc(doc(db, 'settings', 'bank_details'));
-                if (d.exists()) setBankDetails(d.data());
+                // Fallback to old global settings (for backward compatibility)
+                d = await getDoc(doc(db, 'settings', 'payment_info'));
+                if (d.exists()) {
+                    const data = d.data();
+                    setBankDetails({
+                        accountName: data.accountHolder,
+                        accountNumber: data.accountNumber,
+                        ifscCode: data.ifscCode,
+                        bankName: data.bankName,
+                        upiId: data.upiId,
+                        qrCodeUrl: data.qrCodeUrl
+                    });
+                } else {
+                    // Further fallback to old bank_details
+                    d = await getDoc(doc(db, 'settings', 'bank_details'));
+                    if (d.exists()) setBankDetails(d.data());
+                }
             }
         } catch (e) {
             console.error('Failed to fetch bank details:', e);

@@ -158,6 +158,7 @@ const StudentAdmission: React.FC = () => {
         fatherContactNo: initialStudent?.fatherContactNo || '',
         fatherWhatsappNo: initialStudent?.fatherWhatsappNo || '',
         fatherEmailId: initialStudent?.fatherEmailId || '',
+        fatherAge: initialStudent?.fatherAge || '',
 
         // Step 3: Mother's Details
         motherName: initialStudent?.motherName || '',
@@ -170,6 +171,7 @@ const StudentAdmission: React.FC = () => {
         motherContactNo: initialStudent?.motherContactNo || '',
         motherWhatsappNo: initialStudent?.motherWhatsappNo || '',
         motherEmailId: initialStudent?.motherEmailId || '',
+        motherAge: initialStudent?.motherAge || '',
 
         // Step: Guardian Details
         guardianName: initialStudent?.guardianName || '',
@@ -253,7 +255,7 @@ const StudentAdmission: React.FC = () => {
 
     // Auto-populate monthly fee from fee management when class is selected
     React.useEffect(() => {
-        if (formData.class && feeAmounts && feeAmounts.length > 0 && !initialStudent?.monthlyFee) {
+        if (formData.class && feeAmounts && feeAmounts.length > 0) {
             // Filter for this class AND only fees that have "Monthly" in the name
             const classFees = feeAmounts.filter((fa: any) =>
                 fa.className === formData.class &&
@@ -263,15 +265,10 @@ const StudentAdmission: React.FC = () => {
 
             const totalMonthlyFee = classFees.reduce((sum: number, fa: any) => sum + (Number(fa.amount) || 0), 0);
 
-            // Update even if 0 to reflect the change if class changes (but user might have manual edit?)
-            // We only auto-fill if it looks like a system value or empty. 
-            // For now, let's just set it if found, or set to 0 if we want to be strict.
-            // But to be safe and solve the specific "summing everything" issue:
-            if (totalMonthlyFee > 0) {
-                setFormData(prev => ({ ...prev, monthlyFee: totalMonthlyFee.toString() }));
-            }
+            // Always update when class changes, even if it's 0
+            setFormData(prev => ({ ...prev, monthlyFee: totalMonthlyFee.toString() }));
         }
-    }, [formData.class, feeAmounts, initialStudent]);
+    }, [formData.class, feeAmounts]);
 
     const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -333,7 +330,7 @@ const StudentAdmission: React.FC = () => {
             'admissionNo', 'admissionDate', 'pin', 'status', 'admissionType', 'financeType',
             'studentCategory', 'basicDues', 'mobileNo', 'whatsappNo',
             'fatherContactNo', 'fatherWhatsappNo', 'motherContactNo', 'motherWhatsappNo',
-            'fatherEmailId', 'motherEmailId', 'emailId'
+            'fatherEmailId', 'motherEmailId', 'emailId', 'fatherAge', 'motherAge'
         ];
 
         (Object.keys(transformedData) as Array<keyof typeof formData>).forEach(key => {
@@ -756,6 +753,14 @@ const StudentAdmission: React.FC = () => {
                                             <input type="email" placeholder="example@email.com" className="input-field-premium" value={formData.fatherEmailId} onChange={e => setFormData({ ...formData, fatherEmailId: e.target.value })} />
                                         </div>
                                     )}
+                                    {isFieldEnabled('fatherAge') && (
+                                        <div className="input-group-vertical">
+                                            <label className="field-label">
+                                                Father's Age{isFieldRequired('fatherAge') && <span style={{ color: '#ef4444' }}> *</span>}
+                                            </label>
+                                            <input type="number" placeholder="Years" className="input-field-premium" value={formData.fatherAge} onChange={e => setFormData({ ...formData, fatherAge: e.target.value })} />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -887,6 +892,14 @@ const StudentAdmission: React.FC = () => {
                                                 Mother's Email ID{isFieldRequired('motherEmailId') && <span style={{ color: '#ef4444' }}> *</span>}
                                             </label>
                                             <input type="email" placeholder="example@email.com" className="input-field-premium" value={formData.motherEmailId} onChange={e => setFormData({ ...formData, motherEmailId: e.target.value })} />
+                                        </div>
+                                    )}
+                                    {isFieldEnabled('motherAge') && (
+                                        <div className="input-group-vertical">
+                                            <label className="field-label">
+                                                Mother's Age{isFieldRequired('motherAge') && <span style={{ color: '#ef4444' }}> *</span>}
+                                            </label>
+                                            <input type="number" placeholder="Years" className="input-field-premium" value={formData.motherAge} onChange={e => setFormData({ ...formData, motherAge: e.target.value })} />
                                         </div>
                                     )}
                                 </div>

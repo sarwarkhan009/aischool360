@@ -201,21 +201,36 @@ const BulkStudentUpload: React.FC = () => {
                 </div>
                 <button
                     onClick={generateStudentTemplate}
-                    className="btn"
+                    className="btn-premium"
                     style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.5rem',
-                        background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                        gap: '0.75rem',
+                        background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
                         color: 'white',
                         border: 'none',
-                        borderRadius: '0.5rem',
-                        padding: '0.75rem 1.5rem',
-                        fontWeight: 600
+                        borderRadius: '0.75rem',
+                        padding: '0.875rem 1.75rem',
+                        fontWeight: 600,
+                        boxShadow: '0 4px 15px rgba(79, 70, 229, 0.3)',
+                        transition: 'all 0.3s ease',
+                        cursor: 'pointer'
                     }}
                 >
-                    <Download size={18} />
-                    Download Template
+                    <div style={{
+                        background: 'rgba(255, 255, 255, 0.2)',
+                        padding: '0.4rem',
+                        borderRadius: '0.5rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}>
+                        <Download size={20} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.9rem', lineHeight: '1' }}>Download Template</span>
+                        <span style={{ fontSize: '0.7rem', opacity: 0.8, fontWeight: 400 }}>Recommended for first-time</span>
+                    </div>
                 </button>
             </div>
 
@@ -420,6 +435,7 @@ const BulkStudentUpload: React.FC = () => {
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>UID Number</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>Father UID</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mother UID</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Date of Admission</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>PEN</th>
                                 </tr>
                             </thead>
@@ -436,6 +452,7 @@ const BulkStudentUpload: React.FC = () => {
                                         <td style={{ padding: '0.75rem' }}>{student.aadharNo || '-'}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.fatherAadharNo || '-'}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.motherAadharNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.admissionDate || '-'}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.studentPenNo || '-'}</td>
                                     </tr>
                                 ))}

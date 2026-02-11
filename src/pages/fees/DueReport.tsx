@@ -74,18 +74,31 @@ const DueReport: React.FC = () => {
     // Load WhatsApp templates from payment settings
     useEffect(() => {
         const fetchPaymentSettings = async () => {
+            if (!schoolId && !currentSchool?.id) return;
+
             try {
-                const docRef = doc(db, 'settings', 'payment_info');
-                const docSnap = await getDoc(docRef);
+                const schoolIdToUse = currentSchool?.id || schoolId;
+                if (!schoolIdToUse) return;
+
+                // Try school-specific payment_info first
+                let docRef = doc(db, 'schools', schoolIdToUse, 'settings', 'payment_info');
+                let docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
                     setPaymentSettings(docSnap.data());
+                } else {
+                    // Fallback to global settings for backward compatibility
+                    docRef = doc(db, 'settings', 'payment_info');
+                    docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        setPaymentSettings(docSnap.data());
+                    }
                 }
             } catch (error) {
                 console.error('Error fetching payment settings:', error);
             }
         };
         fetchPaymentSettings();
-    }, []);
+    }, [schoolId, currentSchool?.id]);
 
     const studentDues = useMemo(() => {
         if (studentsLoading || collectionsLoading || typesLoading || amountsLoading) return [];

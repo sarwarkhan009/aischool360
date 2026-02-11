@@ -40,10 +40,14 @@ export function useFirestore<T = DocumentData>(collectionName: string, constrain
         const q = query(collection(db, collectionName), ...finalConstraints);
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const items = snapshot.docs.map(doc => ({
-                ...doc.data(),
-                id: doc.id
-            })) as T[];
+            const items = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    ...data,
+                    uid: doc.id,
+                    id: data.id || doc.id
+                };
+            }) as T[];
             setData(items);
             setLoading(false);
         }, (err) => {
