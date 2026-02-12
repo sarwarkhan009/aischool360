@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, ChevronRight, Check, Plus, X, Edit2, Trash2 } from 'lucide-react';
+import { Shield, ChevronRight, ChevronDown, Check, Plus, X, Edit2, Trash2, LayoutDashboard, Users, CreditCard, UserCheck, BookOpen, FileText, Bus, Building2, Bell, MessageSquare, Calendar, Clock, User, Settings } from 'lucide-react';
 import { Permission, DEFAULT_ROLES } from '../../types/rbac';
 import type { Role } from '../../types/rbac';
 import { usePersistence } from '../../hooks/usePersistence';
@@ -7,6 +7,7 @@ import { doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { useSchool } from '../../context/SchoolContext';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../lib/firebase';
+import { useFirestore } from '../../hooks/useFirestore';
 
 interface CustomRole {
     id: string;
@@ -17,7 +18,241 @@ interface CustomRole {
     status: 'ACTIVE' | 'INACTIVE';
 }
 
-import { useFirestore } from '../../hooks/useFirestore';
+// ─── Menu-based permission structure ────────────────────────────────────────
+// This mirrors the sidebar menu exactly. Each menu/submenu item maps to
+// one or more Permission values. Toggling a menu item toggles all its
+// associated permissions together.
+// ────────────────────────────────────────────────────────────────────────────
+
+interface MenuItem {
+    id: string;
+    label: string;
+    icon: any;
+    permissions: Permission[];
+    children?: SubMenuItem[];
+}
+
+interface SubMenuItem {
+    id: string;
+    label: string;
+    permissions: Permission[];
+}
+
+const MENU_STRUCTURE: MenuItem[] = [
+    {
+        id: 'dashboard',
+        label: 'Dashboard',
+        icon: LayoutDashboard,
+        permissions: [Permission.VIEW_DASHBOARD, Permission.VIEW_STATS],
+    },
+    {
+        id: 'students',
+        label: 'Student Management',
+        icon: Users,
+        permissions: [Permission.VIEW_STUDENTS],
+        children: [
+            { id: 'students_add', label: 'Add Student', permissions: [Permission.ADMIT_STUDENT] },
+            { id: 'students_form_sale', label: 'Form Sale', permissions: [Permission.ADMIT_STUDENT] },
+            { id: 'students_bulk_upload', label: 'Bulk Student Upload', permissions: [Permission.ADMIT_STUDENT] },
+            { id: 'students_registrations', label: 'Registration Requests', permissions: [Permission.VIEW_REGISTRATIONS] },
+            { id: 'students_manage', label: 'Manage Students', permissions: [Permission.VIEW_STUDENTS] },
+            { id: 'students_report', label: 'Student Report', permissions: [Permission.VIEW_STUDENT_REPORTS] },
+            { id: 'students_re_reg', label: 'Re-Registration Report', permissions: [Permission.VIEW_RE_REGISTRATION_REPORTS] },
+            { id: 'students_dues', label: 'Dues List', permissions: [Permission.VIEW_DUES_LIST] },
+        ]
+    },
+    {
+        id: 'fees',
+        label: 'Fee Management',
+        icon: CreditCard,
+        permissions: [Permission.COLLECT_FEES],
+        children: [
+            { id: 'fees_collect', label: 'Collect Fees', permissions: [Permission.COLLECT_FEES] },
+            { id: 'fees_structure', label: 'Fee Structure', permissions: [Permission.VIEW_FEE_STRUCTURE] },
+            { id: 'fees_set_amount', label: 'Set Fee Amount', permissions: [Permission.SET_FEE_AMOUNT] },
+            { id: 'fees_manage_structure', label: 'Manage Fee Structure', permissions: [Permission.MANAGE_FEE_STRUCTURE] },
+            { id: 'fees_report', label: 'Fee Report', permissions: [Permission.VIEW_FEE_REPORTS] },
+            { id: 'fees_dues', label: 'Due Report', permissions: [Permission.VIEW_DUE_REPORTS] },
+        ]
+    },
+    {
+        id: 'attendance',
+        label: 'Attendance Management',
+        icon: UserCheck,
+        permissions: [Permission.MANAGE_ATTENDANCE],
+        children: [
+            { id: 'attendance_mark', label: 'Mark Attendance', permissions: [Permission.MANAGE_ATTENDANCE] },
+            { id: 'attendance_staff', label: 'Staff Attendance', permissions: [Permission.MANAGE_STAFF_ATTENDANCE] },
+        ]
+    },
+    {
+        id: 'employees',
+        label: 'Employee Management',
+        icon: Users,
+        permissions: [Permission.VIEW_EMPLOYEES],
+        children: [
+            { id: 'employees_list', label: 'Employee List', permissions: [Permission.VIEW_EMPLOYEES] },
+            { id: 'employees_manage', label: 'Manage Employees', permissions: [Permission.MANAGE_EMPLOYEES] },
+            { id: 'employees_payroll', label: 'Payroll', permissions: [Permission.MANAGE_PAYROLL] },
+            { id: 'employees_teaching_logs', label: 'Teaching Logs', permissions: [Permission.VIEW_TEACHING_LOGS] },
+        ]
+    },
+    {
+        id: 'accounts',
+        label: 'Accounts',
+        icon: CreditCard,
+        permissions: [Permission.VIEW_ACCOUNTS],
+        children: [
+            { id: 'accounts_dashboard', label: 'Dashboard', permissions: [Permission.VIEW_ACCOUNTS] },
+            { id: 'accounts_expenses', label: 'Expense Entry', permissions: [Permission.MANAGE_ACCOUNTS] },
+        ]
+    },
+    {
+        id: 'exams',
+        label: 'Exam Management',
+        icon: BookOpen,
+        permissions: [Permission.VIEW_EXAMS],
+        children: [
+            { id: 'exams_dashboard', label: 'Dashboard', permissions: [Permission.VIEW_EXAMS] },
+            { id: 'exams_academic_year', label: 'Academic Year & Terms', permissions: [Permission.MANAGE_SETTINGS] },
+            { id: 'exams_configuration', label: 'Exam Configuration', permissions: [Permission.MANAGE_SETTINGS] },
+            { id: 'exams_scheduling', label: 'Schedule Exams', permissions: [Permission.MANAGE_EXAM_TIMETABLE] },
+            { id: 'exams_timetable', label: 'Exam Timetable', permissions: [Permission.MANAGE_EXAM_TIMETABLE] },
+            { id: 'exams_admit_cards', label: 'Print Admit Card', permissions: [Permission.PRINT_ADMIT_CARDS] },
+            { id: 'exams_marks_entry', label: 'Marks Entry', permissions: [Permission.ENTER_MARKS] },
+            { id: 'exams_bulk_marks', label: 'Bulk Marks Upload', permissions: [Permission.ENTER_MARKS] },
+            { id: 'exams_results', label: 'View Results', permissions: [Permission.VIEW_EXAMS] },
+            { id: 'exams_analytics', label: 'Performance Analytics', permissions: [Permission.VIEW_EXAMS] },
+            { id: 'exams_syllabus', label: 'Manage Syllabus', permissions: [Permission.MANAGE_EXAM_TIMETABLE] },
+            { id: 'exams_templates', label: 'Customize Templates', permissions: [Permission.MANAGE_EXAMS] },
+            { id: 'exams_report_cards', label: 'Print Report Card', permissions: [Permission.PRINT_REPORT_CARDS] },
+            { id: 'exams_question_gen', label: 'Question Generator', permissions: [Permission.GENERATE_QUESTIONS] },
+        ]
+    },
+    {
+        id: 'homework',
+        label: 'Homework Management',
+        icon: FileText,
+        permissions: [Permission.MANAGE_HOMEWORK],
+        children: [
+            { id: 'homework_assign', label: 'Assign Homework', permissions: [Permission.MANAGE_HOMEWORK] },
+            { id: 'homework_report', label: 'Homework Report', permissions: [Permission.VIEW_HOMEWORK_REPORTS] },
+        ]
+    },
+    {
+        id: 'transport',
+        label: 'Transport',
+        icon: Bus,
+        permissions: [Permission.MANAGE_TRANSPORT],
+    },
+    {
+        id: 'hostel',
+        label: 'Hostel',
+        icon: Building2,
+        permissions: [Permission.VIEW_REPORTS],
+    },
+    {
+        id: 'library',
+        label: 'Library',
+        icon: BookOpen,
+        permissions: [Permission.MANAGE_LIBRARY],
+    },
+    {
+        id: 'notices',
+        label: 'Notice Board',
+        icon: Bell,
+        permissions: [Permission.MANAGE_NOTICES, Permission.POST_NOTICE],
+    },
+    {
+        id: 'messages',
+        label: 'Messages',
+        icon: MessageSquare,
+        permissions: [Permission.VIEW_MESSAGES],
+    },
+    {
+        id: 'calendar',
+        label: 'Calendar',
+        icon: Calendar,
+        permissions: [Permission.VIEW_CALENDAR, Permission.MANAGE_CALENDAR],
+    },
+    {
+        id: 'routine',
+        label: 'Routine Management',
+        icon: Clock,
+        permissions: [Permission.VIEW_ROUTINE, Permission.MANAGE_ROUTINE],
+    },
+    {
+        id: 'gallery',
+        label: 'Gallery',
+        icon: User,
+        permissions: [Permission.VIEW_GALLERY, Permission.MANAGE_GALLERY],
+    },
+    {
+        id: 'reports',
+        label: 'Reports',
+        icon: FileText,
+        permissions: [Permission.VIEW_REPORTS],
+    },
+    {
+        id: 'roles',
+        label: 'Roles & Managers',
+        icon: Shield,
+        permissions: [Permission.MANAGE_ROLES, Permission.MANAGE_MANAGERS],
+    },
+    {
+        id: 'settings',
+        label: 'Settings',
+        icon: Settings,
+        permissions: [Permission.MANAGE_SETTINGS],
+        children: [
+            { id: 'settings_classes', label: 'Class & Section Master', permissions: [Permission.MANAGE_CLASSES] },
+            { id: 'settings_inventory', label: 'Inventory Master', permissions: [Permission.MANAGE_INVENTORY] },
+            { id: 'settings_institution', label: 'Institution Info', permissions: [Permission.MANAGE_INSTITUTION] },
+            { id: 'settings_reg_fields', label: 'Registration Fields', permissions: [Permission.MANAGE_REGISTRATION_FIELDS] },
+            { id: 'settings_adm_fields', label: 'Admission Fields', permissions: [Permission.MANAGE_ADMISSION_FIELDS] },
+            { id: 'settings_print', label: 'Print Form Designer', permissions: [Permission.MANAGE_PRINT_DESIGN] },
+            { id: 'settings_api', label: 'API Keys', permissions: [Permission.MANAGE_API_KEYS] },
+            { id: 'settings_seeder', label: 'Data Seeder', permissions: [Permission.MANAGE_DATA_SEEDER] },
+            { id: 'settings_master', label: 'Master Control', permissions: [Permission.MANAGE_MASTER_CONTROL] },
+            { id: 'settings_schools', label: 'Manage Schools', permissions: [Permission.MANAGE_SCHOOLS] },
+            { id: 'settings_payments', label: 'Payment Settings', permissions: [Permission.MANAGE_PAYMENT_SETTINGS] },
+            { id: 'settings_holidays', label: 'Upload Holidays', permissions: [Permission.UPLOAD_HOLIDAYS] },
+            { id: 'settings_subjects', label: 'Subjects & Chapters', permissions: [Permission.MANAGE_ACADEMIC_STRUCTURE] },
+        ]
+    },
+    {
+        id: 'parent_controls',
+        label: 'Parent Controls',
+        icon: User,
+        permissions: [Permission.PARENT_SHOW_FEE_TAB, Permission.PARENT_SHOW_DUES_BANNER],
+        children: [
+            { id: 'parent_fee_tab', label: 'Show Fee Tab', permissions: [Permission.PARENT_SHOW_FEE_TAB] },
+            { id: 'parent_dues_banner', label: 'Show Dues Banner', permissions: [Permission.PARENT_SHOW_DUES_BANNER] },
+        ]
+    },
+    {
+        id: 'ai',
+        label: 'AI Assistant',
+        icon: BookOpen,
+        permissions: [Permission.USE_AI_ASSISTANT],
+    },
+];
+
+// ─── Helper: Check if a menu/submenu is "on" for a set of permissions ──────
+const isMenuEnabled = (menuPerms: Permission[], rolePerms: Permission[]): boolean => {
+    return menuPerms.every(p => rolePerms.includes(p));
+};
+const isMenuPartial = (menuPerms: Permission[], rolePerms: Permission[]): boolean => {
+    return menuPerms.some(p => rolePerms.includes(p)) && !menuPerms.every(p => rolePerms.includes(p));
+};
+
+// ─── Collect ALL unique permissions from a parent menu (including children) ──
+const getAllMenuPermissions = (menu: MenuItem): Permission[] => {
+    const set = new Set<Permission>(menu.permissions);
+    menu.children?.forEach(c => c.permissions.forEach(p => set.add(p)));
+    return Array.from(set);
+};
+
 
 const UserRoles: React.FC = () => {
     const { currentSchool } = useSchool();
@@ -26,6 +261,7 @@ const UserRoles: React.FC = () => {
         DEFAULT_ROLES.map(r => ({ ...r, id: r.role, isDefault: true, status: 'ACTIVE' }))
     );
     const { data: teachers } = useFirestore<any>('teachers');
+    const { hasPermission: currentUserHasPermission } = useAuth();
 
     const [selectedRole, setSelectedRole] = useState<CustomRole>(roles[0]);
     const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -33,10 +269,10 @@ const UserRoles: React.FC = () => {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [newRoleName, setNewRoleName] = useState('');
     const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
+    const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
 
     // Sync roles to Firestore for global persistence
     useEffect(() => {
-        // Sanitize ID for Firestore document path
         const safeId = currentSchool?.id?.replace(/\//g, '') || '';
         if (safeId && roles.length > 0) {
             const syncRoles = async () => {
@@ -100,47 +336,40 @@ const UserRoles: React.FC = () => {
         loadConfig();
     }, [currentSchool?.id]);
 
-    const permissionGroups = {
-        'Dashboard': [Permission.VIEW_DASHBOARD, Permission.VIEW_STATS],
-        'Students': [Permission.VIEW_STUDENTS, Permission.ADMIT_STUDENT, Permission.VIEW_REGISTRATIONS, Permission.VIEW_STUDENT_REPORTS, Permission.VIEW_RE_REGISTRATION_REPORTS, Permission.VIEW_DUES_LIST],
-        'Employees': [Permission.VIEW_EMPLOYEES, Permission.MANAGE_EMPLOYEES, Permission.MANAGE_PAYROLL, Permission.VIEW_TEACHING_LOGS],
-        'Finance': [Permission.COLLECT_FEES, Permission.VIEW_FEE_STRUCTURE, Permission.MANAGE_FEE_STRUCTURE, Permission.SET_FEE_AMOUNT, Permission.VIEW_FEE_REPORTS, Permission.VIEW_DUE_REPORTS],
-        'Academic': [
-            Permission.MANAGE_ATTENDANCE, Permission.MANAGE_STAFF_ATTENDANCE,
-            Permission.VIEW_EXAMS, Permission.MANAGE_EXAMS, Permission.MANAGE_EXAM_TIMETABLE,
-            Permission.PRINT_ADMIT_CARDS, Permission.ENTER_MARKS, Permission.PRINT_REPORT_CARDS,
-            Permission.GENERATE_QUESTIONS, Permission.VIEW_CALENDAR, Permission.MANAGE_CALENDAR,
-            Permission.MANAGE_HOMEWORK, Permission.VIEW_HOMEWORK_REPORTS,
-            Permission.VIEW_ROUTINE, Permission.MANAGE_ROUTINE
-        ],
-        'Accounts': [Permission.VIEW_ACCOUNTS, Permission.MANAGE_ACCOUNTS],
-        'Communication': [Permission.MANAGE_NOTICES, Permission.POST_NOTICE, Permission.VIEW_MESSAGES, Permission.VIEW_GALLERY, Permission.MANAGE_GALLERY],
-        'Support': [Permission.MANAGE_TRANSPORT, Permission.MANAGE_LIBRARY],
-        'Reports': [Permission.VIEW_REPORTS],
-        'Roles': [Permission.MANAGE_ROLES, Permission.MANAGE_MANAGERS],
-        'Parent Controls': [Permission.PARENT_SHOW_FEE_TAB, Permission.PARENT_SHOW_DUES_BANNER],
-        'Master Control': [
-            Permission.MANAGE_SETTINGS, Permission.MANAGE_SCHOOLS, Permission.MANAGE_CLASSES,
-            Permission.MANAGE_INVENTORY, Permission.MANAGE_INSTITUTION,
-            Permission.MANAGE_REGISTRATION_FIELDS, Permission.MANAGE_ADMISSION_FIELDS,
-            Permission.MANAGE_PRINT_DESIGN, Permission.MANAGE_API_KEYS, Permission.MANAGE_DATA_SEEDER,
-            Permission.MANAGE_MASTER_CONTROL, Permission.MANAGE_PAYMENT_SETTINGS,
-            Permission.UPLOAD_HOLIDAYS, Permission.MANAGE_ACADEMIC_STRUCTURE
-        ],
-        'AI Features': [Permission.USE_AI_ASSISTANT],
+
+    // ─── Get current permissions (for selected role or user) ─────────────
+    const getCurrentPermissions = (): Permission[] => {
+        if (activeTab === 'ROLES') {
+            return selectedRole?.permissions || [];
+        } else {
+            if (!selectedUser) return [];
+            const userId = selectedUser.uid || selectedUser.id;
+            const roleConfig = roles.find(r => r.role === 'TEACHER');
+            return userPermissions[userId]
+                || roleConfig?.permissions
+                || DEFAULT_ROLES.find(r => r.role === 'TEACHER')?.permissions
+                || [];
+        }
     };
 
-    const { hasPermission: currentUserHasPermission } = useAuth();
-
-    const togglePermission = (perm: Permission) => {
+    // ─── Toggle ALL permissions for a menu item (parent or submenu child) ──
+    const toggleMenuPermissions = (permsToToggle: Permission[]) => {
         if (activeTab === 'ROLES') {
             if (!selectedRole) return;
-            // Admins have all permissions locked except for USE_AI_ASSISTANT
-            if (selectedRole.role === 'ADMIN' && perm !== Permission.USE_AI_ASSISTANT) return;
-            const hasPerm = selectedRole.permissions.includes(perm);
-            const newPerms = hasPerm
-                ? selectedRole.permissions.filter((p: Permission) => p !== perm)
-                : [...selectedRole.permissions, perm];
+            if (selectedRole.role === 'ADMIN') return; // Admin has everything locked
+
+            const currentPerms = selectedRole.permissions;
+            const allEnabled = permsToToggle.every(p => currentPerms.includes(p));
+
+            let newPerms: Permission[];
+            if (allEnabled) {
+                // Remove these permissions
+                newPerms = currentPerms.filter(p => !permsToToggle.includes(p));
+            } else {
+                // Add missing permissions
+                const toAdd = permsToToggle.filter(p => !currentPerms.includes(p));
+                newPerms = [...currentPerms, ...toAdd];
+            }
 
             const updatedRole = { ...selectedRole, permissions: newPerms };
             setSelectedRole(updatedRole);
@@ -148,21 +377,28 @@ const UserRoles: React.FC = () => {
         } else {
             if (!selectedUser) return;
             const userId = selectedUser.uid || selectedUser.id;
-
-            // Fallback Priority: Existing Override > Current Role Config > Default Role Config
             const roleConfig = roles.find(r => r.role === 'TEACHER');
             const currentPerms = userPermissions[userId]
                 || roleConfig?.permissions
                 || DEFAULT_ROLES.find(r => r.role === 'TEACHER')?.permissions
                 || [];
 
-            const hasPerm = currentPerms.includes(perm);
-            const newPerms = hasPerm
-                ? currentPerms.filter((p: Permission) => p !== perm)
-                : [...currentPerms, perm];
-
+            const allEnabled = permsToToggle.every(p => currentPerms.includes(p));
+            let newPerms: Permission[];
+            if (allEnabled) {
+                newPerms = currentPerms.filter(p => !permsToToggle.includes(p));
+            } else {
+                const toAdd = permsToToggle.filter(p => !currentPerms.includes(p));
+                newPerms = [...currentPerms, ...toAdd];
+            }
             setUserPermissions({ ...userPermissions, [userId]: newPerms });
         }
+    };
+
+    // ─── Toggle entire parent menu (all children included) ─────────────
+    const toggleEntireMenu = (menu: MenuItem) => {
+        const allPerms = getAllMenuPermissions(menu);
+        toggleMenuPermissions(allPerms);
     };
 
     const handleCreateRole = () => {
@@ -230,7 +466,6 @@ const UserRoles: React.FC = () => {
         });
         setRoles(updatedRoles);
 
-        // Update selected role state if it's the one being toggled
         if (selectedRole?.id === roleId) {
             const updated = updatedRoles.find(r => r.id === roleId);
             if (updated) setSelectedRole(updated);
@@ -248,6 +483,16 @@ const UserRoles: React.FC = () => {
             alert('Failed to update user status');
         }
     };
+
+    const toggleExpanded = (menuId: string) => {
+        setExpandedMenus(prev => ({ ...prev, [menuId]: !prev[menuId] }));
+    };
+
+    const currentPermissions = getCurrentPermissions();
+    const isLocked = activeTab === 'ROLES' && selectedRole?.role === 'ADMIN';
+
+    // Count enabled menus for the role
+    const enabledCount = MENU_STRUCTURE.filter(m => isMenuEnabled(m.permissions, currentPermissions)).length;
 
     return (
         <div className="animate-fade-in no-scrollbar" style={{ paddingBottom: '3rem' }}>
@@ -296,7 +541,7 @@ const UserRoles: React.FC = () => {
             </div>
 
             <div className="responsive-settings-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) 2fr', gap: '2rem' }}>
-                {/* Selection Sidebar */}
+                {/* ──── SELECTION SIDEBAR ──── */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     {activeTab === 'ROLES' ? (
                         <>
@@ -378,7 +623,7 @@ const UserRoles: React.FC = () => {
                     ) : (
                         <>
                             <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '0.5rem' }}>Teachers & Faculty</h3>
-                            {teachers.map((t) => (
+                            {teachers.map((t: any) => (
                                 <div
                                     key={t.uid || t.id}
                                     onClick={() => setSelectedUser(t)}
@@ -418,7 +663,7 @@ const UserRoles: React.FC = () => {
                     )}
                 </div>
 
-                {/* Permissions Management */}
+                {/* ──── PERMISSION MANAGEMENT (MENU-BASED) ──── */}
                 <div className="glass-card animate-slide-up" style={{ padding: '2rem' }}>
                     <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1.5rem', marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
@@ -428,6 +673,32 @@ const UserRoles: React.FC = () => {
                             <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>
                                 {activeTab === 'ROLES' ? selectedRole?.label : selectedUser?.name || 'Select a user'}
                             </h2>
+                            {(activeTab === 'ROLES' ? !!selectedRole : !!selectedUser) && (
+                                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem' }}>
+                                    <span style={{
+                                        background: 'rgba(99, 102, 241, 0.08)',
+                                        color: 'var(--primary)',
+                                        padding: '0.25rem 0.75rem',
+                                        borderRadius: '2rem',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 700,
+                                    }}>
+                                        {enabledCount} / {MENU_STRUCTURE.length} Menus Enabled
+                                    </span>
+                                    {isLocked && (
+                                        <span style={{
+                                            background: 'rgba(245, 158, 11, 0.1)',
+                                            color: '#f59e0b',
+                                            padding: '0.25rem 0.75rem',
+                                            borderRadius: '2rem',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                        }}>
+                                            🔒 Admin role has full access
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         {activeTab === 'USERS' && selectedUser && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -458,73 +729,199 @@ const UserRoles: React.FC = () => {
                     ) : !selectedUser && activeTab === 'USERS' ? (
                         <div style={{ textAlign: 'center', padding: '5rem 0', color: 'var(--text-muted)' }}>Select a user from the sidebar to customize their individual permissions</div>
                     ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '2.5rem' }}>
-                            {Object.entries(permissionGroups).map(([group, perms]) => {
-                                const currentPermissions = activeTab === 'ROLES'
-                                    ? (selectedRole?.permissions || [])
-                                    : (userPermissions[selectedUser.id] || DEFAULT_ROLES.find(r => r.role === 'TEACHER')?.permissions || []);
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {MENU_STRUCTURE.map(menu => {
+                                const Icon = menu.icon;
+                                const allPerms = getAllMenuPermissions(menu);
+                                const enabled = isMenuEnabled(menu.permissions, currentPermissions);
+                                const hasChildren = menu.children && menu.children.length > 0;
+                                const isExpanded = expandedMenus[menu.id] || false;
 
-                                // Filter perms based on what the CURRENT user actually has access to
-                                // This ensures an Admin can't assign permissions they don't have.
-                                const availablePerms = perms.filter(p => currentUserHasPermission(p));
-
-                                if (availablePerms.length === 0) return null;
+                                // Count enabled children
+                                const enabledChildren = menu.children
+                                    ? menu.children.filter(c => isMenuEnabled(c.permissions, currentPermissions)).length
+                                    : 0;
+                                const totalChildren = menu.children?.length || 0;
 
                                 return (
-                                    <div key={group}>
-                                        <h4 style={{ fontSize: '1rem', fontWeight: 800, marginBottom: '1.25rem', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                            <div style={{ width: '8px', height: '18px', background: 'var(--primary)', borderRadius: '4px' }} />
-                                            {group}
-                                        </h4>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                            {availablePerms.map(perm => {
-                                                const isActive = currentPermissions.includes(perm);
-                                                const isLocked = activeTab === 'ROLES' && selectedRole?.role === 'ADMIN' && perm !== Permission.USE_AI_ASSISTANT;
+                                    <div key={menu.id} style={{
+                                        borderRadius: '1rem',
+                                        border: '1px solid',
+                                        borderColor: enabled ? 'rgba(99, 102, 241, 0.15)' : 'var(--border)',
+                                        overflow: 'hidden',
+                                        transition: 'all 0.3s ease',
+                                        background: enabled ? 'rgba(99, 102, 241, 0.02)' : 'transparent',
+                                    }}>
+                                        {/* ── Parent Menu Row ── */}
+                                        <div
+                                            style={{
+                                                padding: '1rem 1.25rem',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '1rem',
+                                                cursor: isLocked ? 'default' : 'pointer',
+                                                transition: 'background 0.2s',
+                                                background: enabled ? 'rgba(99, 102, 241, 0.04)' : 'transparent',
+                                            }}
+                                            onClick={() => hasChildren && toggleExpanded(menu.id)}
+                                            onMouseEnter={(e) => { if (!isLocked) e.currentTarget.style.background = 'rgba(99, 102, 241, 0.06)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.background = enabled ? 'rgba(99, 102, 241, 0.04)' : 'transparent'; }}
+                                        >
+                                            {/* Expand/collapse icon for menus with children */}
+                                            {hasChildren ? (
+                                                <ChevronDown size={16} style={{
+                                                    transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                                                    transition: 'transform 0.3s ease',
+                                                    color: 'var(--text-muted)',
+                                                    flexShrink: 0,
+                                                }} />
+                                            ) : (
+                                                <div style={{ width: 16, flexShrink: 0 }} />
+                                            )}
 
-                                                return (
-                                                    <div
-                                                        key={perm}
-                                                        onClick={() => !isLocked && togglePermission(perm)}
-                                                        style={{
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'space-between',
-                                                            padding: '0.75rem 1rem',
-                                                            borderRadius: '0.75rem',
-                                                            background: isActive ? 'rgba(99, 102, 241, 0.03)' : 'transparent',
-                                                            border: '1px solid',
-                                                            borderColor: isActive ? 'rgba(99, 102, 241, 0.2)' : 'var(--border)',
-                                                            cursor: isLocked ? 'default' : 'pointer',
-                                                            transition: 'all 0.2s ease',
-                                                            opacity: isLocked ? 0.7 : 1
-                                                        }}
-                                                        className={!isLocked ? 'hover-lift' : ''}
-                                                    >
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                                            <div style={{
-                                                                width: '20px',
-                                                                height: '20px',
-                                                                borderRadius: '6px',
-                                                                border: isActive ? 'none' : '2px solid var(--border)',
-                                                                background: isActive ? 'var(--primary)' : 'transparent',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                color: 'white'
-                                                            }}>
-                                                                {isActive && <Check size={14} />}
-                                                            </div>
-                                                            <span style={{ fontSize: '0.9375rem', fontWeight: isActive ? 600 : 500, color: isActive ? 'var(--text-main)' : 'var(--text-muted)' }}>
-                                                                {perm.split('_')
-                                                                    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-                                                                    .join(' ')
-                                                                }
-                                                            </span>
-                                                        </div>
+                                            {/* Menu Icon */}
+                                            <div style={{
+                                                width: '40px',
+                                                height: '40px',
+                                                borderRadius: '12px',
+                                                background: enabled
+                                                    ? 'linear-gradient(135deg, var(--primary) 0%, #4f46e5 100%)'
+                                                    : 'var(--bg-main)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                transition: 'all 0.3s ease',
+                                                boxShadow: enabled ? '0 4px 12px -2px rgba(99, 102, 241, 0.3)' : 'none',
+                                            }}>
+                                                <Icon size={20} color={enabled ? 'white' : 'var(--text-muted)'} />
+                                            </div>
+
+                                            {/* Label & Info */}
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{
+                                                    fontWeight: 700,
+                                                    fontSize: '0.9375rem',
+                                                    color: enabled ? 'var(--text-main)' : 'var(--text-muted)',
+                                                }}>
+                                                    {menu.label}
+                                                </div>
+                                                {hasChildren && (
+                                                    <div style={{
+                                                        fontSize: '0.6875rem',
+                                                        color: 'var(--text-muted)',
+                                                        marginTop: '2px',
+                                                        fontWeight: 600,
+                                                    }}>
+                                                        {enabledChildren} / {totalChildren} sub-menus enabled
                                                     </div>
-                                                );
-                                            })}
+                                                )}
+                                            </div>
+
+                                            {/* ── Toggle Switch ── */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (!isLocked) toggleEntireMenu(menu);
+                                                }}
+                                                style={{
+                                                    width: '52px',
+                                                    height: '28px',
+                                                    borderRadius: '14px',
+                                                    border: 'none',
+                                                    background: enabled ? '#10b981' : '#cbd5e1',
+                                                    position: 'relative',
+                                                    cursor: isLocked ? 'default' : 'pointer',
+                                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                    flexShrink: 0,
+                                                    opacity: isLocked ? 0.6 : 1,
+                                                    boxShadow: enabled ? '0 2px 8px rgba(16, 185, 129, 0.25)' : 'none',
+                                                }}
+                                            >
+                                                <div style={{
+                                                    width: '22px',
+                                                    height: '22px',
+                                                    borderRadius: '50%',
+                                                    background: 'white',
+                                                    position: 'absolute',
+                                                    top: '3px',
+                                                    left: enabled ? '27px' : '3px',
+                                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                                                }}>
+                                                    {enabled ? <Check size={12} color="#10b981" strokeWidth={3} /> : <X size={12} color="#94a3b8" strokeWidth={3} />}
+                                                </div>
+                                            </button>
                                         </div>
+
+                                        {/* ── Sub-menu children (collapsible) ── */}
+                                        {hasChildren && (
+                                            <div style={{
+                                                maxHeight: isExpanded ? '1200px' : '0',
+                                                opacity: isExpanded ? 1 : 0,
+                                                overflow: 'hidden',
+                                                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                borderTop: isExpanded ? '1px solid var(--border)' : 'none',
+                                            }}>
+                                                <div style={{
+                                                    padding: '0.75rem 1.25rem 0.75rem 4.5rem',
+                                                    display: 'grid',
+                                                    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                                                    gap: '0.5rem',
+                                                }}>
+                                                    {menu.children!.map(child => {
+                                                        const childEnabled = isMenuEnabled(child.permissions, currentPermissions);
+
+                                                        return (
+                                                            <div
+                                                                key={child.id}
+                                                                onClick={() => { if (!isLocked) toggleMenuPermissions(child.permissions); }}
+                                                                style={{
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '0.75rem',
+                                                                    padding: '0.75rem 1rem',
+                                                                    borderRadius: '0.75rem',
+                                                                    background: childEnabled ? 'rgba(99, 102, 241, 0.04)' : 'transparent',
+                                                                    border: '1px solid',
+                                                                    borderColor: childEnabled ? 'rgba(99, 102, 241, 0.15)' : 'var(--border)',
+                                                                    cursor: isLocked ? 'default' : 'pointer',
+                                                                    transition: 'all 0.2s ease',
+                                                                    opacity: isLocked ? 0.7 : 1,
+                                                                }}
+                                                                className={!isLocked ? 'hover-lift' : ''}
+                                                            >
+                                                                <div style={{
+                                                                    width: '22px',
+                                                                    height: '22px',
+                                                                    borderRadius: '6px',
+                                                                    border: childEnabled ? 'none' : '2px solid var(--border)',
+                                                                    background: childEnabled ? 'var(--primary)' : 'transparent',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    color: 'white',
+                                                                    flexShrink: 0,
+                                                                    transition: 'all 0.2s ease',
+                                                                }}>
+                                                                    {childEnabled && <Check size={14} />}
+                                                                </div>
+                                                                <span style={{
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: childEnabled ? 600 : 500,
+                                                                    color: childEnabled ? 'var(--text-main)' : 'var(--text-muted)',
+                                                                }}>
+                                                                    {child.label}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}

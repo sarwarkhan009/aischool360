@@ -52,9 +52,7 @@ const LoginPortal: React.FC<LoginPortalProps> = ({ portalType, title, subtitle, 
                     }
                 }
             } else if (portalType === 'MANAGER') {
-                // Use persistence or Firestore for managers. 
-                // Current project stores managers in local storage via usePersistence.
-                // Let's check local storage
+                // Check localStorage first (legacy)
                 const savedManagers = JSON.parse(localStorage.getItem('millat_managers') || '[]');
                 const manager = savedManagers.find((m: any) => m.mobile === mobile && String(m.pin) === String(pin));
                 if (manager) {
@@ -66,6 +64,31 @@ const LoginPortal: React.FC<LoginPortalProps> = ({ portalType, title, subtitle, 
                         mobile: manager.mobile,
                         id: manager.id
                     };
+                }
+
+                // Also check Firestore teachers collection for non-Teacher employee types (Manager, Staff, etc.)
+                if (!userData) {
+                    const q = query(collection(db, 'teachers'), where('mobile', '==', mobile));
+                    const snapshot = await getDocs(q);
+                    const match = snapshot.docs.find(d => {
+                        const data = d.data();
+                        const sPin = data.pin || data.loginPin || data.password || data.loginPassword;
+                        return String(sPin) === String(pin) && data.status !== 'INACTIVE';
+                    });
+                    if (match) {
+                        const docData = match.data();
+                        const empType = docData.employeeType || '';
+                        if (empType !== 'Teacher' && empType !== 'Driver' && empType !== 'Bus Driver') {
+                            const managerRole = DEFAULT_ROLES.find(r => r.role === 'MANAGER');
+                            userData = {
+                                username: docData.name,
+                                role: 'MANAGER',
+                                permissions: managerRole?.permissions || [],
+                                mobile,
+                                id: match.id
+                            };
+                        }
+                    }
                 }
             } else if (portalType === 'TEACHER' || portalType === 'DRIVER') {
                 const q = query(collection(db, 'teachers'), where('mobile', '==', mobile));

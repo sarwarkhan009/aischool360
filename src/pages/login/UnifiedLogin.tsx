@@ -190,9 +190,10 @@ const UnifiedLogin: React.FC = () => {
                 const sPin = docData.pin || docData.loginPin || docData.password || docData.loginPassword;
                 if (String(sPin) !== String(pin)) return;
 
-                if (docData.employeeType === 'Teacher') {
+                const empType = docData.employeeType || '';
+
+                if (empType === 'Teacher') {
                     if (isRoleEnabled('TEACHER')) {
-                        // Find custom role config if it exists
                         const customRole = customRoles.find((r: any) =>
                             (r.label && r.label.toLowerCase() === 'teacher') ||
                             (r.role === 'TEACHER') ||
@@ -211,26 +212,53 @@ const UnifiedLogin: React.FC = () => {
                     } else {
                         disabledRolesFound.push('Teacher Portal');
                     }
-                } else if (docData.employeeType === 'Driver' || docData.employeeType === 'Bus Driver' || docData.employeeType === 'Staff') {
-                    const roleType = (docData.employeeType === 'Driver' || docData.employeeType === 'Bus Driver') ? 'DRIVER' : 'MANAGER';
-                    if (isRoleEnabled(roleType)) {
+                } else if (empType === 'Driver' || empType === 'Bus Driver') {
+                    if (isRoleEnabled('DRIVER')) {
                         const customRole = customRoles.find((r: any) =>
-                            (r.label && r.label.toLowerCase() === roleType.toLowerCase()) ||
-                            (r.role === roleType) ||
-                            (r.id === roleType)
+                            (r.label && r.label.toLowerCase() === 'driver') ||
+                            (r.role === 'DRIVER') ||
+                            (r.id === 'DRIVER')
                         );
-                        const defaultRole = DEFAULT_ROLES.find(r => r.role === roleType);
+                        const defaultRole = DEFAULT_ROLES.find(r => r.role === 'DRIVER');
 
                         results.push({
                             username: docData.name,
-                            role: roleType as any,
+                            role: 'DRIVER',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
                             id: doc.id,
                             schoolId: docData.schoolId || filterSchoolId
                         });
                     } else {
-                        disabledRolesFound.push(`${roleType} Portal`);
+                        disabledRolesFound.push('Driver Portal');
+                    }
+                } else {
+                    // Handle Manager, Accountant, Staff, and any custom employee types
+                    // Map the employeeType label to its RBAC role
+                    const matchedRole = customRoles.find((r: any) =>
+                        (r.label && empType && r.label.toLowerCase() === empType.toLowerCase()) ||
+                        (r.id && empType && r.id.toLowerCase() === empType.toLowerCase())
+                    );
+
+                    // Determine the RBAC role: use the matched role's .role field, or fall back to
+                    // known mappings, or default to MANAGER for any non-teacher staff
+                    let roleType: string = matchedRole?.role || 'MANAGER';
+                    if (empType.toLowerCase() === 'manager' || empType.toLowerCase() === 'staff') roleType = 'MANAGER';
+                    if (empType.toLowerCase() === 'accountant') roleType = 'ACCOUNTANT';
+
+                    if (isRoleEnabled(roleType) && (!matchedRole || matchedRole.status !== 'INACTIVE')) {
+                        const defaultRole = DEFAULT_ROLES.find(r => r.role === roleType);
+
+                        results.push({
+                            username: docData.name,
+                            role: roleType as any,
+                            permissions: matchedRole?.permissions || defaultRole?.permissions || [],
+                            mobile,
+                            id: doc.id,
+                            schoolId: docData.schoolId || filterSchoolId
+                        });
+                    } else {
+                        disabledRolesFound.push(`${empType} Portal`);
                     }
                 }
             });

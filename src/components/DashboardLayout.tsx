@@ -201,7 +201,7 @@ const CollapsableSidebarItem = ({ icon: Icon, label, children, collapsed, permis
 };
 
 const menuItems = [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['ADMIN', 'MANAGER', 'TEACHER', 'ACCOUNTANT', 'PARENT', 'DRIVER'] },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', permission: Permission.VIEW_DASHBOARD, roles: ['ADMIN', 'MANAGER', 'TEACHER', 'ACCOUNTANT', 'PARENT', 'DRIVER'] },
     {
         label: 'Student Management',
         icon: Users,

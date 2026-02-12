@@ -67,7 +67,7 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
                 // 1. Check Path Segment (e.g., /school1/login)
                 // Filter out common top-level routes to avoid misidentifying them as schools
-                const reservedRoutes = ['login', 'register', 'admin', 'dashboard', 'settings', 'students', 'teachers', 'fees', 'attendance', 'exams', 'transport', 'library', 'communication', 'calendar', 'reports', 'accounts'];
+                const reservedRoutes = ['login', 'register', 'dashboard', 'settings', 'students', 'teachers', 'fees', 'attendance', 'exams', 'transport', 'library', 'communication', 'calendar', 'reports', 'accounts', 'smghs'];
 
                 if (pathSegments[1] && pathSegments[1] !== '' && !reservedRoutes.includes(pathSegments[1])) {
                     schoolId = pathSegments[1];

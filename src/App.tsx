@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SchoolProvider, useSchool } from './context/SchoolContext';
 import DashboardLayout from './components/DashboardLayout';
@@ -82,9 +83,58 @@ import SMGHS from './pages/public/SMGHS';
 import RoutineManager from './components/RoutineManager';
 import TeachingLogReports from './pages/TeachingLogReports';
 import { Permission } from './types/rbac';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from './lib/firebase';
+
+/**
+ * When Super Admin logs in without a school slug, we need to pick a school.
+ * This component fetches the first active school and redirects there.
+ */
+const SuperAdminSchoolSelector = () => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const findSchool = async () => {
+      try {
+        const schoolsSnap = await getDocs(collection(db, 'schools'));
+        const activeSchool = schoolsSnap.docs.find(d => {
+          const data = d.data();
+          return data.status === 'ACTIVE' || data.isActive === true;
+        }) || schoolsSnap.docs[0];
+
+        if (activeSchool) {
+          navigate(`/${activeSchool.id}/dashboard`, { replace: true });
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Error finding school:', err);
+        setLoading(false);
+      }
+    };
+    findSchool();
+  }, [navigate]);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ width: '40px', height: '40px', border: '4px solid #e5e7eb', borderTop: '4px solid #6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <p style={{ color: '#6b7280', fontWeight: 500 }}>Loading schools...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '1rem' }}>
+      <p style={{ color: '#6b7280', fontSize: '1.25rem' }}>No schools found. Please create a school first.</p>
+    </div>
+  );
+};
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredPermission?: Permission }> = ({ children, requiredPermission }) => {
-  const { isAuthenticated, hasPermission } = useAuth();
+  const { isAuthenticated, hasPermission, user } = useAuth();
   const { schoolId } = useParams();
 
   // Redirect to appropriate login page based on context
@@ -93,7 +143,26 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredPermission?:
   }
 
   if (requiredPermission && !hasPermission(requiredPermission)) {
-    return <Navigate to={schoolId ? `/${schoolId}/dashboard` : "/dashboard"} />;
+    // Find the first accessible page to redirect to (avoid infinite loop if dashboard is blocked)
+    const fallbackRoutes = [
+      { path: 'dashboard', permission: Permission.VIEW_DASHBOARD },
+      { path: 'students', permission: Permission.VIEW_STUDENTS },
+      { path: 'fees', permission: Permission.COLLECT_FEES },
+      { path: 'attendance', permission: Permission.MANAGE_ATTENDANCE },
+      { path: 'teachers', permission: Permission.VIEW_EMPLOYEES },
+      { path: 'exams', permission: Permission.VIEW_EXAMS },
+      { path: 'notices', permission: null }, // no permission needed
+      { path: 'calendar', permission: null },
+      { path: 'profile', permission: null },
+    ];
+
+    const firstAvailable = fallbackRoutes.find(r =>
+      !r.permission || hasPermission(r.permission)
+    );
+    const fallbackPath = firstAvailable ? firstAvailable.path : 'profile';
+    const target = schoolId ? `/${schoolId}/${fallbackPath}` : `/${fallbackPath}`;
+
+    return <Navigate to={target} replace />;
   }
 
   return <>{children}</>;
@@ -153,7 +222,7 @@ const AuthWrapper = () => {
         } />
 
         {/* Public Login Routes */}
-        <Route path="/login" element={!isAuthenticated ? <UnifiedLogin /> : (currentSchool ? <Navigate to={`/${currentSchool.id}/dashboard`} /> : <Navigate to="/dashboard" />)} />
+        <Route path="/login" element={!isAuthenticated ? <UnifiedLogin /> : (currentSchool ? <Navigate to={`/${currentSchool.id}/dashboard`} /> : <SuperAdminSchoolSelector />)} />
         <Route path="/register" element={<PublicRegistration />} />
         <Route path="/smghs" element={<SMGHS />} />
 
@@ -164,7 +233,7 @@ const AuthWrapper = () => {
           <Route path="register" element={<PublicRegistration />} />
 
           <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
-            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="dashboard" element={<ProtectedRoute requiredPermission={Permission.VIEW_DASHBOARD}><Dashboard /></ProtectedRoute>} />
             <Route path="profile-verifications" element={<ProfileVerificationCenter />} />
 
             {/* Student Routes */}
@@ -260,10 +329,9 @@ const AuthWrapper = () => {
         </Route>
 
         {/* Legacy/Fallback Routes - Redirect to school context if available */}
-        <Route path="/dashboard" element={currentSchool ? <Navigate to={`/${currentSchool.id}/dashboard`} /> : <Navigate to="/login" />} />
-        <Route path="/dashboard/*" element={currentSchool ? <Navigate to={`/${currentSchool.id}/dashboard`} /> : <Navigate to="/login" />} />
-        <Route path="/settings/*" element={currentSchool ? <Navigate to={`/${currentSchool.id}/settings`} /> : <Navigate to="/login" />} />
-        <Route path="/admin" element={<Navigate to="/" />} />
+        <Route path="/dashboard" element={currentSchool ? <Navigate to={`/${currentSchool.id}/dashboard`} /> : (isAuthenticated ? <SuperAdminSchoolSelector /> : <Navigate to="/login" />)} />
+        <Route path="/dashboard/*" element={currentSchool ? <Navigate to={`/${currentSchool.id}/dashboard`} /> : (isAuthenticated ? <SuperAdminSchoolSelector /> : <Navigate to="/login" />)} />
+        <Route path="/settings/*" element={currentSchool ? <Navigate to={`/${currentSchool.id}/settings`} /> : (isAuthenticated ? <SuperAdminSchoolSelector /> : <Navigate to="/login" />)} />
         <Route path="/manager" element={<Navigate to="/" />} />
         <Route path="/teacher" element={<Navigate to="/" />} />
         <Route path="/driver" element={<Navigate to="/" />} />
