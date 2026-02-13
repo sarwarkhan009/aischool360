@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Printer, MessageCircle, ArrowLeft, Check } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
 import { amountToWords } from '../../utils/formatters';
@@ -11,20 +11,87 @@ interface FeeReceiptProps {
     onClose: () => void;
 }
 
+// Helper: convert an image URL to base64 data URL via canvas
+const toBase64 = (url: string): Promise<string> => {
+    return new Promise((resolve) => {
+        if (!url || url.startsWith('data:')) { resolve(url); return; }
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            try {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth;
+                c.height = img.naturalHeight;
+                c.getContext('2d')?.drawImage(img, 0, 0);
+                resolve(c.toDataURL('image/png'));
+            } catch { resolve(url); }
+        };
+        img.onerror = () => {
+            // Fallback: try using a CORS proxy if direct load fails
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+            const proxyImg = new Image();
+            proxyImg.crossOrigin = 'anonymous';
+            proxyImg.onload = () => {
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = proxyImg.naturalWidth;
+                    c.height = proxyImg.naturalHeight;
+                    c.getContext('2d')?.drawImage(proxyImg, 0, 0);
+                    resolve(c.toDataURL('image/png'));
+                } catch { resolve(url); }
+            };
+            proxyImg.onerror = () => resolve(url);
+            proxyImg.src = proxyUrl;
+        };
+        setTimeout(() => resolve(url), 6000);
+        img.src = url;
+    });
+};
+
 const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInfo, onClose }) => {
     const { currentSchool } = useSchool();
+
+    // Pre-converted base64 images (ensures html2canvas can capture them)
+    const [logoB64, setLogoB64] = useState('');
+    const [headerB64, setHeaderB64] = useState('');
+
     if (!receipt) return null;
 
-    const totalPaid = receipt.paid || receipt.total || 0;
+    const totalPaid = receipt.paid || 0;
     const previousDues = receipt.previousDues || 0;
-    const currentDues = ((receipt.total || 0) - (receipt.discount || 0)) - (receipt.paid || 0);
+    const grandTotal = receipt.total || 0;
+    const discount = receipt.discount || 0;
+    const netPayable = grandTotal - discount;
+    const currentDues = netPayable - totalPaid;
 
     // Prioritize name and logo from currentSchool (SuperAdmin settings)
     const schoolName = currentSchool?.fullName || currentSchool?.name || schoolInfo?.name || schoolInfo?.schoolName || 'Millat Public School';
     const schoolAddress = currentSchool?.address || schoolInfo?.address || schoolInfo?.schoolAddress || 'Near Moti Nagar, Vickhara, PO-Tarwer, PS-Amnour, Saran Bihar';
-    const schoolPhone = currentSchool?.phone || currentSchool?.contactNumber || schoolInfo?.phone || schoolInfo?.contact || schoolInfo?.mobile || '9570656404';
+    const schoolPhone = currentSchool?.phone || schoolInfo?.phone || schoolInfo?.contact || schoolInfo?.mobile || '';
     const schoolWebsite = currentSchool?.website || schoolInfo?.website || schoolInfo?.web || currentSchool?.web || 'www.millatschool.co.in';
     const schoolLogo = currentSchool?.logoUrl || currentSchool?.logo || schoolInfo?.logoUrl || schoolInfo?.logo || '/logo.png';
+    const receiptHeaderImage = currentSchool?.receiptHeaderUrl || schoolInfo?.receiptHeaderUrl || '';
+
+    // Pre-convert images to base64 on mount so html2canvas can always capture them
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        if (currentSchool?.logoBase64) {
+            setLogoB64(currentSchool.logoBase64);
+        } else {
+            toBase64(schoolLogo).then(setLogoB64);
+        }
+    }, [schoolLogo, currentSchool?.logoBase64]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        if (currentSchool?.receiptHeaderBase64) {
+            setHeaderB64(currentSchool.receiptHeaderBase64);
+        } else if (receiptHeaderImage) {
+            toBase64(receiptHeaderImage).then(setHeaderB64);
+        } else {
+            setHeaderB64('');
+        }
+    }, [receiptHeaderImage, currentSchool?.receiptHeaderBase64]);
 
     const handlePrint = () => {
         window.print();
@@ -36,60 +103,12 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
             const receiptElement = document.querySelector('.printable-receipt') as HTMLElement;
             if (!receiptElement) return;
 
-            // Debug: Log logo information
-            console.log('WhatsApp Share - School Logo:', schoolLogo);
-            console.log('WhatsApp Share - currentSchool:', currentSchool);
-            console.log('WhatsApp Share - schoolInfo:', schoolInfo);
-
-            // Try to preload the logo to ensure it's available for canvas
-            const logoImg = receiptElement.querySelector('img[alt="Logo"]') as HTMLImageElement;
-            if (logoImg && logoImg.src) {
-                console.log('WhatsApp Share - Logo img src:', logoImg.src);
-                console.log('WhatsApp Share - Logo complete:', logoImg.complete);
-                console.log('WhatsApp Share - Logo naturalWidth:', logoImg.naturalWidth);
-
-                // Convert relative URL to absolute if needed
-                if (logoImg.src.startsWith('/')) {
-                    const absoluteUrl = window.location.origin + logoImg.src;
-                    console.log('Converting relative URL to absolute:', absoluteUrl);
-                    logoImg.src = absoluteUrl;
-                }
-
-                try {
-                    // Wait for image to be fully loaded
-                    if (!logoImg.complete || logoImg.naturalWidth === 0) {
-                        console.log('Waiting for logo to load...');
-                        await new Promise((resolve) => {
-                            logoImg.onload = () => {
-                                console.log('Logo loaded successfully');
-                                resolve(null);
-                            };
-                            logoImg.onerror = (e) => {
-                                console.error('Logo failed to load:', e);
-                                resolve(null);
-                            };
-                            // Timeout after 3 seconds
-                            setTimeout(() => {
-                                console.warn('Logo load timeout');
-                                resolve(null);
-                            }, 3000);
-                        });
-                    } else {
-                        console.log('Logo already loaded');
-                    }
-                } catch (e) {
-                    console.error('Logo load wait failed:', e);
-                }
-            } else {
-                console.warn('Logo img element not found or no src');
-            }
-
-
+            // Images are already base64 via useEffect, no CORS issues
             const canvas = await html2canvas(receiptElement, {
                 scale: 2,
                 backgroundColor: '#ffffff',
                 logging: false,
-                useCORS: false,
+                useCORS: true,
                 allowTaint: true
             });
 
@@ -104,7 +123,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                     const whatsappUrl = `https://wa.me/${mobileNumber.replace(/[^0-9]/g, '')}?text=${message}`;
                     window.open(whatsappUrl, '_blank');
                     alert('Receipt copied to clipboard! Paste it in WhatsApp chat.');
-                } catch (e) {
+                } catch {
                     alert('Clipboard access denied. Please allow permissions.');
                 }
             }, 'image/png');
@@ -176,23 +195,58 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                     minHeight: '200mm',
                     margin: '0 auto'
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '10px' }}>
-                        <div style={{ width: '50px', height: '50px', marginRight: '10px', flexShrink: 0 }}>
-                            <img
-                                src={schoolLogo}
-                                alt="Logo"
-                                style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%', border: '2px solid #000' }}
-                            />
-                        </div>
-                        <div style={{ flex: 1, textAlign: 'center' }}>
-                            <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#8B0000' }}>{schoolName}</h2>
-                            <p style={{ margin: '2px 0', fontSize: '10px' }}>{schoolAddress}</p>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '3px', fontSize: '9px' }}>
-                                <span>📱 {schoolPhone}</span>
-                                <span>🌐 {schoolWebsite}</span>
+                    {(() => {
+                        const hf = currentSchool?.receiptHeaderFields || schoolInfo?.receiptHeaderFields || { showLogo: true, showSchoolName: true, showAddress: true, showPhone: true, showEmail: false, showWebsite: true };
+
+                        // Items for the small row at the bottom
+                        const getContactRow = (includeAddress: boolean) => {
+                            const items: string[] = [];
+                            if (includeAddress && hf.showAddress !== false && schoolAddress) items.push(`📍 ${schoolAddress}`);
+                            if (hf.showPhone !== false && schoolPhone) items.push(`📱 ${schoolPhone}`);
+                            if (hf.showEmail !== false && (currentSchool?.email || schoolInfo?.email)) items.push(`✉ ${currentSchool?.email || schoolInfo?.email}`);
+                            if (hf.showWebsite !== false && schoolWebsite) items.push(`🌐 ${schoolWebsite}`);
+                            return items;
+                        };
+
+                        const imageHeight = currentSchool?.receiptHeaderImageHeight || schoolInfo?.receiptHeaderImageHeight || 120;
+                        const schoolFontSize = currentSchool?.receiptSchoolNameFontSize || schoolInfo?.receiptSchoolNameFontSize || 16;
+
+                        const headerMode = currentSchool?.receiptHeaderMode || schoolInfo?.receiptHeaderMode || (receiptHeaderImage ? 'image' : 'text');
+
+                        return (headerMode === 'image' && receiptHeaderImage) ? (
+                            /* Header Image Mode */
+                            <div style={{ borderBottom: '2px solid #000', paddingBottom: '4px', marginBottom: '10px', textAlign: 'center' }}>
+                                <img src={headerB64 || receiptHeaderImage} alt="School Header" style={{ width: '100%', maxHeight: `${imageHeight}px`, objectFit: 'contain' }} />
+                                {getContactRow(true).length > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '3px', fontSize: '9px' }}>
+                                        {getContactRow(true).map((item, i) => <span key={i}>{item}</span>)}
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    </div>
+                        ) : (
+                            /* Text-based Header Mode */
+                            <div style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '10px' }}>
+                                {hf.showLogo !== false && (
+                                    <div style={{ width: '50px', height: '50px', marginRight: '10px', flexShrink: 0 }}>
+                                        <img src={logoB64 || schoolLogo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%', border: '2px solid #000' }} />
+                                    </div>
+                                )}
+                                <div style={{ flex: 1, textAlign: 'center' }}>
+                                    {hf.showSchoolName !== false && (
+                                        <h2 style={{ margin: 0, fontSize: `${schoolFontSize}px`, fontWeight: 900, color: '#8B0000' }}>{schoolName}</h2>
+                                    )}
+                                    {hf.showAddress !== false && schoolAddress && (
+                                        <p style={{ margin: '2px 0', fontSize: '10px', fontWeight: 600 }}>{schoolAddress}</p>
+                                    )}
+                                    {getContactRow(false).length > 0 && (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '3px', fontSize: '9px' }}>
+                                            {getContactRow(false).map((item, i) => <span key={i}>{item}</span>)}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', marginBottom: '8px', fontSize: '10px' }}>
                         <div style={{ border: '1px solid #000', padding: '3px 6px' }}>
@@ -260,38 +314,32 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                                         </tr>
                                     );
                                 })
-                            ) : (
-                                <>
-                                    {receipt.tuitionFee > 0 && (
-                                        <tr>
-                                            <td style={{ border: '1px solid #000', padding: '3px 6px' }}>Tuition Fee</td>
-                                            <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right' }}>{receipt.tuitionFee.toFixed(2)}</td>
-                                        </tr>
-                                    )}
-                                    {/* ... add more if needed, but breakdown is preferred */}
-                                </>
-                            )}
-                            {receipt.discount > 0 && (
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px', color: '#d00' }}>Discount (-)</td>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right', color: '#d00' }}>-{receipt.discount.toFixed(2)}</td>
-                                </tr>
-                            )}
+                            ) : null}
                         </tbody>
                     </table>
 
                     <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px', fontSize: '10px' }}>
                         <tbody>
                             <tr style={{ fontWeight: 700 }}>
-                                <td style={{ border: '1px solid #000', padding: '4px 6px', width: '50%' }}>Total Payable</td>
-                                <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{((receipt.total || 0) - (receipt.discount || 0)).toFixed(2)}</td>
+                                <td style={{ border: '1px solid #000', padding: '4px 6px', width: '50%' }}>Grand Total</td>
+                                <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{grandTotal.toFixed(2)}</td>
+                            </tr>
+                            {discount > 0 && (
+                                <tr style={{ fontWeight: 700, color: '#d00' }}>
+                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Discount (-)</td>
+                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>-{discount.toFixed(2)}</td>
+                                </tr>
+                            )}
+                            <tr style={{ fontWeight: 700, background: '#f8fafc' }}>
+                                <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Net Payable</td>
+                                <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{netPayable.toFixed(2)}</td>
                             </tr>
                             <tr style={{ fontWeight: 700, background: '#f0f0f0' }}>
                                 <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Paid Amount</td>
                                 <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{totalPaid.toFixed(2)}</td>
                             </tr>
                             <tr style={{ fontWeight: 700, background: currentDues > 0 ? '#ffe0e0' : '#f0f0f0' }}>
-                                <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Balance Dues</td>
+                                <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Current Dues</td>
                                 <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right', color: currentDues > 0 ? '#d00' : '#000' }}>{currentDues.toFixed(2)}</td>
                             </tr>
                         </tbody>

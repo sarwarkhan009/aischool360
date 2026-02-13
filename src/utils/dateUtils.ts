@@ -7,16 +7,31 @@ export const formatDate = (dateInput: string | Date | any): string => {
         if (dateInput?.toDate) {
             date = dateInput.toDate();
         } else {
-            date = new Date(dateInput);
+            // Check for weird YYYY-DD-MM format (e.g., 2017-18-02)
+            if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+                const parts = dateInput.split('-');
+                const y = parseInt(parts[0]);
+                const d = parseInt(parts[1]);
+                const m = parseInt(parts[2]);
+
+                // If middle part is > 12, it's likely YYYY-DD-MM
+                if (d > 12 && m <= 12) {
+                    date = new Date(y, m - 1, d);
+                } else {
+                    date = new Date(dateInput);
+                }
+            } else {
+                date = new Date(dateInput);
+            }
         }
 
         if (isNaN(date.getTime())) return String(dateInput);
 
         const day = date.getDate().toString().padStart(2, '0');
-        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const monthShort = date.toLocaleString('default', { month: 'short' });
         const year = date.getFullYear().toString().slice(-2);
 
-        return `${day}-${month}-${year}`;
+        return `${day}-${monthShort}-${year}`;
     } catch (error) {
         return String(dateInput);
     }

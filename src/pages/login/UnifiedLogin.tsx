@@ -106,11 +106,11 @@ const UnifiedLogin: React.FC = () => {
 
                 if (rolesDoc.exists()) {
                     customRoles = rolesDoc.data().roles || [];
-                    localStorage.setItem('millat_custom_roles', JSON.stringify(customRoles));
+                    localStorage.setItem('aischool360_custom_roles', JSON.stringify(customRoles));
                 }
                 if (overridesDoc.exists()) {
                     userOverrides = overridesDoc.data().overrides || {};
-                    localStorage.setItem('millat_user_overrides', JSON.stringify(userOverrides));
+                    localStorage.setItem('aischool360_user_overrides', JSON.stringify(userOverrides));
                 }
             }
 
@@ -159,7 +159,7 @@ const UnifiedLogin: React.FC = () => {
             const filterSchoolId = currentSchool?.id;
 
             // 2. Check Manager
-            const savedManagers = JSON.parse(localStorage.getItem('millat_managers') || '[]');
+            const savedManagers = JSON.parse(localStorage.getItem('aischool360_managers') || '[]');
             const managerMatch = savedManagers.find((m: any) => m.mobile === mobile && String(m.pin) === String(pin));
             if (managerMatch) {
                 if (!isRoleEnabled('MANAGER')) {
@@ -381,14 +381,14 @@ const UnifiedLogin: React.FC = () => {
             }
 
             // 2. Manager
-            const savedManagers = JSON.parse(localStorage.getItem('millat_managers') || '[]');
+            const savedManagers = JSON.parse(localStorage.getItem('aischool360_managers') || '[]');
             savedManagers.forEach((m: any) => {
                 if (m.mobile === mobile && String(m.pin) === String(oldPin)) {
                     m.pin = newPin;
                     success = true;
                 }
             });
-            if (success) localStorage.setItem('millat_managers', JSON.stringify(savedManagers));
+            if (success) localStorage.setItem('aischool360_managers', JSON.stringify(savedManagers));
 
             // 3. Teachers/Drivers
             const teacherQuery = query(collection(db, 'teachers'), where('mobile', '==', mobile), where('pin', '==', oldPin));

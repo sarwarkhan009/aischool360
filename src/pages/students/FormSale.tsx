@@ -105,19 +105,22 @@ const FormSale: React.FC = () => {
 
     // Search and filter for reporting
     const [searchQuery, setSearchQuery] = useState('');
-    const [startDate, setStartDate] = useState(getCurrentDate());
-    const [endDate, setEndDate] = useState(getCurrentDate());
+    const [dateFilter, setDateFilter] = useState<'this-month' | 'last-month' | 'lifetime'>('this-month');
     const [currentReceipt, setCurrentReceipt] = useState<any | null>(null);
 
     // Filter form sales
     const filteredFormSales = allFormSalesForReport.filter((sale: any) => {
         // Date Filter
-        if (startDate || endDate) {
-            const saleDate = sale.saleDate?.toDate ? sale.saleDate.toDate() : new Date(sale.saleDate || 0);
-            const saleDateStr = saleDate.toISOString().split('T')[0];
+        const saleDate = sale.saleDate?.toDate ? sale.saleDate.toDate() : new Date(sale.saleDate || 0);
+        const now = new Date();
 
-            if (startDate && saleDateStr < startDate) return false;
-            if (endDate && saleDateStr > endDate) return false;
+        if (dateFilter === 'this-month') {
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            if (saleDate < startOfMonth) return false;
+        } else if (dateFilter === 'last-month') {
+            const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+            if (saleDate < startOfLastMonth || saleDate > endOfLastMonth) return false;
         }
 
         const q = searchQuery.toLowerCase();
@@ -280,6 +283,14 @@ const FormSale: React.FC = () => {
                                 section: currentReceipt.section || '',
                                 mobileNo: currentReceipt.mobileNo || currentReceipt.whatsappNumber
                             }}
+                            schoolInfo={{
+                                name: currentSchool?.fullName || currentSchool?.name || 'AI School 360',
+                                logo: currentSchool?.logoUrl || currentSchool?.logo || '',
+                                address: currentSchool?.address || '',
+                                phone: currentSchool?.phone || '',
+                                website: currentSchool?.website || ''
+                            }}
+                            onClose={() => setCurrentReceipt(null)}
                         />
                     </div>
                 </div>
@@ -537,39 +548,43 @@ const FormSale: React.FC = () => {
                                     Form Sales Report
                                 </span>
                             </div>
-                            <div style={{ position: 'relative' }}>
-                                <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                            <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
+                                <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                                 <input
                                     type="text"
-                                    placeholder="Search by name, class..."
+                                    placeholder="Search by name, receipt, class or WhatsApp..."
                                     className="input-field"
-                                    style={{ paddingLeft: '2.5rem', width: '220px', background: 'white', borderRadius: '8px' }}
+                                    style={{ paddingLeft: '2.8rem', background: 'white', borderRadius: '12px', height: '44px' }}
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                 />
                             </div>
-                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                <div style={{ position: 'relative' }}>
-                                    <Calendar size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                                    <input
-                                        type="date"
-                                        className="input-field"
-                                        style={{ paddingLeft: '2.2rem', width: '135px', background: 'white', borderRadius: '8px', fontSize: '0.8125rem' }}
-                                        value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
-                                    />
-                                </div>
-                                <span style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>to</span>
-                                <div style={{ position: 'relative' }}>
-                                    <Calendar size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                                    <input
-                                        type="date"
-                                        className="input-field"
-                                        style={{ paddingLeft: '2.2rem', width: '135px', background: 'white', borderRadius: '8px', fontSize: '0.8125rem' }}
-                                        value={endDate}
-                                        onChange={(e) => setEndDate(e.target.value)}
-                                    />
-                                </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f1f5f9', padding: '4px', borderRadius: '24px' }}>
+                                {[
+                                    { id: 'this-month', label: 'This Month' },
+                                    { id: 'last-month', label: 'Last Month' },
+                                    { id: 'lifetime', label: 'Life Time' }
+                                ].map((chip) => (
+                                    <button
+                                        key={chip.id}
+                                        onClick={() => setDateFilter(chip.id as any)}
+                                        style={{
+                                            padding: '0.6rem 1.25rem',
+                                            borderRadius: '20px',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: 700,
+                                            background: dateFilter === chip.id ? 'white' : 'transparent',
+                                            color: dateFilter === chip.id ? 'var(--primary)' : 'var(--text-muted)',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                            boxShadow: dateFilter === chip.id ? '0 4px 12px rgba(0, 0, 0, 0.08)' : 'none',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {chip.label}
+                                    </button>
+                                ))}
                             </div>
                         </div>
 

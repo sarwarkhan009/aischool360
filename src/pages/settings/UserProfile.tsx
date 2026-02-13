@@ -27,13 +27,23 @@ import {
     Fingerprint,
     Calendar,
     Users,
-    BookOpen
+    BookOpen,
+    Facebook,
+    Twitter,
+    Linkedin,
+    Instagram,
+    Landmark,
+    Home,
+    Globe,
+    Building2,
+    Clock,
+    Edit2
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { compressImage } from '../../utils/imageUtils';
 
-type ProfileSection = 'GENERAL' | 'SECURITY' | 'KYC' | 'PROFESSIONAL' | 'FAMILY';
+type ProfileSection = 'GENERAL' | 'SECURITY' | 'KYC' | 'PROFESSIONAL' | 'FAMILY' | 'FINANCIAL' | 'ADDRESS' | 'SOCIAL';
 
 export default function UserProfile() {
     const { user, login } = useAuth();
@@ -59,13 +69,41 @@ export default function UserProfile() {
         alternatePhone: '',
         gender: '',
         dateOfBirth: '',
-        // Teacher Specific
+        // Employment Info
+        designation: '',
+        department: '',
+        epfNo: '',
+        basicSalary: '',
+        contractType: '',
+        workShift: '',
+        location: '',
+        dateOfJoining: '',
+        // Personal Details
+        emergencyPhone: '',
+        maritalStatus: '',
+        fatherName: '',
+        motherName: '',
         qualification: '',
         experience: '',
+        note: '',
+        uid: '',
+        // Address
+        permanentAddress: '',
+        // Bank Details
+        accountTitle: '',
+        bankName: '',
+        bankBranch: '',
+        accountNumber: '',
+        ifscCode: '',
+        upiId: '',
+        // Social Media
+        facebookUrl: '',
+        twitterUrl: '',
+        linkedinUrl: '',
+        instagramUrl: '',
+        // Other
         specialization: '',
-        // Parent Specific
         emergencyContact: '',
-        emergencyPhone: '',
         pin: '',
     });
 
@@ -167,6 +205,41 @@ export default function UserProfile() {
                                 gender: data.gender || '',
                                 dateOfBirth: data.dateOfBirth || '',
                                 pin: data.pin || '',
+
+                                // Employment Info
+                                designation: data.designation || '',
+                                department: data.department || '',
+                                epfNo: data.epfNo || '',
+                                basicSalary: data.basicSalary || data.baseSalary || '',
+                                contractType: data.contractType || '',
+                                workShift: data.workShift || '',
+                                location: data.location || '',
+                                dateOfJoining: data.dateOfJoining || data.joiningDate || '',
+
+                                // Personal Details
+                                emergencyPhone: data.emergencyPhone || data.emergencyContactNumber || '',
+                                maritalStatus: data.maritalStatus || '',
+                                fatherName: data.fatherName || '',
+                                motherName: data.motherName || '',
+                                note: data.note || '',
+                                uid: data.uid || data.employeeId || data.id || '',
+
+                                // Address
+                                permanentAddress: data.permanentAddress || '',
+
+                                // Bank Details
+                                accountTitle: data.accountTitle || '',
+                                bankName: data.bankName || '',
+                                bankBranch: data.bankBranch || data.branchName || '',
+                                accountNumber: data.accountNumber || '',
+                                ifscCode: data.ifscCode || '',
+                                upiId: data.upiId || '',
+
+                                // Social Media
+                                facebookUrl: data.facebookUrl || '',
+                                twitterUrl: data.twitterUrl || '',
+                                linkedinUrl: data.linkedinUrl || '',
+                                instagramUrl: data.instagramUrl || '',
                             }));
                         }
                     }
@@ -288,7 +361,10 @@ export default function UserProfile() {
     };
 
     const calculateCompletion = () => {
-        const fields = ['name', 'email', 'mobile', 'address', 'bio', 'photo', 'aadharUrl', 'panUrl', 'aadharNo'];
+        const fields = [
+            'name', 'email', 'mobile', 'address', 'bio', 'photo', 'aadharUrl', 'gender', 'dateOfBirth',
+            'designation', 'department', 'accountNumber', 'bankName', 'fatherName', 'motherName'
+        ];
         const filled = fields.filter(f => !!(profileData as any)[f]).length;
         return Math.round((filled / fields.length) * 100);
     };
@@ -411,12 +487,25 @@ export default function UserProfile() {
                             <button className={`nav-link ${activeTab === 'GENERAL' ? 'active' : ''}`} onClick={() => setActiveTab('GENERAL')}>
                                 <User size={18} /> General Identity
                             </button>
+                            <button className={`nav-link ${activeTab === 'ADDRESS' ? 'active' : ''}`} onClick={() => setActiveTab('ADDRESS')}>
+                                <Home size={18} /> Address
+                            </button>
                             <button className={`nav-link ${activeTab === 'KYC' ? 'active' : ''}`} onClick={() => setActiveTab('KYC')}>
                                 <Shield size={18} /> Governance & KYC
                             </button>
                             {user?.role === 'TEACHER' && (
                                 <button className={`nav-link ${activeTab === 'PROFESSIONAL' ? 'active' : ''}`} onClick={() => setActiveTab('PROFESSIONAL')}>
                                     <Briefcase size={18} /> Professional
+                                </button>
+                            )}
+                            {user?.role === 'TEACHER' && (
+                                <button className={`nav-link ${activeTab === 'FINANCIAL' ? 'active' : ''}`} onClick={() => setActiveTab('FINANCIAL')}>
+                                    <Landmark size={18} /> Financial Details
+                                </button>
+                            )}
+                            {user?.role === 'TEACHER' && (
+                                <button className={`nav-link ${activeTab === 'SOCIAL' ? 'active' : ''}`} onClick={() => setActiveTab('SOCIAL')}>
+                                    <Globe size={18} /> Social Media
                                 </button>
                             )}
                             {user?.role === 'PARENT' && (
@@ -497,24 +586,78 @@ export default function UserProfile() {
                                         <label>Date of Birth</label>
                                         <input type="date" className="premium-input-date" style={{ width: '100%', padding: '0.85rem 1.25rem', borderRadius: '1rem', border: '1px solid #e2e8f0', outline: 'none' }} value={profileData.dateOfBirth} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, dateOfBirth: e.target.value })} />
                                     </div>
-                                    <div className="p-input-group full-width">
-                                        <label>Address Information</label>
+                                    <div className="p-input-group">
+                                        <label>Marital Status</label>
+                                        <select className="premium-select" value={profileData.maritalStatus} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, maritalStatus: e.target.value })}>
+                                            <option value="">Select Status</option>
+                                            <option value="Single">Single</option>
+                                            <option value="Married">Married</option>
+                                            <option value="Widowed">Widowed</option>
+                                            <option value="Divorced">Divorced</option>
+                                        </select>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Father's Name</label>
                                         <div className="input-with-icon">
-                                            <MapPin size={18} className="i-icon" />
-                                            <input type="text" value={profileData.address} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, address: e.target.value })} placeholder="Complete residential address" />
+                                            <User size={18} className="i-icon" />
+                                            <input type="text" value={profileData.fatherName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, fatherName: e.target.value })} placeholder="Father's Name" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Mother's Name</label>
+                                        <div className="input-with-icon">
+                                            <User size={18} className="i-icon" />
+                                            <input type="text" value={profileData.motherName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, motherName: e.target.value })} placeholder="Mother's Name" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Emergency Contact No</label>
+                                        <div className="input-with-icon">
+                                            <Phone size={18} className="i-icon" />
+                                            <input type="text" value={profileData.emergencyPhone} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, emergencyPhone: e.target.value })} placeholder="Emergency Contact No" />
                                         </div>
                                     </div>
                                     <div className="p-input-group full-width">
                                         <label>Short Bio / About Yourself</label>
                                         <textarea
                                             className="premium-textarea"
-                                            rows={3}
+                                            rows={2}
                                             style={{ width: '100%', padding: '1.25rem', borderRadius: '1rem', border: '1px solid #e2e8f0', outline: 'none', background: isEditing ? 'white' : '#f8fafc' }}
                                             value={profileData.bio}
                                             disabled={!isEditing}
                                             onChange={e => setProfileData({ ...profileData, bio: e.target.value })}
                                             placeholder="Tell us a bit about your professional journey or interests..."
                                         />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'ADDRESS' && (
+                        <div className="explorer-section animate-slide-up">
+                            <div className="glass-card section-card">
+                                <div className="section-head">
+                                    <div className="section-icon" style={{ background: '#3b82f6' }}><Home size={20} /></div>
+                                    <div>
+                                        <h4>Residential Addresses</h4>
+                                        <p>Current and permanent contact location details.</p>
+                                    </div>
+                                </div>
+                                <div className="premium-form-grid">
+                                    <div className="p-input-group full-width">
+                                        <label>Current Address</label>
+                                        <div className="input-with-icon">
+                                            <MapPin size={18} className="i-icon" />
+                                            <input type="text" value={profileData.address} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, address: e.target.value })} placeholder="Complete residential address" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group full-width">
+                                        <label>Permanent Address</label>
+                                        <div className="input-with-icon">
+                                            <Home size={18} className="i-icon" />
+                                            <input type="text" value={profileData.permanentAddress} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, permanentAddress: e.target.value })} placeholder="Permanent home address" />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -590,12 +733,73 @@ export default function UserProfile() {
                                 <div className="section-head">
                                     <div className="section-icon" style={{ background: '#f59e0b' }}><GraduationCap size={20} /></div>
                                     <div>
-                                        <h4>Academic Portfolio</h4>
-                                        <p>Your educational background and expertise.</p>
+                                        <h4>Professional & Employment Portfolio</h4>
+                                        <p>Your educational background and institutional details.</p>
                                     </div>
                                 </div>
-
                                 <div className="premium-form-grid">
+                                    <div className="p-input-group">
+                                        <label>UID / Employee ID</label>
+                                        <div className="input-with-icon">
+                                            <Fingerprint size={18} className="i-icon" />
+                                            <input type="text" value={profileData.uid} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, uid: e.target.value })} placeholder="E12345" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Designation</label>
+                                        <div className="input-with-icon">
+                                            <Briefcase size={18} className="i-icon" />
+                                            <input type="text" value={profileData.designation} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, designation: e.target.value })} placeholder="e.g. Senior Teacher" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Department</label>
+                                        <div className="input-with-icon">
+                                            <Building2 size={18} className="i-icon" />
+                                            <input type="text" value={profileData.department} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, department: e.target.value })} placeholder="e.g. Mathematics" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Date of Joining</label>
+                                        <input type="date" className="premium-input-date" style={{ width: '100%', padding: '0.85rem 1.25rem', borderRadius: '1rem', border: '1px solid #e2e8f0', outline: 'none' }} value={profileData.dateOfJoining} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, dateOfJoining: e.target.value })} />
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>EPF Number</label>
+                                        <div className="input-with-icon">
+                                            <Shield size={18} className="i-icon" />
+                                            <input type="text" value={profileData.epfNo} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, epfNo: e.target.value })} placeholder="EPF XXXXXX" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Basic Salary</label>
+                                        <div className="input-with-icon">
+                                            <Landmark size={18} className="i-icon" />
+                                            <input type="text" value={profileData.basicSalary} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, basicSalary: e.target.value })} placeholder="e.g. 25000" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Contract Type</label>
+                                        <select className="premium-select" value={profileData.contractType} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, contractType: e.target.value })}>
+                                            <option value="">Select Type</option>
+                                            <option value="Permanent">Permanent</option>
+                                            <option value="Contractual">Contractual</option>
+                                            <option value="Probation">Probation</option>
+                                        </select>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Work Shift</label>
+                                        <div className="input-with-icon">
+                                            <Clock size={18} className="i-icon" />
+                                            <input type="text" value={profileData.workShift} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, workShift: e.target.value })} placeholder="e.g. 9 am to 2 PM" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Location</label>
+                                        <div className="input-with-icon">
+                                            <MapPin size={18} className="i-icon" />
+                                            <input type="text" value={profileData.location} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, location: e.target.value })} placeholder="Campus Location" />
+                                        </div>
+                                    </div>
                                     <div className="p-input-group">
                                         <label>Highest Qualification</label>
                                         <div className="input-with-icon">
@@ -610,11 +814,125 @@ export default function UserProfile() {
                                             <input type="number" value={profileData.experience} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, experience: e.target.value })} placeholder="e.g. 5" />
                                         </div>
                                     </div>
-                                    <div className="p-input-group full-width">
+                                    <div className="p-input-group">
                                         <label>Subjects / Specializations</label>
                                         <div className="input-with-icon">
                                             <BookOpen size={18} className="i-icon" />
-                                            <input type="text" value={profileData.specialization} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, specialization: e.target.value })} placeholder="e.g. Calculus, Atomic Physics, Chess" />
+                                            <input type="text" value={profileData.specialization} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, specialization: e.target.value })} placeholder="e.g. Calculus" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group full-width">
+                                        <label>Notes</label>
+                                        <textarea
+                                            className="premium-textarea"
+                                            rows={2}
+                                            style={{ width: '100%', padding: '1rem', borderRadius: '1rem', border: '1px solid #e2e8f0', outline: 'none', background: isEditing ? 'white' : '#f8fafc' }}
+                                            value={profileData.note}
+                                            disabled={!isEditing}
+                                            onChange={e => setProfileData({ ...profileData, note: e.target.value })}
+                                            placeholder="Any additional notes..."
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'FINANCIAL' && user?.role === 'TEACHER' && (
+                        <div className="explorer-section animate-slide-up">
+                            <div className="glass-card section-card">
+                                <div className="section-head">
+                                    <div className="section-icon" style={{ background: '#10b981' }}><Landmark size={20} /></div>
+                                    <div>
+                                        <h4>Bank Account Details</h4>
+                                        <p>Secure financial information for payroll processing.</p>
+                                    </div>
+                                </div>
+                                <div className="premium-form-grid">
+                                    <div className="p-input-group">
+                                        <label>Account Title</label>
+                                        <div className="input-with-icon">
+                                            <User size={18} className="i-icon" />
+                                            <input type="text" value={profileData.accountTitle} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, accountTitle: e.target.value })} placeholder="Name as per Bank" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Bank Name</label>
+                                        <div className="input-with-icon">
+                                            <Landmark size={18} className="i-icon" />
+                                            <input type="text" value={profileData.bankName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, bankName: e.target.value })} placeholder="e.g. State Bank of India" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Bank Branch Name</label>
+                                        <div className="input-with-icon">
+                                            <MapPin size={18} className="i-icon" />
+                                            <input type="text" value={profileData.bankBranch} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, bankBranch: e.target.value })} placeholder="Branch Location" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Bank Account Number</label>
+                                        <div className="input-with-icon">
+                                            <CreditCard size={18} className="i-icon" />
+                                            <input type="text" value={profileData.accountNumber} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, accountNumber: e.target.value })} placeholder="000000000000" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>IFSC Code</label>
+                                        <div className="input-with-icon">
+                                            <Shield size={18} className="i-icon" />
+                                            <input type="text" value={profileData.ifscCode} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, ifscCode: e.target.value.toUpperCase() })} placeholder="SBIN000XXXX" />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>UPI ID</label>
+                                        <div className="input-with-icon">
+                                            <Globe size={18} className="i-icon" />
+                                            <input type="text" value={profileData.upiId} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, upiId: e.target.value })} placeholder="user@upi" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'SOCIAL' && user?.role === 'TEACHER' && (
+                        <div className="explorer-section animate-slide-up">
+                            <div className="glass-card section-card">
+                                <div className="section-head">
+                                    <div className="section-icon" style={{ background: '#6366f1' }}><Globe size={20} /></div>
+                                    <div>
+                                        <h4>Social Media Links</h4>
+                                        <p>Connect your professional social presence.</p>
+                                    </div>
+                                </div>
+                                <div className="premium-form-grid">
+                                    <div className="p-input-group">
+                                        <label>Facebook URL</label>
+                                        <div className="input-with-icon">
+                                            <Facebook size={18} className="i-icon" />
+                                            <input type="text" value={profileData.facebookUrl} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, facebookUrl: e.target.value })} placeholder="https://facebook.com/..." />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Twitter URL</label>
+                                        <div className="input-with-icon">
+                                            <Twitter size={18} className="i-icon" />
+                                            <input type="text" value={profileData.twitterUrl} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, twitterUrl: e.target.value })} placeholder="https://twitter.com/..." />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>LinkedIn URL</label>
+                                        <div className="input-with-icon">
+                                            <Linkedin size={18} className="i-icon" />
+                                            <input type="text" value={profileData.linkedinUrl} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, linkedinUrl: e.target.value })} placeholder="https://linkedin.com/in/..." />
+                                        </div>
+                                    </div>
+                                    <div className="p-input-group">
+                                        <label>Instagram URL</label>
+                                        <div className="input-with-icon">
+                                            <Instagram size={18} className="i-icon" />
+                                            <input type="text" value={profileData.instagramUrl} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, instagramUrl: e.target.value })} placeholder="https://instagram.com/..." />
                                         </div>
                                     </div>
                                 </div>
@@ -870,6 +1188,4 @@ const KBDOcCard = ({ title, desc, value, icon, onUpload, onView, isEditing }: an
     );
 };
 
-const Edit2 = ({ size }: { size: number }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-);
+

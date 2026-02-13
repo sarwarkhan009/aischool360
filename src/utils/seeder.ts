@@ -1,6 +1,6 @@
 
 export const seedTestData = () => {
-    if (localStorage.getItem('millat_seeded_v1')) {
+    if (localStorage.getItem('aischool360_seeded_v1')) {
         console.log("Data already seeded.");
         return;
     }
@@ -61,7 +61,7 @@ export const seedTestData = () => {
 
             // Attendance for this section for all dates
             dates.forEach(date => {
-                const key = `millat_attendance_${cls}_${sec}_${date}`;
+                const key = `aischool360_attendance_${cls}_${sec}_${date}`;
                 const records = sectionStudents.map(s => ({
                     id: s.id,
                     name: s.name,
@@ -71,7 +71,7 @@ export const seedTestData = () => {
             });
 
             // Also set "current" attendance (no date suffix) for UI default
-            const currentKey = `millat_attendance_${cls}_${sec}`;
+            const currentKey = `aischool360_attendance_${cls}_${sec}`;
             const currentRecords = sectionStudents.map(s => ({
                 id: s.id,
                 name: s.name,
@@ -81,9 +81,9 @@ export const seedTestData = () => {
         });
     });
 
-    localStorage.setItem('millat_students', JSON.stringify(students));
-    localStorage.setItem('millat_fees', JSON.stringify(fees));
-    localStorage.setItem('millat_seeded_v1', 'true');
+    localStorage.setItem('aischool360_students', JSON.stringify(students));
+    localStorage.setItem('aischool360_fees', JSON.stringify(fees));
+    localStorage.setItem('aischool360_seeded_v1', 'true');
     console.log("Seeding complete!");
 };
 

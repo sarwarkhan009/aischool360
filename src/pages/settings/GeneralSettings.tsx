@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Edit2, Plus, BrainCircuit, Database, Save, Loader2, ShoppingBag, Shield, CreditCard, Image as ImageIcon, FileText, BookOpen } from 'lucide-react';
+import { Trash2, Edit2, Plus, BrainCircuit, Database, Save, Loader2, ShoppingBag, Shield, CreditCard, Image as ImageIcon, FileText, BookOpen, Upload } from 'lucide-react';
 import { usePersistence } from '../../hooks/usePersistence';
 import { seedDatabase, clearDatabase } from '../../lib/dbSeeder';
 import { APP_CONFIG, CLASS_ORDER } from '../../constants/app';
-import { db } from '../../lib/firebase';
+import { db, storage } from '../../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
@@ -839,7 +840,7 @@ export function ClassMaster() {
 }
 
 export function InstitutionInfo() {
-    const { currentSchool } = useSchool();
+    const { currentSchool, updateSchoolData } = useSchool();
     const [info, setInfo] = useState({
         name: '',
         fullName: '',
@@ -853,10 +854,70 @@ export function InstitutionInfo() {
         customTitle: '',
         admissionNumberPrefix: '',
         admissionNumberStartNumber: '',
-        academicYearStartMonth: 'April'
+        academicYearStartMonth: 'April',
+        receiptHeaderUrl: ''
     });
     const [isSaving, setIsSaving] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [logoFile, setLogoFile] = useState<File | null>(null);
+    const [logoPreview, setLogoPreview] = useState<string>('');
+    const [uploadProgress, setUploadProgress] = useState<number>(0);
+    const [headerFile, setHeaderFile] = useState<File | null>(null);
+    const [headerPreview, setHeaderPreview] = useState<string>('');
+    const [headerUploadProgress, setHeaderUploadProgress] = useState<number>(0);
+    const [receiptFields, setReceiptFields] = useState({
+        showLogo: true,
+        showSchoolName: true,
+        showAddress: true,
+        showPhone: true,
+        showEmail: false,
+        showWebsite: true
+    });
+    const [headerImageHeight, setHeaderImageHeight] = useState(120);
+    const [schoolNameFontSize, setSchoolNameFontSize] = useState(18);
+    const [receiptHeaderMode, setReceiptHeaderMode] = useState<'image' | 'text'>('text');
+
+    const handleHeaderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please select a valid image file (PNG, JPG, SVG, or WebP)');
+                return;
+            }
+            if (file.size > 5 * 1024 * 1024) {
+                alert('Header image must be less than 5MB');
+                return;
+            }
+            setHeaderFile(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setHeaderPreview(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please select a valid image file (PNG, JPG, SVG, or WebP)');
+                return;
+            }
+            if (file.size > 2 * 1024 * 1024) {
+                alert('Logo file size must be less than 2MB');
+                return;
+            }
+            setLogoFile(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setLogoPreview(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
 
     // Load school data from currentSchool context
     useEffect(() => {
@@ -874,17 +935,137 @@ export function InstitutionInfo() {
                 customTitle: currentSchool.customTitle || '',
                 admissionNumberPrefix: currentSchool.admissionNumberPrefix || '',
                 admissionNumberStartNumber: currentSchool.admissionNumberStartNumber || '',
-                academicYearStartMonth: currentSchool.academicYearStartMonth || 'April'
+                academicYearStartMonth: currentSchool.academicYearStartMonth || 'April',
+                receiptHeaderUrl: currentSchool.receiptHeaderUrl || ''
             });
+            setLogoPreview(currentSchool.logoUrl || currentSchool.logo || '');
+            setHeaderPreview(currentSchool.receiptHeaderUrl || '');
+            if (currentSchool.receiptHeaderFields) {
+                setReceiptFields(prev => ({ ...prev, ...currentSchool.receiptHeaderFields }));
+            }
+            setHeaderImageHeight(currentSchool.receiptHeaderImageHeight || 120);
+            setSchoolNameFontSize(currentSchool.receiptSchoolNameFontSize || 18);
+            setReceiptHeaderMode(currentSchool.receiptHeaderMode || (currentSchool.receiptHeaderUrl ? 'image' : 'text'));
             setLoading(false);
         }
     }, [currentSchool]);
+
+    // Helper to compress image and get base64
+    const compressImage = (file: File, maxWidth: number = 800): Promise<string> => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (e) => {
+                const img = new Image();
+                img.src = e.target?.result as string;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.7)); // 70% quality JPEG
+                };
+            };
+        });
+    };
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!currentSchool?.id) return;
         setIsSaving(true);
         try {
+            let finalLogoUrl = info.logoUrl;
+            let finalLogoBase64 = currentSchool.logoBase64 || '';
+            let finalHeaderBase64 = currentSchool.receiptHeaderBase64 || '';
+
+            // Upload logo file if one was selected
+            if (logoFile) {
+                const fileExtension = logoFile.name.split('.').pop();
+                const storagePath = `schools/${currentSchool.id}/logo.${fileExtension}`;
+                const storageRef = ref(storage, storagePath);
+
+                const uploadTask = uploadBytesResumable(storageRef, logoFile);
+
+                await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Upload timeout - please check Firebase Storage rules'));
+                    }, 30000);
+
+                    uploadTask.on(
+                        'state_changed',
+                        (snapshot) => {
+                            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                            setUploadProgress(progress);
+                        },
+                        (error) => {
+                            clearTimeout(timeout);
+                            reject(new Error(`Upload failed: ${error.message}`));
+                        },
+                        async () => {
+                            clearTimeout(timeout);
+                            try {
+                                finalLogoUrl = await getDownloadURL(uploadTask.snapshot.ref);
+                                resolve();
+                            } catch (error) {
+                                reject(error);
+                            }
+                        }
+                    );
+                });
+
+                finalLogoBase64 = await compressImage(logoFile, 200); // Small for logo
+                setLogoFile(null);
+            }
+
+            // Upload receipt header image if one was selected
+            let finalHeaderUrl = info.receiptHeaderUrl;
+            if (headerFile) {
+                const fileExtension = headerFile.name.split('.').pop();
+                const storagePath = `schools/${currentSchool.id}/receipt-header.${fileExtension}`;
+                const storageRef2 = ref(storage, storagePath);
+
+                const uploadTask2 = uploadBytesResumable(storageRef2, headerFile);
+
+                await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Header upload timeout - please check Firebase Storage rules'));
+                    }, 30000);
+
+                    uploadTask2.on(
+                        'state_changed',
+                        (snapshot) => {
+                            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                            setHeaderUploadProgress(progress);
+                        },
+                        (error) => {
+                            clearTimeout(timeout);
+                            reject(new Error(`Header upload failed: ${error.message}`));
+                        },
+                        async () => {
+                            clearTimeout(timeout);
+                            try {
+                                finalHeaderUrl = await getDownloadURL(uploadTask2.snapshot.ref);
+                                resolve();
+                            } catch (error) {
+                                reject(error);
+                            }
+                        }
+                    );
+                });
+
+                finalHeaderBase64 = await compressImage(headerFile, 1000); // Larger for header
+                setHeaderFile(null);
+            }
+
             // 1. Update the school document in schools collection
             await updateDoc(doc(db, 'schools', currentSchool.id), {
                 name: info.name,
@@ -895,7 +1076,14 @@ export function InstitutionInfo() {
                 website: info.website,
                 contactPerson: info.contactPerson,
                 contactNumber: info.contactNumber,
-                logoUrl: info.logoUrl,
+                logoUrl: finalLogoUrl,
+                logoBase64: finalLogoBase64,
+                receiptHeaderUrl: finalHeaderUrl,
+                receiptHeaderBase64: finalHeaderBase64,
+                receiptHeaderMode: receiptHeaderMode,
+                receiptHeaderImageHeight: headerImageHeight,
+                receiptSchoolNameFontSize: schoolNameFontSize,
+                receiptHeaderFields: receiptFields,
                 customTitle: info.customTitle,
                 admissionNumberPrefix: info.admissionNumberPrefix,
                 admissionNumberStartNumber: info.admissionNumberStartNumber,
@@ -904,7 +1092,6 @@ export function InstitutionInfo() {
             });
 
             // 2. Also update/sync the school_info document in settings collection for legacy component compatibility
-            // Since useFirestore filters by schoolId, we MUST include schoolId here
             const settingsRef = doc(db, 'settings', `school_info_${currentSchool.id}`);
             await setDoc(settingsRef, {
                 name: info.name,
@@ -913,9 +1100,16 @@ export function InstitutionInfo() {
                 address: info.address,
                 phone: info.phone,
                 website: info.website,
-                web: info.website, // legacy field name
-                logo: info.logoUrl,
-                logoUrl: info.logoUrl,
+                web: info.website,
+                logo: finalLogoUrl,
+                logoUrl: finalLogoUrl,
+                logoBase64: finalLogoBase64,
+                receiptHeaderUrl: finalHeaderUrl,
+                receiptHeaderBase64: finalHeaderBase64,
+                receiptHeaderMode: receiptHeaderMode,
+                receiptHeaderImageHeight: headerImageHeight,
+                receiptSchoolNameFontSize: schoolNameFontSize,
+                receiptHeaderFields: receiptFields,
                 admissionNumberPrefix: info.admissionNumberPrefix,
                 admissionNumberStartNumber: info.admissionNumberStartNumber,
                 type: 'school_info',
@@ -923,11 +1117,44 @@ export function InstitutionInfo() {
                 updatedAt: new Date().toISOString()
             }, { merge: true });
 
+            // Update local state with the final URL
+            setInfo(prev => ({ ...prev, logoUrl: finalLogoUrl, receiptHeaderUrl: finalHeaderUrl }));
+            setLogoPreview(finalLogoUrl);
+            setHeaderPreview(finalHeaderUrl);
+
+            // Sync context so other pages (like FeeReceipt) get updated data immediately
+            if (updateSchoolData) {
+                await updateSchoolData({
+                    name: info.name,
+                    fullName: info.fullName,
+                    email: info.email,
+                    address: info.address,
+                    phone: info.phone,
+                    website: info.website,
+                    contactPerson: info.contactPerson,
+                    contactNumber: info.contactNumber,
+                    logoUrl: finalLogoUrl,
+                    logoBase64: finalLogoBase64,
+                    receiptHeaderUrl: finalHeaderUrl,
+                    receiptHeaderBase64: finalHeaderBase64,
+                    receiptHeaderMode: receiptHeaderMode,
+                    receiptHeaderImageHeight: headerImageHeight,
+                    receiptSchoolNameFontSize: schoolNameFontSize,
+                    receiptHeaderFields: receiptFields,
+                    customTitle: info.customTitle,
+                    admissionNumberPrefix: info.admissionNumberPrefix,
+                    admissionNumberStartNumber: info.admissionNumberStartNumber,
+                    academicYearStartMonth: info.academicYearStartMonth,
+                } as any);
+            }
+
             alert('✅ Institution information updated successfully!');
         } catch (err) {
             alert('Failed to update: ' + (err as Error).message);
         } finally {
             setIsSaving(false);
+            setUploadProgress(0);
+            setHeaderUploadProgress(0);
         }
     };
 
@@ -1020,9 +1247,7 @@ export function InstitutionInfo() {
                                 placeholder=""
                                 maxLength={6}
                             />
-                            <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                Example: PPHS/493
-                            </small>
+
                         </div>
                     </div>
                     <div className="grid-2" style={{ gap: '1rem' }}>
@@ -1076,13 +1301,99 @@ export function InstitutionInfo() {
                             />
                         </div>
                         <div className="input-group">
-                            <label>Logo URL</label>
-                            <input
-                                type="text"
-                                className="input-field"
-                                value={info.logoUrl}
-                                onChange={e => setInfo({ ...info, logoUrl: e.target.value })}
-                            />
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                <ImageIcon size={16} /> School Logo
+                            </label>
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                {/* Logo Preview */}
+                                <div style={{
+                                    width: '100px',
+                                    height: '100px',
+                                    borderRadius: '12px',
+                                    border: '2px dashed var(--border)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: 'var(--bg-main)',
+                                    overflow: 'hidden',
+                                    flexShrink: 0
+                                }}>
+                                    {logoPreview ? (
+                                        <img src={logoPreview} alt="Logo preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                    ) : (
+                                        <ImageIcon size={40} color="var(--text-muted)" style={{ opacity: 0.3 }} />
+                                    )}
+                                </div>
+                                {/* Upload Controls */}
+                                <div style={{ flex: 1 }}>
+                                    <input
+                                        type="file"
+                                        id="institution-logo-upload"
+                                        accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                                        onChange={handleLogoChange}
+                                        style={{ display: 'none' }}
+                                    />
+                                    <label
+                                        htmlFor="institution-logo-upload"
+                                        className="btn"
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            cursor: 'pointer',
+                                            padding: '0.6rem 1rem',
+                                            border: '1px solid var(--border)',
+                                            borderRadius: '8px',
+                                            background: 'white',
+                                            fontWeight: 600,
+                                            fontSize: '0.85rem'
+                                        }}
+                                    >
+                                        <Upload size={16} />
+                                        {logoPreview ? 'Change Logo' : 'Upload Logo'}
+                                    </label>
+                                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem', marginBottom: '0.75rem' }}>
+                                        PNG, JPG, SVG, WebP (max 2MB)
+                                    </p>
+                                    <div className="input-group" style={{ marginBottom: 0 }}>
+                                        <label className="field-label" style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.7 }}>Or enter Logo URL manually:</label>
+                                        <input
+                                            type="text"
+                                            className="input-field"
+                                            style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
+                                            value={info.logoUrl}
+                                            onChange={e => {
+                                                const url = e.target.value;
+                                                setInfo({ ...info, logoUrl: url });
+                                                if (!logoFile) setLogoPreview(url);
+                                            }}
+                                            placeholder="https://example.com/logo.png"
+                                        />
+                                    </div>
+                                    {/* Upload Progress Bar */}
+                                    {uploadProgress > 0 && uploadProgress < 100 && (
+                                        <div style={{ marginTop: '0.5rem' }}>
+                                            <div style={{
+                                                width: '100%',
+                                                height: '6px',
+                                                background: 'var(--bg-main)',
+                                                borderRadius: '100px',
+                                                overflow: 'hidden'
+                                            }}>
+                                                <div style={{
+                                                    width: `${uploadProgress}%`,
+                                                    height: '100%',
+                                                    background: 'var(--primary)',
+                                                    transition: 'width 0.3s ease'
+                                                }} />
+                                            </div>
+                                            <p style={{ fontSize: '0.65rem', color: 'var(--primary)', marginTop: '0.25rem' }}>
+                                                Uploading: {Math.round(uploadProgress)}%
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div className="input-group">
@@ -1094,6 +1405,277 @@ export function InstitutionInfo() {
                             onChange={e => setInfo({ ...info, address: e.target.value })}
                         />
                     </div>
+
+                    {/* Receipt Header Image Section */}
+                    <div style={{ background: 'rgba(99, 102, 241, 0.04)', border: '1px dashed rgba(99, 102, 241, 0.3)', borderRadius: '12px', padding: '1.25rem', marginTop: '0.5rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontWeight: 700, fontSize: '0.95rem', color: 'var(--primary)' }}>
+                            <ImageIcon size={18} /> Fee Receipt Header Image (Optional)
+                        </label>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            Upload a complete header image (letterhead) for fee receipts. This image will replace the text-based header (school name, address, phone, website).
+                            <strong> If no image is uploaded, the receipt will use text from Institution Info fields above.</strong>
+                        </p>
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                            {/* Header Preview */}
+                            <div style={{
+                                width: '200px',
+                                minHeight: '70px',
+                                borderRadius: '8px',
+                                border: '2px dashed var(--border)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'white',
+                                overflow: 'hidden',
+                                flexShrink: 0
+                            }}>
+                                {headerPreview ? (
+                                    <img src={headerPreview} alt="Header preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                ) : (
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.5rem' }}>No header image<br />Text header will be used</span>
+                                )}
+                            </div>
+                            {/* Upload Controls */}
+                            <div style={{ flex: 1 }}>
+                                <input
+                                    type="file"
+                                    id="receipt-header-upload"
+                                    accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                                    onChange={handleHeaderChange}
+                                    style={{ display: 'none' }}
+                                />
+                                <label
+                                    htmlFor="receipt-header-upload"
+                                    className="btn"
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        cursor: 'pointer',
+                                        padding: '0.6rem 1rem',
+                                        border: '1px solid var(--primary)',
+                                        borderRadius: '8px',
+                                        background: 'white',
+                                        fontWeight: 600,
+                                        fontSize: '0.85rem',
+                                        color: 'var(--primary)'
+                                    }}
+                                >
+                                    <Upload size={16} />
+                                    {headerPreview ? 'Change Header Image' : 'Upload Header Image'}
+                                </label>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem', marginBottom: '0.75rem' }}>
+                                    PNG, JPG, SVG, WebP (max 5MB). Recommended: wide landscape format.
+                                </p>
+                                <div className="input-group" style={{ marginBottom: 0 }}>
+                                    <label className="field-label" style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.7 }}>Or enter Header Image URL:</label>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
+                                        value={info.receiptHeaderUrl}
+                                        onChange={e => {
+                                            const url = e.target.value;
+                                            setInfo({ ...info, receiptHeaderUrl: url });
+                                            if (!headerFile) setHeaderPreview(url);
+                                        }}
+                                        placeholder="https://example.com/header.png"
+                                    />
+                                </div>
+                                {headerPreview && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setHeaderPreview('');
+                                            setHeaderFile(null);
+                                            setInfo({ ...info, receiptHeaderUrl: '' });
+                                        }}
+                                        style={{
+                                            marginTop: '0.5rem',
+                                            padding: '0.3rem 0.75rem',
+                                            fontSize: '0.75rem',
+                                            background: '#fee2e2',
+                                            color: '#dc2626',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            cursor: 'pointer',
+                                            fontWeight: 600
+                                        }}
+                                    >
+                                        ✕ Remove Header Image (Use Text Instead)
+                                    </button>
+                                )}
+                                {/* Upload Progress Bar */}
+                                {headerUploadProgress > 0 && headerUploadProgress < 100 && (
+                                    <div style={{ marginTop: '0.5rem' }}>
+                                        <div style={{
+                                            width: '100%',
+                                            height: '6px',
+                                            background: 'var(--bg-main)',
+                                            borderRadius: '100px',
+                                            overflow: 'hidden'
+                                        }}>
+                                            <div style={{
+                                                width: `${headerUploadProgress}%`,
+                                                height: '100%',
+                                                background: 'var(--primary)',
+                                                transition: 'width 0.3s ease'
+                                            }} />
+                                        </div>
+                                        <p style={{ fontSize: '0.65rem', color: 'var(--primary)', marginTop: '0.25rem' }}>
+                                            Uploading: {Math.round(headerUploadProgress)}%
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        {/* Header Image Size Control */}
+                        {headerPreview && (
+                            <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'white', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700, display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                                    <span>Image Height on Receipt</span>
+                                    <span style={{ color: 'var(--primary)' }}>{headerImageHeight}px</span>
+                                </label>
+                                <input
+                                    type="range"
+                                    min="60"
+                                    max="200"
+                                    step="5"
+                                    value={headerImageHeight}
+                                    onChange={e => setHeaderImageHeight(Number(e.target.value))}
+                                    style={{ width: '100%', accentColor: 'var(--primary)' }}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                    <span>Small (60px)</span>
+                                    <span>Large (200px)</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* School Name Font Size Control */}
+                        {receiptFields.showSchoolName && (
+                            <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'white', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700, display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                                    <span>School Name Font Size</span>
+                                    <span style={{ color: 'var(--primary)' }}>{schoolNameFontSize}px</span>
+                                </label>
+                                <input
+                                    type="range"
+                                    min="12"
+                                    max="36"
+                                    step="1"
+                                    value={schoolNameFontSize}
+                                    onChange={e => setSchoolNameFontSize(Number(e.target.value))}
+                                    style={{ width: '100%', accentColor: 'var(--primary)' }}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                    <span>Small (12px)</span>
+                                    <span>Extra Large (36px)</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Receipt Header Fields Checkboxes */}
+                    <div style={{ background: 'rgba(34, 197, 94, 0.04)', border: '1px dashed rgba(34, 197, 94, 0.3)', borderRadius: '12px', padding: '1.25rem', marginTop: '0.5rem' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontWeight: 700, fontSize: '0.95rem', color: '#16a34a' }}>
+                            <FileText size={18} /> Receipt Header: Show/Hide Fields
+                        </label>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                            Select which fields to display in the fee receipt header (used when no header image is set, or below the header image).
+                        </p>
+
+                        {/* Receipt Header Mode Toggle */}
+                        {headerPreview && (
+                            <div style={{
+                                marginBottom: '1rem',
+                                padding: '0.75rem',
+                                background: 'white',
+                                borderRadius: '10px',
+                                border: `2px solid ${receiptHeaderMode === 'image' ? '#2563eb' : '#16a34a'}`,
+                            }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.5rem', display: 'block', color: '#374151' }}>
+                                    📋 Receipt Header Style
+                                </label>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setReceiptHeaderMode('image')}
+                                        style={{
+                                            padding: '0.6rem 0.75rem',
+                                            borderRadius: '8px',
+                                            border: `2px solid ${receiptHeaderMode === 'image' ? '#2563eb' : '#e5e7eb'}`,
+                                            background: receiptHeaderMode === 'image' ? 'rgba(37, 99, 235, 0.08)' : 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '0.82rem',
+                                            fontWeight: 700,
+                                            color: receiptHeaderMode === 'image' ? '#2563eb' : '#6b7280',
+                                            transition: 'all 0.2s',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem'
+                                        }}
+                                    >
+                                        🖼️ Use Image Header
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setReceiptHeaderMode('text')}
+                                        style={{
+                                            padding: '0.6rem 0.75rem',
+                                            borderRadius: '8px',
+                                            border: `2px solid ${receiptHeaderMode === 'text' ? '#16a34a' : '#e5e7eb'}`,
+                                            background: receiptHeaderMode === 'text' ? 'rgba(34, 197, 94, 0.08)' : 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '0.82rem',
+                                            fontWeight: 700,
+                                            color: receiptHeaderMode === 'text' ? '#16a34a' : '#6b7280',
+                                            transition: 'all 0.2s',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem'
+                                        }}
+                                    >
+                                        📝 Use Text Header
+                                    </button>
+                                </div>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                                    {receiptHeaderMode === 'image'
+                                        ? '✅ Receipt will show the uploaded header image as heading.'
+                                        : '✅ Receipt will show school name, logo & address as text heading.'}
+                                </p>
+                            </div>
+                        )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+                            {[
+                                { key: 'showLogo', label: 'School Logo' },
+                                { key: 'showSchoolName', label: 'School Name' },
+                                { key: 'showAddress', label: 'Address' },
+                                { key: 'showPhone', label: 'Phone Number' },
+                                { key: 'showEmail', label: 'Email' },
+                                { key: 'showWebsite', label: 'Website' }
+                            ].map(item => (
+                                <label key={item.key} style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                    padding: '0.6rem 0.75rem', borderRadius: '8px',
+                                    border: `1px solid ${(receiptFields as any)[item.key] ? '#16a34a' : 'var(--border)'}`,
+                                    background: (receiptFields as any)[item.key] ? 'rgba(34, 197, 94, 0.06)' : 'white',
+                                    cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600,
+                                    transition: 'all 0.2s'
+                                }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={(receiptFields as any)[item.key]}
+                                        onChange={e => setReceiptFields({ ...receiptFields, [item.key]: e.target.checked })}
+                                        style={{ accentColor: '#16a34a' }}
+                                    />
+                                    {item.label}
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
                     <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isSaving || loading}>
                         {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
                         Update Institution Info
@@ -1106,7 +1688,7 @@ export function InstitutionInfo() {
 
 export function GeminiConfig() {
     const { currentSchool } = useSchool();
-    const [geminiKey, setGeminiKey] = usePersistence<string>('millat_gemini_api_key', '');
+    const [geminiKey, setGeminiKey] = usePersistence<string>('aischool360_gemini_api_key', '');
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
@@ -1376,7 +1958,7 @@ export function InventoryMaster() {
 }
 
 export function MapsConfig() {
-    const [mapsKey, setMapsKey] = usePersistence<string>('millat_google_maps_api_key', '');
+    const [mapsKey, setMapsKey] = usePersistence<string>('aischool360_google_maps_api_key', '');
     const [isSaving, setIsSaving] = useState(false);
 
     const { currentSchool } = useSchool();

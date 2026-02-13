@@ -1,8 +1,4 @@
 {
-  "functions": {
-    "source": "functions",
-    "runtime": "nodejs18"
-  },
   "hosting": {
     "public": "dist",
     "ignore": [
@@ -11,14 +7,6 @@
       "**/node_modules/**"
     ],
     "rewrites": [
-      {
-        "source": "/*/register",
-        "function": "ogMetaServer"
-      },
-      {
-        "source": "/*/login",
-        "function": "ogMetaServer"
-      },
       {
         "source": "**",
         "destination": "/index.html"

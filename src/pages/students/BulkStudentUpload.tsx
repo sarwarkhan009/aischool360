@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
     Upload,
     Download,
@@ -7,7 +7,8 @@ import {
     AlertCircle,
     X,
     FileSpreadsheet,
-    ArrowLeft
+    ArrowLeft,
+    Layers
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSchool } from '../../context/SchoolContext';
@@ -27,14 +28,18 @@ import type {
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 
+type UploadMode = 'single' | 'all';
+
 const BulkStudentUpload: React.FC = () => {
     const navigate = useNavigate();
     const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
     const { data: existingStudents } = useFirestore<any>('students');
+    const { data: feeAmounts } = useFirestore<any>('fee_amounts');
 
     const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || []);
 
+    const [uploadMode, setUploadMode] = useState<UploadMode>('all');
     const [selectedClass, setSelectedClass] = useState<string>('');
     const [selectedSection, setSelectedSection] = useState<string>('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -45,6 +50,22 @@ const BulkStudentUpload: React.FC = () => {
     const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
     const [showPreview, setShowPreview] = useState(false);
     const [uploadComplete, setUploadComplete] = useState(false);
+
+    // Group students by class-section for summary (only used in 'all' mode)
+    const classSectionSummary = useMemo(() => {
+        if (uploadMode !== 'all') return [];
+        const summary = new Map<string, number>();
+        parsedStudents.forEach(s => {
+            const key = `${s.class} (${s.section})`;
+            summary.set(key, (summary.get(key) || 0) + 1);
+        });
+        return Array.from(summary.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    }, [parsedStudents, uploadMode]);
+
+    const handleModeChange = (mode: UploadMode) => {
+        setUploadMode(mode);
+        resetForm();
+    };
 
     const handleClassSelect = (classId: string) => {
         setSelectedClass(classId);
@@ -69,7 +90,7 @@ const BulkStudentUpload: React.FC = () => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        if (!selectedClass || !selectedSection) {
+        if (uploadMode === 'single' && (!selectedClass || !selectedSection)) {
             alert('Please select class and section first');
             return;
         }
@@ -83,12 +104,17 @@ const BulkStudentUpload: React.FC = () => {
             setExcelData(data);
 
             // Validate
-            const validationResult = validateStudentData(data);
+            const validationResult = validateStudentData(data, uploadMode === 'all');
             setValidation(validationResult);
 
             if (validationResult.isValid || validationResult.validCount > 0) {
                 // Convert to student objects
-                const students = convertToStudents(data, selectedClass, selectedSection, currentSchool?.id || '');
+                let students: ParsedStudent[];
+                if (uploadMode === 'single') {
+                    students = convertToStudents(data, selectedClass, selectedSection, currentSchool?.id || '');
+                } else {
+                    students = convertToStudents(data, currentSchool?.id || '');
+                }
                 setParsedStudents(students);
                 setShowPreview(true);
             }
@@ -138,8 +164,21 @@ const BulkStudentUpload: React.FC = () => {
                         console.log(`Skipping duplicate: ${student.name} (Roll: ${student.rollNo})`);
                         errorCount++;
                     } else {
+                        // Calculate Monthly Fee for this student
+                        let monthlyFee = '0';
+                        if (student.class && feeAmounts && feeAmounts.length > 0) {
+                            const classFees = feeAmounts.filter((fa: any) =>
+                                fa.className === student.class &&
+                                fa.feeTypeName &&
+                                fa.feeTypeName.toLowerCase().includes('monthly')
+                            );
+                            const total = classFees.reduce((sum: number, fa: any) => sum + (Number(fa.amount) || 0), 0);
+                            monthlyFee = total.toString();
+                        }
+
                         await addDoc(studentsRef, {
                             ...student,
+                            monthlyFee: student.monthlyFee || monthlyFee, // Priority to Excel value if present
                             createdAt: new Date().toISOString(),
                             updatedAt: new Date().toISOString()
                         });
@@ -174,6 +213,8 @@ const BulkStudentUpload: React.FC = () => {
         setUploadComplete(false);
         setUploadProgress({ current: 0, total: 0 });
     };
+
+    const canUploadFile = uploadMode === 'all' || (uploadMode === 'single' && selectedClass && selectedSection);
 
     return (
         <div className="page-container">
@@ -243,36 +284,130 @@ const BulkStudentUpload: React.FC = () => {
                 </div>
             )}
 
-            {/* Class Selection */}
-            <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
-                <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Users size={20} />
-                    Step 1: Select Class
+            {/* Upload Mode Toggle */}
+            <div className="card" style={{ padding: '1.25rem', marginBottom: '2rem' }}>
+                <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem' }}>
+                    <Layers size={20} />
+                    Upload Mode
                 </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '1rem' }}>
-                    {activeClasses.map((cls: any) => (
-                        <button
-                            key={cls.name}
-                            onClick={() => handleClassSelect(cls.name)}
-                            className="btn"
-                            style={{
-                                padding: '1rem',
-                                background: selectedClass === cls.name ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'white',
-                                color: selectedClass === cls.name ? 'white' : 'var(--text-main)',
-                                border: selectedClass === cls.name ? 'none' : '2px solid var(--border)',
-                                borderRadius: '0.5rem',
-                                fontWeight: 600,
-                                transition: 'all 0.2s'
-                            }}
-                        >
-                            {cls.name}
-                        </button>
-                    ))}
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <button
+                        onClick={() => handleModeChange('all')}
+                        className="btn"
+                        style={{
+                            padding: '1rem 1.5rem',
+                            background: uploadMode === 'all'
+                                ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)'
+                                : 'white',
+                            color: uploadMode === 'all' ? 'white' : 'var(--text-main)',
+                            border: uploadMode === 'all' ? 'none' : '2px solid var(--border)',
+                            borderRadius: '0.75rem',
+                            fontWeight: 600,
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            gap: '0.25rem',
+                            cursor: 'pointer',
+                            boxShadow: uploadMode === 'all' ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none'
+                        }}
+                    >
+                        <span style={{ fontSize: '0.95rem' }}>📋 All Classes in One File</span>
+                        <span style={{ fontSize: '0.75rem', opacity: 0.8, fontWeight: 400 }}>
+                            Excel me Class column hoga — sab ek saath upload
+                        </span>
+                    </button>
+                    <button
+                        onClick={() => handleModeChange('single')}
+                        className="btn"
+                        style={{
+                            padding: '1rem 1.5rem',
+                            background: uploadMode === 'single'
+                                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                                : 'white',
+                            color: uploadMode === 'single' ? 'white' : 'var(--text-main)',
+                            border: uploadMode === 'single' ? 'none' : '2px solid var(--border)',
+                            borderRadius: '0.75rem',
+                            fontWeight: 600,
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            gap: '0.25rem',
+                            cursor: 'pointer',
+                            boxShadow: uploadMode === 'single' ? '0 4px 12px rgba(16, 185, 129, 0.3)' : 'none'
+                        }}
+                    >
+                        <span style={{ fontSize: '0.95rem' }}>📁 Single Class Upload</span>
+                        <span style={{ fontSize: '0.75rem', opacity: 0.8, fontWeight: 400 }}>
+                            Pehle class select karo, phir file upload karo
+                        </span>
+                    </button>
                 </div>
             </div>
 
-            {/* Section Selection */}
-            {selectedClass && (
+            {/* Info Banner for 'all' mode */}
+            {uploadMode === 'all' && (
+                <div className="card" style={{
+                    padding: '1.25rem',
+                    marginBottom: '2rem',
+                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.08) 100%)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    borderRadius: '0.75rem'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                        <Layers size={22} style={{ color: '#10b981', flexShrink: 0, marginTop: '0.1rem' }} />
+                        <div>
+                            <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                                📋 All classes & sections in one file!
+                            </p>
+                            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                                Your Excel file must have a <strong>"Class"</strong> column with section info.
+                                Format: <code style={{ background: 'rgba(99, 102, 241, 0.15)', padding: '0.15rem 0.4rem', borderRadius: '0.25rem', fontWeight: 600 }}>1 (A)</code>,
+                                <code style={{ background: 'rgba(99, 102, 241, 0.15)', padding: '0.15rem 0.4rem', borderRadius: '0.25rem', fontWeight: 600, marginLeft: '0.25rem' }}>9 (A)</code>,
+                                <code style={{ background: 'rgba(99, 102, 241, 0.15)', padding: '0.15rem 0.4rem', borderRadius: '0.25rem', fontWeight: 600, marginLeft: '0.25rem' }}>LKG</code>,
+                                <code style={{ background: 'rgba(99, 102, 241, 0.15)', padding: '0.15rem 0.4rem', borderRadius: '0.25rem', fontWeight: 600, marginLeft: '0.25rem' }}>10 (B)</code>
+                            </p>
+                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                Dates should be in <strong>dd-mm-yy</strong> format (e.g., 05-08-24). Download the template for reference.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Class Selection (only for single mode) */}
+            {uploadMode === 'single' && (
+                <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+                    <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Users size={20} />
+                        Step 1: Select Class
+                    </h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '1rem' }}>
+                        {activeClasses.map((cls: any) => (
+                            <button
+                                key={cls.name}
+                                onClick={() => handleClassSelect(cls.name)}
+                                className="btn"
+                                style={{
+                                    padding: '1rem',
+                                    background: selectedClass === cls.name ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'white',
+                                    color: selectedClass === cls.name ? 'white' : 'var(--text-main)',
+                                    border: selectedClass === cls.name ? 'none' : '2px solid var(--border)',
+                                    borderRadius: '0.5rem',
+                                    fontWeight: 600,
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                {cls.name}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Section Selection (only for single mode) */}
+            {uploadMode === 'single' && selectedClass && (
                 <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
                     <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Users size={20} />
@@ -312,20 +447,21 @@ const BulkStudentUpload: React.FC = () => {
             )}
 
             {/* File Upload */}
-            {selectedClass && selectedSection && (
+            {canUploadFile && (
                 <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
                     <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <FileSpreadsheet size={20} />
-                        Step 3: Upload Excel File
+                        {uploadMode === 'single' ? 'Step 3: Upload Excel File' : 'Upload Excel File'}
                     </h3>
                     <div
                         style={{
                             border: '2px dashed var(--primary)',
-                            borderRadius: '0.5rem',
+                            borderRadius: '0.75rem',
                             padding: '3rem',
                             textAlign: 'center',
                             background: 'rgba(99, 102, 241, 0.05)',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
                         }}
                         onClick={() => document.getElementById('file-input')?.click()}
                     >
@@ -334,7 +470,7 @@ const BulkStudentUpload: React.FC = () => {
                             {selectedFile ? selectedFile.name : 'Click to upload Excel file'}
                         </p>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                            Supports .xlsx, .xls files
+                            Supports .xlsx, .xls files{uploadMode === 'all' ? ' — All classes in one file' : ''}
                         </p>
                         <input
                             id="file-input"
@@ -344,6 +480,39 @@ const BulkStudentUpload: React.FC = () => {
                             style={{ display: 'none' }}
                         />
                     </div>
+
+                    {/* Column Order Reference */}
+                    {uploadMode === 'all' && (
+                        <div style={{
+                            marginTop: '1.25rem',
+                            padding: '1rem',
+                            background: 'rgba(99, 102, 241, 0.05)',
+                            borderRadius: '0.5rem',
+                            border: '1px solid rgba(99, 102, 241, 0.15)'
+                        }}>
+                            <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                                📄 Required Column Order:
+                            </p>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                                {['Roll No.', 'GR. No', 'Date of Admission', 'Student Name', 'Class', 'Father Name', 'Father UID', 'Father Phone', 'Mother Name', 'Mother UID', 'Mother Phone', 'Address', 'Date of Birth', 'Gender', 'Mobile Number', 'UID Number', 'PEN', 'APAAR ID'].map((col) => (
+                                    <span key={col} style={{
+                                        fontSize: '0.7rem',
+                                        padding: '0.2rem 0.5rem',
+                                        background: ['Roll No.', 'Student Name', 'Class'].includes(col) ? 'rgba(239, 68, 68, 0.15)' : 'rgba(99, 102, 241, 0.1)',
+                                        color: ['Roll No.', 'Student Name', 'Class'].includes(col) ? '#ef4444' : 'var(--text-muted)',
+                                        borderRadius: '0.25rem',
+                                        fontWeight: ['Roll No.', 'Student Name', 'Class'].includes(col) ? 700 : 500,
+                                        border: ['Roll No.', 'Student Name', 'Class'].includes(col) ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(99, 102, 241, 0.15)'
+                                    }}>
+                                        {col}{['Roll No.', 'Student Name', 'Class'].includes(col) ? ' *' : ''}
+                                    </span>
+                                ))}
+                            </div>
+                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                * Required fields are highlighted in red
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -417,6 +586,49 @@ const BulkStudentUpload: React.FC = () => {
                 </div>
             )}
 
+            {/* Class-Section Summary (only for 'all' mode) */}
+            {showPreview && uploadMode === 'all' && classSectionSummary.length > 0 && (
+                <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+                    <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Layers size={20} />
+                        Class-wise Summary
+                    </h3>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                        {classSectionSummary.map(([classSection, count]) => (
+                            <div
+                                key={classSection}
+                                style={{
+                                    padding: '0.75rem 1.25rem',
+                                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(79, 70, 229, 0.15) 100%)',
+                                    borderRadius: '0.75rem',
+                                    border: '1px solid rgba(99, 102, 241, 0.25)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem'
+                                }}
+                            >
+                                <div style={{
+                                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                                    color: 'white',
+                                    padding: '0.3rem 0.6rem',
+                                    borderRadius: '0.4rem',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    minWidth: '1.5rem',
+                                    textAlign: 'center'
+                                }}>
+                                    {count}
+                                </div>
+                                <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.9rem' }}>{classSection}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <p style={{ margin: '1rem 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        Total: <strong>{parsedStudents.length} students</strong> across <strong>{classSectionSummary.length} class-sections</strong>
+                    </p>
+                </div>
+            )}
+
             {/* Preview Table */}
             {showPreview && parsedStudents.length > 0 && (
                 <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
@@ -425,40 +637,54 @@ const BulkStudentUpload: React.FC = () => {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                             <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-main)', zIndex: 1 }}>
                                 <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Class</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Section</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>Roll No.</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>GR. No</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Student Name</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Father Phone</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mobile No</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>UID Number</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Father UID</th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mother UID</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>Date of Admission</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Student Name</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Class</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Section</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Gender</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Date of Birth</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mobile No.</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Address</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Father Name</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Father UID</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Father Phone</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mother Name</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mother UID</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Mother Phone</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>UID Number</th>
                                     <th style={{ padding: '0.75rem', textAlign: 'left' }}>PEN</th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>APAAR ID</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {parsedStudents.slice(0, 50).map((student: any, index: number) => (
                                     <tr key={index} style={{ borderBottom: '1px solid var(--border)' }}>
-                                        <td style={{ padding: '0.75rem' }}>{student.class}</td>
-                                        <td style={{ padding: '0.75rem' }}>{student.section}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.rollNo}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.grNo || '-'}</td>
-                                        <td style={{ padding: '0.75rem', fontWeight: 600 }}>{student.name}</td>
-                                        <td style={{ padding: '0.75rem' }}>{student.fatherContactNo || '-'}</td>
-                                        <td style={{ padding: '0.75rem' }}>{student.mobileNo || '-'}</td>
-                                        <td style={{ padding: '0.75rem' }}>{student.aadharNo || '-'}</td>
-                                        <td style={{ padding: '0.75rem' }}>{student.fatherAadharNo || '-'}</td>
-                                        <td style={{ padding: '0.75rem' }}>{student.motherAadharNo || '-'}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.admissionDate || '-'}</td>
+                                        <td style={{ padding: '0.75rem', fontWeight: 600 }}>{student.name}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.class}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.section}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.gender || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.dob || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.mobileNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.permanentAddress || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.fatherName || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.fatherAadharNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.fatherContactNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.motherName || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.motherAadharNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.motherContactNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.aadharNo || '-'}</td>
                                         <td style={{ padding: '0.75rem' }}>{student.studentPenNo || '-'}</td>
+                                        <td style={{ padding: '0.75rem' }}>{student.appaarNo || '-'}</td>
                                     </tr>
                                 ))}
                                 {parsedStudents.length > 50 && (
                                     <tr>
-                                        <td colSpan={6} style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                        <td colSpan={15} style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                             ... and {parsedStudents.length - 50} more students
                                         </td>
                                     </tr>

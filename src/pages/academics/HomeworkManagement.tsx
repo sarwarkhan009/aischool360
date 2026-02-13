@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
+import { sortClasses } from '../../constants/app';
 
 interface Homework {
     id: string;
@@ -68,9 +69,10 @@ const HomeworkManagement: React.FC = () => {
         const fetchAssigned = async () => {
             setIsFetchingAssigned(true);
             try {
-                const routineDoc = await getDoc(doc(db, 'settings', `school_routine_${currentSchool.id}`));
                 const classes = new Set<string>();
 
+                // 1. Fetch from Routine
+                const routineDoc = await getDoc(doc(db, 'settings', `school_routine_${currentSchool.id}`));
                 if (routineDoc.exists()) {
                     const days = routineDoc.data().days || {};
                     Object.values(days).forEach((day: any) => {
@@ -82,15 +84,23 @@ const HomeworkManagement: React.FC = () => {
                     });
                 }
 
-                if (classes.size === 0) {
-                    const q = query(
-                        collection(db, 'homework'),
-                        where('schoolId', '==', currentSchool.id),
-                        where('teacherId', '==', user.id)
-                    );
-                    const snap = await getDocs(q);
-                    snap.docs.forEach(d => classes.add(d.data().class));
+                // 2. Fetch from Teacher Profile (Employee Management)
+                const teacherDoc = await getDoc(doc(db, 'teachers', user.id));
+                if (teacherDoc.exists()) {
+                    const teacherData = teacherDoc.data();
+                    if (teacherData.teachingClasses && Array.isArray(teacherData.teachingClasses)) {
+                        teacherData.teachingClasses.forEach((cls: string) => classes.add(cls));
+                    }
                 }
+
+                // 3. Fetch from Previous Homework History (as fallback or additional info)
+                const q = query(
+                    collection(db, 'homework'),
+                    where('schoolId', '==', currentSchool.id),
+                    where('teacherId', '==', user.id)
+                );
+                const snap = await getDocs(q);
+                snap.docs.forEach(d => classes.add(d.data().class));
 
                 setAssignedClasses(Array.from(classes));
             } catch (e) {
@@ -136,11 +146,11 @@ const HomeworkManagement: React.FC = () => {
         remove: removeHomework
     } = useFirestore<any>('homework');
 
-    const classSettings = (allSettings?.filter((s: any) => s.type === 'class' && s.active !== false) || []).filter((c: any) => {
+    const classSettings = sortClasses((allSettings?.filter((s: any) => s.type === 'class' && s.active !== false) || []).filter((c: any) => {
         if (user?.role === 'ADMIN' || user?.role === 'MANAGER') return true;
         if (user?.role === 'TEACHER') return assignedClasses.includes(c.name);
         return true;
-    });
+    }));
 
     const availableSubjects = academicStructure?.subjects?.filter((s: any) => s.enabledFor?.includes(formData.class)) || [];
 

@@ -17,7 +17,7 @@ const AIAssistant: React.FC = () => {
     const [report, setReport] = useState<string | null>(null);
     const [showModal, setShowModal] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
-    const [localApiKey, setLocalApiKey] = usePersistence<string>('millat_gemini_api_key', '');
+    const [localApiKey, setLocalApiKey] = usePersistence<string>('aischool360_gemini_api_key', '');
     const [apiKey, setApiKey] = useState<string>(localApiKey);
 
     useEffect(() => {
@@ -264,7 +264,7 @@ const AIAssistant: React.FC = () => {
     };
 
     const [position, setPosition] = useState(() => {
-        const saved = localStorage.getItem('millat_ai_bubble_pos');
+        const saved = localStorage.getItem('aischool360_ai_bubble_pos');
         try {
             return saved ? JSON.parse(saved) : { bottom: 32, right: 32 };
         } catch (e) {
@@ -312,7 +312,7 @@ const AIAssistant: React.FC = () => {
 
     const endDrag = () => {
         if (isDragging) {
-            localStorage.setItem('millat_ai_bubble_pos', JSON.stringify(position));
+            localStorage.setItem('aischool360_ai_bubble_pos', JSON.stringify(position));
         }
         setIsDragging(false);
         dragStartPos.current = null;

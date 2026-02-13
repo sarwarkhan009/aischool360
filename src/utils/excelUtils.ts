@@ -24,11 +24,11 @@ export const parseExcelFile = (file: File): Promise<any[]> => {
                 // First, get all data as array of arrays to find the header row
                 const range = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
 
-                // Find header row (the one containing 'ROLL' and 'STUDENT NAME')
+                // Find header row (the one containing 'ROLL' or 'Roll No.' and 'STUDENT NAME')
                 let headerRowIndex = -1;
                 for (let i = 0; i < range.length; i++) {
                     const row = range[i].map(cell => cell?.toString().trim().toUpperCase());
-                    if (row.includes('ROLL') || (row.includes('STUDENT NAME') || row.includes('NAME'))) {
+                    if (row.includes('ROLL') || row.includes('ROLL NO.') || (row.includes('STUDENT NAME') || row.includes('NAME'))) {
                         headerRowIndex = i;
                         break;
                     }
@@ -74,7 +74,32 @@ const isValidAadhar = (aadhar?: string): boolean => {
     return cleaned.length === 12;
 };
 
-export const validateStudentData = (data: StudentExcelRow[]): ValidationResult => {
+// Helper to parse class column value like '1 (A)', '9 (A)', 'LKG', 'UKG (B)', 'Class 5 (A)'
+export const parseClassSection = (classStr: string): { className: string; section: string } => {
+    if (!classStr) return { className: '', section: 'A' };
+    const trimmed = classStr.toString().trim();
+
+    // Match patterns like "1 (A)", "10 (B)", "Class 5 (A)", "LKG (A)", "Pre-Nursery (A)"
+    const match = trimmed.match(/^(.+?)\s*\(\s*([A-Za-z])\s*\)$/);
+    if (match) {
+        let cls = match[1].trim();
+        const sec = match[2].trim().toUpperCase();
+        // Normalize: if it's just a number, prepend 'Class '
+        if (/^\d+$/.test(cls)) {
+            cls = `Class ${cls}`;
+        }
+        return { className: cls, section: sec };
+    }
+
+    // No section in parentheses — just class name
+    let cls = trimmed;
+    if (/^\d+$/.test(cls)) {
+        cls = `Class ${cls}`;
+    }
+    return { className: cls, section: 'A' };
+};
+
+export const validateStudentData = (data: StudentExcelRow[], requireClass: boolean = false): ValidationResult => {
     const errors: string[] = [];
     const warnings: string[] = [];
     let validCount = 0;
@@ -85,7 +110,7 @@ export const validateStudentData = (data: StudentExcelRow[]): ValidationResult =
     }
 
     const firstRow = data[0];
-    const requiredColumns = ['Roll No.', 'Student Name'];
+    const requiredColumns = requireClass ? ['Roll No.', 'Student Name', 'Class'] : ['Roll No.', 'Student Name'];
     const missingColumns = requiredColumns.filter(col => !(col in firstRow));
 
     if (missingColumns.length > 0) {
@@ -93,7 +118,9 @@ export const validateStudentData = (data: StudentExcelRow[]): ValidationResult =
         return { isValid: false, errors, warnings, validCount: 0, totalCount: data.length };
     }
 
-    const rollNumbers = new Set<string>();
+    // Track roll numbers: per class-section if requireClass, or globally if not
+    const rollNumbersByClass = new Map<string, Set<string>>();
+    const globalRollNumbers = new Set<string>();
 
     data.forEach((row, index) => {
         const rowNum = index + 2;
@@ -107,13 +134,38 @@ export const validateStudentData = (data: StudentExcelRow[]): ValidationResult =
         if (!row['Roll No.'] || row['Roll No.'].toString().trim() === '') {
             errors.push(`Row ${rowNum}: Roll No. is required`);
             hasError = true;
-        } else {
-            const rollNo = row['Roll No.'].toString().trim();
-            if (rollNumbers.has(rollNo)) {
-                errors.push(`Row ${rowNum}: Duplicate Roll No.: ${rollNo}`);
+        }
+
+        if (requireClass) {
+            if (!row['Class'] || row['Class'].toString().trim() === '') {
+                errors.push(`Row ${rowNum}: Class is required`);
                 hasError = true;
             }
-            rollNumbers.add(rollNo);
+
+            // Check duplicate roll numbers within same class-section
+            if (row['Roll No.'] && row['Class']) {
+                const rollNo = row['Roll No.'].toString().trim();
+                const classKey = row['Class'].toString().trim().toUpperCase();
+                if (!rollNumbersByClass.has(classKey)) {
+                    rollNumbersByClass.set(classKey, new Set());
+                }
+                const classRolls = rollNumbersByClass.get(classKey)!;
+                if (classRolls.has(rollNo)) {
+                    errors.push(`Row ${rowNum}: Duplicate Roll No. ${rollNo} in class ${row['Class']}`);
+                    hasError = true;
+                }
+                classRolls.add(rollNo);
+            }
+        } else {
+            // Old behavior: global duplicate check
+            if (row['Roll No.']) {
+                const rollNo = row['Roll No.'].toString().trim();
+                if (globalRollNumbers.has(rollNo)) {
+                    errors.push(`Row ${rowNum}: Duplicate Roll No.: ${rollNo}`);
+                    hasError = true;
+                }
+                globalRollNumbers.add(rollNo);
+            }
         }
 
         if (row['Father Phone'] && !isValidPhone(row['Father Phone']?.toString())) {
@@ -135,13 +187,68 @@ export const validateStudentData = (data: StudentExcelRow[]): ValidationResult =
     return { isValid: errors.length === 0, errors, warnings, validCount, totalCount: data.length };
 };
 
+// Helper to normalize date strings in dd-mm-yy or dd-mm-yyyy or dd/mm/yyyy format to YYYY-MM-DD
+// Also handles Excel serial date numbers (e.g., 42488 = 2016-04-28)
+const normalizeDate = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const trimmed = dateStr.trim();
+    if (!trimmed) return '';
+
+    // Handle Excel serial date numbers (pure number like 42488)
+    if (/^\d{4,5}$/.test(trimmed)) {
+        const serial = parseInt(trimmed);
+        if (serial > 1000 && serial < 100000) {
+            // Excel serial date: days since 1899-12-30
+            const excelEpoch = new Date(1899, 11, 30);
+            const date = new Date(excelEpoch.getTime() + serial * 86400000);
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+    }
+
+    // Handle dd-mm-yy, dd-mm-yyyy, or yyyy-mm-dd
+    if (trimmed.includes('-') || trimmed.includes('/')) {
+        const parts = trimmed.split(/[-/]/);
+        if (parts.length === 3) {
+            // Check if it's already yyyy-mm-dd
+            if (parts[0].length === 4) {
+                const y = parts[0];
+                const m = parts[1].padStart(2, '0');
+                const d = parts[2].padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }
+
+            const day = parts[0].padStart(2, '0');
+            const month = parts[1].padStart(2, '0');
+            let year = parts[2];
+            // If 2-digit year, assume 2000s for <=50, 1900s for >50
+            if (year.length === 2) {
+                const yearNum = parseInt(year);
+                year = yearNum <= 50 ? `20${year}` : `19${year}`;
+            }
+            if (year.length === 4) {
+                return `${year}-${month}-${day}`;
+            }
+        }
+    }
+    return trimmed;
+};
+
 export const convertToStudents = (
     data: StudentExcelRow[],
-    classId: string,
-    section: string,
-    schoolId: string
+    classIdOrSchoolId: string,
+    section?: string,
+    schoolId?: string
 ): ParsedStudent[] => {
-    return data.map(row => {
+    // Support both old (classId, section, schoolId) and new (just schoolId) signatures
+    const isOldSignature = section !== undefined && schoolId !== undefined;
+    const actualSchoolId = isOldSignature ? schoolId : classIdOrSchoolId;
+    return data.filter(row => {
+        // Skip rows where both student name and roll no are empty
+        return row['Student Name']?.toString().trim() && row['Roll No.']?.toString().trim();
+    }).map(row => {
         const rollNo = row['Roll No.']?.toString().trim() || '';
         const name = row['Student Name']?.toString().trim() || '';
         const fatherName = row['Father Name']?.toString().trim() || '';
@@ -153,34 +260,20 @@ export const convertToStudents = (
         const aadhar = row['UID Number']?.toString().replace(/\D/g, '') || '';
         const grNo = row['GR. No']?.toString().trim();
 
+        // Parse Class column for class + section (e.g., '1 (A)', '9 (A)', 'LKG', 'UKG (B)')
+        const parsed = parseClassSection(row['Class']?.toString() || '');
+        const finalClass = isOldSignature ? classIdOrSchoolId : parsed.className;
+        const finalSection = isOldSignature ? (section as string) : parsed.section;
+
         // Normalize Gender
         let gender = (row['Gender']?.toString().trim() || 'Male').toLowerCase();
         if (gender.startsWith('m')) gender = 'Male';
         else if (gender.startsWith('f')) gender = 'Female';
         else gender = 'Other';
 
-        // Normalize Date (expecting common formats like DD-MM-YYYY or DD/MM/YYYY)
-        let dob = row['Date of Birth']?.toString().trim() || '';
-        if (dob && (dob.includes('-') || dob.includes('/'))) {
-            const parts = dob.split(/[-/]/);
-            if (parts.length === 3) {
-                // If it's DD-MM-YYYY, convert to YYYY-MM-DD
-                if (parts[2].length === 4) {
-                    dob = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-                }
-            }
-        }
-
-        let admissionDate = row['Date of Admission']?.toString().trim() || new Date().toISOString().split('T')[0];
-        if (admissionDate && (admissionDate.includes('-') || admissionDate.includes('/'))) {
-            const parts = admissionDate.split(/[-/]/);
-            if (parts.length === 3) {
-                // If it's DD-MM-YYYY, convert to YYYY-MM-DD
-                if (parts[2].length === 4) {
-                    admissionDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-                }
-            }
-        }
+        // Normalize Dates (expecting dd-mm-yy or dd-mm-yyyy format)
+        const dob = normalizeDate(row['Date of Birth']?.toString() || '');
+        const admissionDate = normalizeDate(row['Date of Admission']?.toString() || '') || new Date().toISOString().split('T')[0];
 
         return {
             // Student Details
@@ -189,13 +282,14 @@ export const convertToStudents = (
             dob: dob,
             admissionDate: admissionDate,
             gender: gender,
-            studentCategory: (row['Category']?.toString().trim() || 'GENERAL').toUpperCase(),
+            studentCategory: 'GENERAL',
             permanentAddress: address,
             presentAddress: address,
             isAddressSame: true,
             aadharNo: aadhar,
             aadharNumber: aadhar, // Keep for compatibility
             studentPenNo: row['PEN']?.toString().trim(),
+            appaarNo: row['APAAR ID']?.toString().trim() || '',
             grNo: grNo,
             admissionNo: grNo || '', // Mapping GR. No to Admission No
 
@@ -216,9 +310,9 @@ export const convertToStudents = (
             rollNo: rollNo,
             classRollNo: rollNo,
             status: 'ACTIVE',
-            class: classId,
-            section: section,
-            schoolId: schoolId,
+            class: finalClass,
+            section: finalSection,
+            schoolId: actualSchoolId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -427,26 +521,72 @@ export const convertToMarksData = (data: MarksExcelRow[]): ParsedMarks[] => {
 // ===================================
 
 export const generateStudentTemplate = (): void => {
-    const template = [{
-        'Roll No.': '1',
-        'GR. No': 'GR001',
-        'Student Name': 'Sample Student',
-        'Father Name': 'Mr. Father',
-        'Father UID': '123412341234',
-        'Father Phone': '9876543210',
-        'Mother Name': 'Mrs. Mother',
-        'Mother UID': '123412341234',
-        'Mother Phone': '9876543210',
-        'Address': 'Sample Address, City',
-        'Date of Birth': '01-01-2015',
-        'Date of Admission': '10-02-2026',
-        'Gender': 'Male',
-        'Category': 'General',
-        'Mobile Number': '9876543210',
-        'UID Number': '123456789012',
-        'PEN': 'PEN123456'
-    }];
+    const template = [
+        {
+            'Roll No.': '1',
+            'GR. No': '260',
+            'Date of Admission': '05-08-24',
+            'Student Name': 'SAMPLE STUDENT',
+            'Class': '1 (A)',
+            'Father Name': 'MR. FATHER NAME',
+            'Father UID': '551902008610',
+            'Father Phone': '9876543210',
+            'Mother Name': 'MRS. MOTHER NAME',
+            'Mother UID': '757760037601',
+            'Mother Phone': '9876543210',
+            'Address': 'SAMPLE ADDRESS, CITY',
+            'Date of Birth': '15-06-15',
+            'Gender': 'Male',
+            'Mobile Number': '9876543210',
+            'UID Number': '123456789012',
+            'PEN': 'PEN123456',
+            'APAAR ID': 'APAAR123456'
+        },
+        {
+            'Roll No.': '2',
+            'GR. No': '1072',
+            'Date of Admission': '17-05-24',
+            'Student Name': 'ANOTHER STUDENT',
+            'Class': '9 (A)',
+            'Father Name': 'MR. ANOTHER FATHER',
+            'Father UID': '278829039725',
+            'Father Phone': '9876543211',
+            'Mother Name': 'MRS. ANOTHER MOTHER',
+            'Mother UID': '250624075955',
+            'Mother Phone': '9876543211',
+            'Address': 'ANOTHER ADDRESS, CITY',
+            'Date of Birth': '20-03-10',
+            'Gender': 'Female',
+            'Mobile Number': '9876543211',
+            'UID Number': '987654321098',
+            'PEN': 'PEN654321',
+            'APAAR ID': 'APAAR654321'
+        }
+    ];
     const ws = XLSX.utils.json_to_sheet(template);
+
+    // Set column widths
+    ws['!cols'] = [
+        { wch: 8 },   // Roll No.
+        { wch: 10 },  // GR. No
+        { wch: 18 },  // Date of Admission
+        { wch: 25 },  // Student Name
+        { wch: 10 },  // Class
+        { wch: 22 },  // Father Name
+        { wch: 15 },  // Father UID
+        { wch: 14 },  // Father Phone
+        { wch: 22 },  // Mother Name
+        { wch: 15 },  // Mother UID
+        { wch: 14 },  // Mother Phone
+        { wch: 30 },  // Address
+        { wch: 15 },  // Date of Birth
+        { wch: 8 },   // Gender
+        { wch: 14 },  // Mobile Number
+        { wch: 15 },  // UID Number
+        { wch: 12 },  // PEN
+        { wch: 14 },  // APAAR ID
+    ];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Student Template");
     XLSX.writeFile(wb, "Student_Upload_Template.xlsx");

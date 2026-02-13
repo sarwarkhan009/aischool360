@@ -5,6 +5,8 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useSchool } from '../../context/SchoolContext';
 
+import { sortClasses } from '../../constants/app';
+
 interface TeachingLogEntry {
     className: string;
     subject: string;
@@ -56,7 +58,7 @@ export default function AddTeachingLog() {
                 }
             });
 
-            setClasses(classNames.sort());
+            setClasses(sortClasses(classNames));
 
             // Fetch subjects from academic_structure document (Subjects & Chapters)
             const academicDocRef = doc(db, 'settings', `academic_structure_${currentSchool.id}`);

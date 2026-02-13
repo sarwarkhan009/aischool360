@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSchool } from '../../context/SchoolContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { formatDate, formatDateTime } from '../../utils/dateUtils';
 import { formatClassSectionShort } from '../../utils/formatters';
-import { Search, Edit2, Trash2, UserPlus, FileText, Settings } from 'lucide-react';
+import { Search, Edit2, Trash2, UserPlus, FileText, Settings, Download } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { collection, query, where, orderBy, limit, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { getActiveClasses, SESSIONS } from '../../constants/app';
@@ -16,6 +17,7 @@ const StudentManagement: React.FC = () => {
     const [printingStudent, setPrintingStudent] = useState<any | null>(null);
     const [isPrintingReport, setIsPrintingReport] = useState(false);
     const { data: students, loading, update: updateStudent, remove: removeStudent } = useFirestore<any>('students');
+    const { data: feeAmounts } = useFirestore<any>('fee_amounts');
 
     const { data: allSettings } = useFirestore<any>('settings');
     const printSettings = allSettings?.find((s: any) => s.id === `print_form_${schoolId}`);
@@ -23,12 +25,14 @@ const StudentManagement: React.FC = () => {
     const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
     const classesList = activeClasses.map((c: any) => c.name);
 
+    const [isProcessing, setIsProcessing] = useState(false);
     const [selectedSession, setSelectedSession] = useState('');
     const [selectedClass, setSelectedClass] = useState('');
     const [selectedSection, setSelectedSection] = useState('');
 
     const sectionsList = selectedClass ? (activeClasses.find((c: any) => c.name === selectedClass)?.sections || []) : [];
-    const [selectedStatus, setSelectedStatus] = useState('ALL');
+    const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
+    const [selectedGenders, setSelectedGenders] = useState<string[]>(['Male', 'Female']);
     const [searchQuery, setSearchQuery] = useState('');
     const [entriesToShow, setEntriesToShow] = useState(10);
 
@@ -165,10 +169,58 @@ const StudentManagement: React.FC = () => {
         }
     };
 
+    const handleFixFees = async () => {
+        if (!students || students.length === 0) {
+            alert('No students found to update.');
+            return;
+        }
+
+        if (!feeAmounts || feeAmounts.length === 0) {
+            alert('No fee configurations found. Please set up fees in Fee Management first.');
+            return;
+        }
+
+        const confirmMsg = `This will recalculate the default monthly fee for ALL ${allFilteredStudents.length} currently filtered students according to their Class and Fee Settings. \n\nContinue?`;
+        if (!window.confirm(confirmMsg)) return;
+
+        try {
+            setIsProcessing(true);
+            let updateCount = 0;
+
+            // Use batch for efficiency (500 limit)
+            for (let i = 0; i < allFilteredStudents.length; i += 500) {
+                const chunk = allFilteredStudents.slice(i, i + 500);
+                const batch = writeBatch(db);
+
+                chunk.forEach(student => {
+                    if (student.class) {
+                        const classFees = feeAmounts.filter((fa: any) =>
+                            fa.className === student.class &&
+                            fa.feeTypeName &&
+                            fa.feeTypeName.toLowerCase().includes('monthly')
+                        );
+                        const total = classFees.reduce((sum: number, fa: any) => sum + (Number(fa.amount) || 0), 0);
+                        batch.update(doc(db, 'students', student.id), { monthlyFee: total.toString() });
+                        updateCount++;
+                    }
+                });
+
+                await batch.commit();
+            }
+
+            alert(`Successfully updated monthly fees for ${updateCount} students.`);
+        } catch (error) {
+            console.error('Error fixing fees:', error);
+            alert('An error occurred: ' + (error as Error).message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const allFilteredStudents = students.filter(s => {
         // Robust filtering: match if filter is empty OR property includes selection (to handle "Class VI" vs "VI")
         const matchesSession = !selectedSession || (s.session && s.session.includes(selectedSession)) || !s.session;
-        const matchesClass = !selectedClass || (s.class && new RegExp(`\\b${selectedClass}$`).test(s.class));
+        const matchesClass = !selectedClass || (s.class && (s.class === selectedClass || s.class.endsWith(' ' + selectedClass)));
         const matchesSection = !selectedSection || (s.section && s.section.toUpperCase() === selectedSection.toUpperCase()) || !s.section;
         const matchesStatus = selectedStatus === 'ALL' || (s.status && s.status.toUpperCase() === selectedStatus.toUpperCase());
 
@@ -198,7 +250,9 @@ const StudentManagement: React.FC = () => {
             (s.diseaseAllergy && s.diseaseAllergy.toLowerCase().includes(q)) ||
             (s.class && s.class.toLowerCase().includes(q));
 
-        return matchesSession && matchesClass && matchesSection && matchesStatus && matchesSearch;
+        const matchesGender = selectedGenders.length === 0 || (s.gender && selectedGenders.includes(s.gender)) || (!s.gender && selectedGenders.includes('Male')); // Default to Male if not specified? Or handle empty.
+
+        return matchesSession && matchesClass && matchesSection && matchesStatus && matchesSearch && matchesGender;
     }).sort((a, b) => {
         // Sort by Roll No if available, else by name
         const rollA = parseInt(a.rollNo);
@@ -223,37 +277,76 @@ const StudentManagement: React.FC = () => {
         }, 300);
     };
 
-    const handleExportCSV = () => {
-        if (allFilteredStudents.length === 0) return;
+    const handleExportExcel = () => {
+        if (allFilteredStudents.length === 0) {
+            alert('No students found to export.');
+            return;
+        }
 
-        const headers = ["Roll No", "Admission No", "Name", "Father's Name", "Father's Number", "Mother's Name", "Mother's Number", "Class", "Section", "Status"];
-        const rows = allFilteredStudents.map(s => [
-            s.rollNo || s.classRollNo || '-',
-            s.admissionNo || s.id,
-            s.name || s.fullName,
-            s.fatherName || '-',
-            s.fatherContactNo || s.fatherMobile || s.mobileNo || s.phone || '-',
-            s.motherName || '-',
-            s.motherContactNo || s.motherMobile || '-',
-            s.class,
-            s.section || '-',
-            s.status || 'ACTIVE'
-        ]);
+        const dataToExport = allFilteredStudents.map(s => ({
+            'Session': s.session || '-',
+            'Admission No': s.admissionNo || s.id || '-',
+            'Registration No': s.registrationNo || '-',
+            'Admission Date': s.admissionDate ? formatDate(s.admissionDate) : '-',
+            'Roll No': s.rollNo || s.classRollNo || '-',
+            'Student Name': (s.name || s.fullName || '').toUpperCase(),
+            'Class': s.class || '-',
+            'Section': s.section || '-',
+            'Gender': s.gender || '-',
+            'Date of Birth': s.dob ? formatDate(s.dob) : '-',
+            'Aadhar No': s.aadharNo || s.studentAadharNo || '-',
+            'Blood Group': s.bloodGroup || '-',
+            'Religion': s.fatherReligion || s.religion || '-',
+            'Caste': s.caste || '-',
+            'Category': s.studentCategory || '-',
+            'Status': s.status || 'ACTIVE',
+            'Mobile No': s.mobileNo || s.phone || '-',
+            'WhatsApp No': s.whatsappNo || '-',
+            'Email': s.emailId || '-',
+            'Father Name': (s.fatherName || s.parentName || '').toUpperCase(),
+            'Father Contact': s.fatherContactNo || '-',
+            'Father Aadhar': s.fatherAadharNo || '-',
+            'Father Occupation': s.fatherOccupation || '-',
+            'Father Qualification': s.fatherQualification || '-',
+            'Mother Name': (s.motherName || '').toUpperCase(),
+            'Mother Contact': s.motherContactNo || '-',
+            'Mother Aadhar': s.motherAadharNo || '-',
+            'Mother Occupation': s.motherOccupation || '-',
+            'Guardian Name': s.guardianName || '-',
+            'Guardian Contact': s.guardianMobile || '-',
+            'Guardian Address': s.guardianAddress || '-',
+            'Present Address': s.presentAddress || '-',
+            'Permanent Address': s.permanentAddress || '-',
+            'State': s.state || '-',
+            'District': s.district || '-',
+            'Pin Code': s.pinCode || '-',
+            'Previous School': s.previousSchool || '-',
+            'Disease/Allergy': s.diseaseAllergy || '-',
+            'Appaar No': s.appaarNo || '-',
+            'PEN Number': s.studentPenNo || '-',
+            'Monthly Fee': s.monthlyFee || '0',
+            'Login PIN': s.pin || '-',
+            'Admission Type': s.admissionType || '-',
+            'Finance Type': s.financeType || '-',
+            'Family Income': s.familyIncome || '-',
+            'Remarks': s.parentOtherInfo || s.remarks || '-',
+            'Admission Timestamp': s.admissionTimestamp || s.createdAt || '-'
+        }));
 
-        const csvContent = [
-            headers.join(','),
-            ...rows.map(r => r.map(val => `"${val}"`).join(','))
-        ].join('\n');
+        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Students");
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", `Student_Report_${selectedClass || 'All'}_${new Date().toISOString().split('T')[0]}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // Set column widths
+        const wscols = [
+            { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 25 }, // Session to Name
+            { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 15 }, // Class to Aadhar
+            { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, // Blood to Status
+            { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 15 }  // Mobile to Father Contact
+        ];
+        worksheet['!cols'] = wscols;
+
+        XLSX.writeFile(workbook, `Student_Database_${selectedClass || 'All'}_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
     return (
@@ -471,9 +564,25 @@ const StudentManagement: React.FC = () => {
             {/* Main UI (Hidden during system print) */}
             <div className="no-print">
                 <div className="student-management-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', gap: '1rem', flexWrap: 'wrap' }}>
-                    <div style={{ flex: '1 1 300px' }}>
-                        <h1 className="main-title" style={{ fontSize: '2.25rem', fontWeight: 800, marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Student Database</h1>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '1.0625rem' }}>Comprehensive records management system.</p>
+                    <div style={{ flex: '1 1 300px', display: 'flex', alignItems: 'center', gap: '2rem' }}>
+                        <div>
+                            <h1 className="main-title" style={{ fontSize: '2.25rem', fontWeight: 800, marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Student Database</h1>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '1.0625rem' }}>Comprehensive records management system.</p>
+                        </div>
+                        <div style={{
+                            background: 'white',
+                            padding: '0.75rem 1.5rem',
+                            borderRadius: '16px',
+                            border: '1px solid var(--border)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            minWidth: '120px'
+                        }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Students</span>
+                            <span style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--primary)' }}>{allFilteredStudents.length}</span>
+                        </div>
                     </div>
                     <div style={{ display: 'flex', gap: '1rem' }}>
                         <button
@@ -486,18 +595,18 @@ const StudentManagement: React.FC = () => {
                         <div className="btn-group" style={{ display: 'flex', gap: '0.25rem' }}>
                             <button
                                 className="btn hover-lift"
-                                onClick={handlePrintReport}
+                                onClick={handleExportExcel}
                                 style={{ border: '1px solid var(--border)', background: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md) 0 0 var(--radius-md)' }}
                             >
-                                <FileText size={18} /> <span className="mobile-hide">Export Report</span>
+                                <Download size={18} /> <span className="mobile-hide">Export Excel</span>
                             </button>
                             <button
                                 className="btn hover-lift"
-                                onClick={handleExportCSV}
-                                title="Download CSV"
+                                onClick={handlePrintReport}
+                                title="Print Report (PDF)"
                                 style={{ border: '1px solid var(--border)', borderLeft: 'none', background: 'white', display: 'flex', alignItems: 'center', padding: '0.75rem 0.5rem', borderRadius: '0 var(--radius-md) var(--radius-md) 0' }}
                             >
-                                <Settings size={16} />
+                                <FileText size={16} />
                             </button>
                         </div>
                         <button className="btn btn-primary hover-lift hover-glow" onClick={() => navigate(`/${schoolId}/students/admission`)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem' }}>
@@ -516,6 +625,14 @@ const StudentManagement: React.FC = () => {
                                 style={{ background: '#3b82f6', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                             >
                                 <Settings size={14} /> GENERATE PIN
+                            </button>
+                            <button
+                                className="btn hover-lift"
+                                onClick={handleFixFees}
+                                disabled={isProcessing}
+                                style={{ background: '#8b5cf6', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                            >
+                                <Settings size={14} /> {isProcessing ? 'FIXING...' : 'FIX MONTHLY FEES'}
                             </button>
                             <button
                                 className="btn hover-lift"
@@ -571,6 +688,34 @@ const StudentManagement: React.FC = () => {
                                 <option value="ACTIVE">Active</option>
                                 <option value="INACTIVE">Inactive</option>
                             </select>
+
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: 'white', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                {['Male', 'Female'].map(gender => (
+                                    <button
+                                        key={gender}
+                                        onClick={() => {
+                                            setSelectedGenders(prev =>
+                                                prev.includes(gender)
+                                                    ? prev.filter(g => g !== gender)
+                                                    : [...prev, gender]
+                                            );
+                                        }}
+                                        style={{
+                                            padding: '0.4rem 0.8rem',
+                                            borderRadius: '6px',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                            background: selectedGenders.includes(gender) ? 'var(--primary)' : 'transparent',
+                                            color: selectedGenders.includes(gender) ? 'white' : 'var(--text-muted)',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                    >
+                                        {gender}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
 
@@ -633,9 +778,9 @@ const StudentManagement: React.FC = () => {
                                                     <div>
                                                         <div style={{ fontWeight: 700 }}>{stu.name || stu.fullName}</div>
                                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatClassSectionShort(stu.class, stu.section, currentSchool?.useRomanNumerals)}</div>
-                                                        {(stu.admissionTimestamp || stu.createdAt) && (
+                                                        {stu.admissionDate && (
                                                             <div style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 600, marginTop: '2px' }}>
-                                                                📅 {formatDateTime(stu.admissionTimestamp || stu.createdAt)}
+                                                                Adm Date: {formatDate(stu.admissionDate)}
                                                             </div>
                                                         )}
                                                     </div>

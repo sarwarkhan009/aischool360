@@ -1340,12 +1340,15 @@ const FeeManagement: React.FC = () => {
                 <FeeReceipt
                     receipt={currentReceipt}
                     studentData={selectedStudent}
-                    schoolInfo={dbItems?.find((item: any) =>
-                        item.id === 'school_info' ||
-                        item.type === 'school_info' ||
-                        item.type === 'institution' ||
-                        item.type === 'Institution Information'
-                    )}
+                    schoolInfo={
+                        dbItems?.find((item: any) => item.id === `school_info_${currentSchool?.id}`) ||
+                        dbItems?.find((item: any) =>
+                            item.id === 'school_info' ||
+                            item.type === 'school_info' ||
+                            item.type === 'institution' ||
+                            item.type === 'Institution Information'
+                        )
+                    }
                     onClose={() => setView('PAY')}
                 />
             </div>

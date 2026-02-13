@@ -29,6 +29,20 @@ interface SchoolData {
     principalSignatureUrl?: string; // Principal signature image
     enableWatermark?: boolean; // Enable/disable watermark
     academicYearStartMonth?: string; // Academic year start month (e.g., "April", "March")
+    receiptHeaderUrl?: string; // Custom header image for fee receipt (replaces text header)
+    receiptHeaderBase64?: string; // Base64 backup to bypass CORS in reports
+    receiptHeaderMode?: 'image' | 'text'; // User choice: image header or text header
+    logoBase64?: string; // Base64 backup for school logo
+    receiptHeaderImageHeight?: number; // Header image max height in px (default 120)
+    receiptSchoolNameFontSize?: number; // School name font size on receipt in px (default 18)
+    receiptHeaderFields?: {
+        showLogo?: boolean;
+        showSchoolName?: boolean;
+        showAddress?: boolean;
+        showPhone?: boolean;
+        showEmail?: boolean;
+        showWebsite?: boolean;
+    };
 }
 
 interface SchoolContextType {

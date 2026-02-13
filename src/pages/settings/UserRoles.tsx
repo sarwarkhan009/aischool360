@@ -257,7 +257,7 @@ const getAllMenuPermissions = (menu: MenuItem): Permission[] => {
 const UserRoles: React.FC = () => {
     const { currentSchool } = useSchool();
     const [activeTab, setActiveTab] = useState<'ROLES' | 'USERS'>('ROLES');
-    const [roles, setRoles] = usePersistence<CustomRole[]>('millat_custom_roles',
+    const [roles, setRoles] = usePersistence<CustomRole[]>('aischool360_custom_roles',
         DEFAULT_ROLES.map(r => ({ ...r, id: r.role, isDefault: true, status: 'ACTIVE' }))
     );
     const { data: teachers } = useFirestore<any>('teachers');
@@ -265,7 +265,7 @@ const UserRoles: React.FC = () => {
 
     const [selectedRole, setSelectedRole] = useState<CustomRole>(roles[0]);
     const [selectedUser, setSelectedUser] = useState<any>(null);
-    const [userPermissions, setUserPermissions] = usePersistence<Record<string, Permission[]>>('millat_user_overrides', {});
+    const [userPermissions, setUserPermissions] = usePersistence<Record<string, Permission[]>>('aischool360_user_overrides', {});
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [newRoleName, setNewRoleName] = useState('');
     const [editingRole, setEditingRole] = useState<CustomRole | null>(null);

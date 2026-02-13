@@ -5,6 +5,8 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useSchool } from '../../context/SchoolContext';
 
+import { sortClasses } from '../../constants/app';
+
 interface TeachingLog {
     id: string;
     date: string;
@@ -78,7 +80,7 @@ export default function MyTeachingLogs() {
             logsData.sort((a, b) => b.date.localeCompare(a.date));
 
             setLogs(logsData);
-            setClasses(Array.from(classesSet).sort());
+            setClasses(sortClasses(Array.from(classesSet)));
             setSubjects(Array.from(subjectsSet).sort());
         } catch (error) {
             console.error('Error fetching teaching logs:', error);

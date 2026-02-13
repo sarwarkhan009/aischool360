@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
 import { useFirestore } from '../../hooks/useFirestore';
-import { FileDown, Search, IndianRupee, ArrowLeft, Printer, MessageCircle } from 'lucide-react';
-
+import { FileDown, Search, IndianRupee, ArrowLeft, Printer, MessageCircle, Trash2, AlertTriangle, X } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
-import { sortClasses } from '../../constants/app';
+import { sortClasses, APP_CONFIG } from '../../constants/app';
 import { amountToWords } from '../../utils/formatters';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSchool } from '../../context/SchoolContext';
-import { Trash2, AlertTriangle, X } from 'lucide-react';
 
 const FeeReport: React.FC = () => {
     const { currentSchool } = useSchool();
@@ -118,11 +116,51 @@ const FeeReport: React.FC = () => {
                 return;
             }
 
+            // Convert cross-origin logo to base64 data URL to avoid canvas taint
+            const logoImg = receiptElement.querySelector('img') as HTMLImageElement;
+            let originalSrc = '';
+            if (logoImg && logoImg.src) {
+                originalSrc = logoImg.src;
+                try {
+                    const tempImg = new Image();
+                    tempImg.crossOrigin = 'anonymous';
+                    const logoDataUrl = await new Promise<string>((resolve) => {
+                        tempImg.onload = () => {
+                            try {
+                                const c = document.createElement('canvas');
+                                c.width = tempImg.naturalWidth;
+                                c.height = tempImg.naturalHeight;
+                                const ctx = c.getContext('2d');
+                                ctx?.drawImage(tempImg, 0, 0);
+                                resolve(c.toDataURL('image/png'));
+                            } catch {
+                                resolve('');
+                            }
+                        };
+                        tempImg.onerror = () => resolve('');
+                        setTimeout(() => resolve(''), 5000);
+                        tempImg.src = logoImg.src;
+                    });
+                    if (logoDataUrl) {
+                        logoImg.src = logoDataUrl;
+                    }
+                } catch {
+                    // If conversion fails, continue without converting
+                }
+            }
+
             const canvas = await html2canvas(receiptElement, {
                 scale: 2,
                 backgroundColor: '#ffffff',
-                logging: false
+                logging: false,
+                useCORS: true,
+                allowTaint: false
             });
+
+            // Restore original logo src
+            if (logoImg && originalSrc) {
+                logoImg.src = originalSrc;
+            }
 
             canvas.toBlob(async (blob) => {
                 if (!blob) {
@@ -196,9 +234,12 @@ const FeeReport: React.FC = () => {
         if (!currentReceipt) return null;
 
         const receipt = currentReceipt;
-        const totalPaid = receipt.paid || receipt.total || 0;
+        const totalPaid = receipt.paid || 0;
         const previousDues = receipt.previousDues || 0;
-        const currentDues = (receipt.total || 0) - (receipt.paid || 0);
+        const grandTotal = receipt.total || 0;
+        const discount = receipt.discount || 0;
+        const netPayable = grandTotal - discount;
+        const currentDues = netPayable - totalPaid;
 
         const institutionInfo = allSettings?.find((item: any) =>
             item.id === 'school_info' ||
@@ -207,11 +248,11 @@ const FeeReport: React.FC = () => {
             item.type === 'Institution Information'
         );
 
-        const schoolName = currentSchool?.fullName || currentSchool?.name || institutionInfo?.name || institutionInfo?.schoolName || 'Millat Public School';
+        const schoolName = currentSchool?.fullName || currentSchool?.name || institutionInfo?.name || institutionInfo?.schoolName || 'AI School 360';
         const schoolAddress = currentSchool?.address || institutionInfo?.address || institutionInfo?.schoolAddress || 'Near Moti Nagar, Vickhara, PO-Tarwer, PS-Amnour, Saran Bihar';
-        const schoolPhone = currentSchool?.phone || currentSchool?.contactNumber || institutionInfo?.phone || institutionInfo?.contact || institutionInfo?.mobile || '9570656404';
-        const schoolWebsite = currentSchool?.website || institutionInfo?.website || institutionInfo?.web || 'www.millatschool.co.in';
-        const schoolLogo = currentSchool?.logoUrl || currentSchool?.logo || institutionInfo?.logo || '/logo.png';
+        const schoolPhone = currentSchool?.phone || institutionInfo?.phone || institutionInfo?.contact || institutionInfo?.mobile || '';
+        const schoolWebsite = currentSchool?.website || institutionInfo?.website || institutionInfo?.web || 'www.aischool360.in';
+        const schoolLogo = currentSchool?.logoUrl || currentSchool?.logo || institutionInfo?.logo || APP_CONFIG.logo;
 
         return (
             <div className="animate-fade-in" style={{ maxWidth: '600px', margin: '0 auto' }}>
@@ -307,7 +348,7 @@ const FeeReport: React.FC = () => {
                                 <tr>
                                     <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Class</strong></td>
                                     <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
-                                        {receipt.class}-{receipt.section} ({selectedStudent?.financeType || 'GENERAL'}) <span style={{ float: 'right' }}><strong>Roll No:</strong> {selectedStudent?.rollNo || 'N/A'}</span>
+                                        {receipt.class}-{receipt.section} <span style={{ float: 'right' }}><strong>Roll No:</strong> {selectedStudent?.rollNo || 'N/A'}</span>
                                     </td>
                                 </tr>
                             </tbody>
@@ -326,12 +367,6 @@ const FeeReport: React.FC = () => {
                                         <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right' }}>{Number(amount).toFixed(2)}</td>
                                     </tr>
                                 ))}
-                                {receipt.discount > 0 && (
-                                    <tr>
-                                        <td style={{ border: '1px solid #000', padding: '3px 6px', color: '#d00' }}>Discount (-)</td>
-                                        <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right', color: '#d00' }}>-{Number(receipt.discount).toFixed(2)}</td>
-                                    </tr>
-                                )}
                             </tbody>
                         </table>
 
@@ -339,8 +374,18 @@ const FeeReport: React.FC = () => {
                         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px', fontSize: '10px' }}>
                             <tbody>
                                 <tr style={{ fontWeight: 700 }}>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', width: '50%' }}>Total</td>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{(receipt.total || 0).toFixed(2)}</td>
+                                    <td style={{ border: '1px solid #000', padding: '4px 6px', width: '50%' }}>Grand Total</td>
+                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{grandTotal.toFixed(2)}</td>
+                                </tr>
+                                {discount > 0 && (
+                                    <tr style={{ fontWeight: 700, color: '#d00' }}>
+                                        <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Discount (-)</td>
+                                        <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>-{discount.toFixed(2)}</td>
+                                    </tr>
+                                )}
+                                <tr style={{ fontWeight: 700, background: '#f8fafc' }}>
+                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Net Payable</td>
+                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{netPayable.toFixed(2)}</td>
                                 </tr>
                                 <tr style={{ fontWeight: 700, background: '#f0f0f0' }}>
                                     <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Paid Amount (in {receipt.paymentMode || 'CASH'})</td>

@@ -492,7 +492,12 @@ const FeeStructure: React.FC = () => {
                                         </div>
                                     </td>
                                     <td style={{ padding: '0.75rem', borderRight: '1px solid var(--border)', maxWidth: '250px', fontSize: '0.75rem', color: '#64748b' }}>
-                                        {fee.months?.length === 13 ? 'April, May, June, July, August, September, October, November, December, January, February, March' : fee.months?.map((m: string) => m.replace('_month', '')).join(', ')}
+                                        {fee.months?.length === 13
+                                            ? monthsList.map(m => m.replace('_month', '')).join(', ')
+                                            : monthsList
+                                                .filter(m => fee.months?.includes(m))
+                                                .map(m => m.replace('_month', ''))
+                                                .join(', ')}
                                     </td>
                                     <td style={{ padding: '0.75rem', borderRight: '1px solid var(--border)', maxWidth: '150px', fontSize: '0.75rem', color: '#64748b' }}>
                                         {fee.classes?.join(', ')}

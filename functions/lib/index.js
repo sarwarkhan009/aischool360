@@ -1,8 +1,9 @@
-import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
-
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ogMetaServer = void 0;
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
 admin.initializeApp();
-
 // User-Agent patterns for social media crawlers / link preview bots
 const BOT_AGENTS = [
     "whatsapp",
@@ -17,12 +18,10 @@ const BOT_AGENTS = [
     "googlebot",
     "bingbot",
 ];
-
-function isBot(userAgent: string): boolean {
+function isBot(userAgent) {
     const ua = userAgent.toLowerCase();
     return BOT_AGENTS.some((bot) => ua.includes(bot));
 }
-
 /**
  * Serves dynamic Open Graph meta tags for social media link previews.
  * When a bot/crawler requests a page like /canopus/register, this function:
@@ -33,21 +32,18 @@ function isBot(userAgent: string): boolean {
  *
  * For normal users (non-bot), it redirects to the SPA served by Firebase Hosting.
  */
-export const ogMetaServer = functions.https.onRequest(async (req, res) => {
+exports.ogMetaServer = functions.https.onRequest(async (req, res) => {
     const userAgent = req.headers["user-agent"] || "";
-
     // Only intercept for bots/crawlers; normal users get the SPA from hosting
     if (!isBot(userAgent)) {
         // Let Firebase Hosting serve the SPA index.html
         res.redirect(req.originalUrl || "/");
         return;
     }
-
     // Extract school slug from URL path
     // e.g. /canopus/register → slug = "canopus"
     const urlPath = req.path || "/";
     const segments = urlPath.split("/").filter(Boolean);
-
     // Reserved top-level routes that are NOT school slugs
     const reserved = [
         "login", "register", "admin", "dashboard", "settings",
@@ -55,21 +51,17 @@ export const ogMetaServer = functions.https.onRequest(async (req, res) => {
         "transport", "library", "communication", "calendar",
         "reports", "accounts", "smghs",
     ];
-
     let schoolSlug = "";
     if (segments.length > 0 && !reserved.includes(segments[0])) {
         schoolSlug = segments[0];
     }
-
     // Default OG values
     let ogTitle = "AI School 360 - India's First AI based ERP System";
     let ogDescription = "Complete school management solution powered by AI. Manage admissions, fees, attendance, exams, and more.";
     let ogImage = `https://${req.hostname}/logo.png`;
     let ogUrl = `https://${req.hostname}${urlPath}`;
-
     // Determine page type from remaining segments
     const pageType = segments.length > 1 ? segments[1] : "";
-
     if (schoolSlug) {
         try {
             // Fetch school data from Firestore
@@ -77,7 +69,6 @@ export const ogMetaServer = functions.https.onRequest(async (req, res) => {
                 .collection("schools")
                 .doc(schoolSlug)
                 .get();
-
             // Fallback: try with leading slash (legacy data)
             if (!schoolDoc.exists) {
                 schoolDoc = await admin.firestore()
@@ -85,16 +76,13 @@ export const ogMetaServer = functions.https.onRequest(async (req, res) => {
                     .doc(`/${schoolSlug}`)
                     .get();
             }
-
             if (schoolDoc.exists) {
-                const school = schoolDoc.data()!;
+                const school = schoolDoc.data();
                 const schoolName = school.fullName || school.name || schoolSlug;
                 const schoolLogo = school.logoUrl || school.logo || "";
-
                 if (schoolLogo) {
                     ogImage = schoolLogo;
                 }
-
                 // Customize OG title/description based on page type
                 switch (pageType) {
                     case "register":
@@ -111,12 +99,12 @@ export const ogMetaServer = functions.https.onRequest(async (req, res) => {
                         break;
                 }
             }
-        } catch (error) {
+        }
+        catch (error) {
             console.error("Error fetching school data for OG tags:", error);
             // Fall back to defaults
         }
     }
-
     // Serve HTML with dynamic OG meta tags
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -146,13 +134,11 @@ export const ogMetaServer = functions.https.onRequest(async (req, res) => {
   <p>${escapeHtml(ogDescription)}</p>
 </body>
 </html>`;
-
     res.set("Content-Type", "text/html");
     res.set("Cache-Control", "public, max-age=300, s-maxage=600");
     res.status(200).send(html);
 });
-
-function escapeHtml(str: string): string {
+function escapeHtml(str) {
     return str
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -160,3 +146,4 @@ function escapeHtml(str: string): string {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 }
+//# sourceMappingURL=index.js.map

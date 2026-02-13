@@ -9,7 +9,9 @@ export interface ValidationResult {
 export interface StudentExcelRow {
     'Roll No.': string | number;
     'GR. No'?: string | number;
+    'Date of Admission'?: string;
     'Student Name': string;
+    'Class'?: string;
     'Father Name'?: string;
     'Father UID'?: string | number;
     'Father Phone'?: string | number;
@@ -18,12 +20,11 @@ export interface StudentExcelRow {
     'Mother Phone'?: string | number;
     'Address'?: string;
     'Date of Birth'?: string;
-    'Date of Admission'?: string;
     'Gender'?: string;
-    'Category'?: string;
     'Mobile Number'?: string | number;
     'UID Number'?: string | number;
     'PEN'?: string;
+    'APAAR ID'?: string;
 }
 
 export interface ParsedStudent {
@@ -44,6 +45,7 @@ export interface ParsedStudent {
     aadharNo: string;
     aadharNumber: string;
     studentPenNo?: string;
+    appaarNo?: string;
     grNo?: string;
     admissionNo: string;
 
@@ -65,6 +67,7 @@ export interface ParsedStudent {
     class: string;
     section: string;
     schoolId: string;
+    monthlyFee?: string;
     createdAt: string;
     updatedAt: string;
 }

@@ -35,18 +35,18 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
     // Initial state from localStorage to prevent flicker
-    const savedUser = localStorage.getItem('millat_user');
+    const savedUser = localStorage.getItem('aischool360_user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
   const login = (userData: User) => {
     setUser(userData);
-    localStorage.setItem('millat_user', JSON.stringify(userData));
+    localStorage.setItem('aischool360_user', JSON.stringify(userData));
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('millat_user');
+    localStorage.removeItem('aischool360_user');
   };
 
   const hasPermission = (permission: Permission) => {

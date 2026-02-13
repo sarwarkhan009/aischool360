@@ -105,7 +105,6 @@ const EmployeeManagement: React.FC = () => {
                 joiningDate: employee.joiningDate || new Date().toISOString().split('T')[0],
                 subjects: employee.subjects || [],
                 teachingClasses: employee.teachingClasses || (employee.fromClass ? [employee.fromClass, employee.toClass].filter(Boolean) as string[] : []),
-                pin: employee.pin || employee.loginPin || '',
                 fromClass: employee.fromClass || '',
                 toClass: employee.toClass || ''
             });

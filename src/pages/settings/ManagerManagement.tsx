@@ -14,7 +14,7 @@ interface Manager {
 
 const ManagerManagement: React.FC = () => {
     const [showModal, setShowModal] = useState(false);
-    const [managers, setManagers] = usePersistence<Manager[]>('millat_managers', []);
+    const [managers, setManagers] = usePersistence<Manager[]>('aischool360_managers', []);
     const [newManager, setNewManager] = useState({
         name: '',
         mobile: '',

@@ -41,7 +41,7 @@ const StudentReport: React.FC = () => {
     const filteredStudents = useMemo(() => {
         return students.filter(s => {
             const matchesSession = !selectedSession || (s.session && s.session.includes(selectedSession));
-            const matchesClass = !selectedClass || (s.class && s.class.includes(selectedClass));
+            const matchesClass = !selectedClass || (s.class && (s.class === selectedClass || s.class.endsWith(' ' + selectedClass)));
             const matchesSection = !selectedSection || (s.section && s.section.toUpperCase() === selectedSection.toUpperCase());
             const matchesType = !selectedType || (s.studentType && s.studentType.toUpperCase() === selectedType.toUpperCase());
             const matchesGender = !selectedGender || (s.gender && s.gender.toUpperCase() === selectedGender.toUpperCase());
