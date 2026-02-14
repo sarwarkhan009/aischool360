@@ -179,7 +179,7 @@ const StudentAdmission: React.FC = () => {
         guardianAddress: initialStudent?.guardianAddress || '',
 
         // Step 4: Admission Details (Office Use)
-        session: initialStudent?.session || SESSIONS[2], // Default to 2025-26 from our list
+        session: initialStudent?.session || SESSIONS[0], // Default to 2025-26 from our list
         admissionDate: initialStudent?.admissionDate || new Date().toISOString().split('T')[0],
         admissionNo: initialStudent?.admissionNo || '',
         class: initialStudent?.class || initialStudent?.admissionClass || '',

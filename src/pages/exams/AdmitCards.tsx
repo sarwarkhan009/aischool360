@@ -275,7 +275,7 @@ const AdmitCards: React.FC = () => {
                         </div>
                         <div className="info-item" style={{ width: '48%' }}>
                             <label style={{ fontSize: '0.65rem', color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>Academic Year</label>
-                            <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.15rem' }}>{exam?.academicYearName || '2024-25'}</div>
+                            <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.15rem' }}>{exam?.academicYearName || '2025-26'}</div>
                         </div>
                     </div>
 

@@ -5,6 +5,8 @@ import { DollarSign, Calendar, User, Search, Download, AlertCircle, RefreshCw, L
 import { useParams } from 'react-router-dom';
 import { db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { sortClasses } from '../../constants/app';
+import { formatClassName } from '../../utils/formatters';
 
 interface Student {
     id: string;
@@ -163,8 +165,20 @@ const DueReport: React.FC = () => {
                 const matchesAdmType = type.admissionTypes?.includes(admType);
                 if (!matchesAdmType) return;
 
-                const matchesClass = type.classes?.includes(student.class || '');
                 const matchesStudentType = type.studentTypes?.includes(student.studentCategory || 'GENERAL');
+
+                // Check if fee type's classes array includes the student's class
+                let matchesClass = type.classes?.includes(student.class || '');
+
+                // Fallback: If fee type's classes list is stale (e.g. has "KG" instead of "LKG"),
+                // check if a fee_amount entry exists for this student's class + fee type.
+                // This handles cases where Class Master was updated but fee types weren't re-saved.
+                if (!matchesClass && student.class) {
+                    const hasAmountForClass = feeAmounts.some(fa => fa.feeTypeId === type.id && fa.className === student.class);
+                    if (hasAmountForClass) {
+                        matchesClass = true;
+                    }
+                }
 
                 if (matchesClass && matchesStudentType) {
                     const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === student.class);
@@ -318,8 +332,8 @@ const DueReport: React.FC = () => {
     };
 
     const uniqueClasses = useMemo(() => {
-        const set = new Set(students.map(s => s.class).filter(Boolean));
-        return Array.from(set).sort();
+        const set = new Set<string>(students.map(s => s.class).filter((c): c is string => Boolean(c)));
+        return sortClasses(Array.from(set));
     }, [students]);
 
     if (studentsLoading || collectionsLoading || typesLoading || amountsLoading) {
@@ -448,7 +462,11 @@ const DueReport: React.FC = () => {
                         onChange={e => setFilterClass(e.target.value)}
                     >
                         <option value="ALL">All Classes</option>
-                        {uniqueClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                        {uniqueClasses.map(c => (
+                            <option key={c} value={c}>
+                                {formatClassName(c, currentSchool?.useRomanNumerals)}
+                            </option>
+                        ))}
                     </select>
                 </div>
             </div>

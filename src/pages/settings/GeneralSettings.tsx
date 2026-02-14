@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, Edit2, Plus, BrainCircuit, Database, Save, Loader2, ShoppingBag, Shield, CreditCard, Image as ImageIcon, FileText, BookOpen, Upload } from 'lucide-react';
 import { usePersistence } from '../../hooks/usePersistence';
 import { seedDatabase, clearDatabase } from '../../lib/dbSeeder';
-import { APP_CONFIG, CLASS_ORDER } from '../../constants/app';
+import { APP_CONFIG, CLASS_ORDER, getActiveClasses } from '../../constants/app';
 import { db, storage } from '../../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
@@ -1782,27 +1782,148 @@ export function GeminiConfig() {
     );
 };
 
+// -- Class-wise Price Grid Component --
+const ClassPriceGrid = ({
+    classPrices,
+    onChange,
+    disabled,
+    sortedClassNames,
+    useRomanNumerals
+}: {
+    classPrices: Record<string, number>;
+    onChange: (prices: Record<string, number>) => void;
+    disabled?: boolean;
+    sortedClassNames: string[];
+    useRomanNumerals?: boolean;
+}) => (
+    <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+        gap: '0.625rem',
+        padding: '1rem',
+        background: 'rgba(99, 102, 241, 0.03)',
+        borderRadius: '12px',
+        border: '1px solid rgba(99, 102, 241, 0.1)'
+    }}>
+        {sortedClassNames.map((cls: string) => (
+            <div key={cls} style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.25rem'
+            }}>
+                <label style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    color: 'var(--text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.03em'
+                }}>
+                    {formatClassName(cls, useRomanNumerals)}
+                </label>
+                <input
+                    type="number"
+                    className="input-field"
+                    style={{
+                        height: '2.25rem',
+                        fontSize: '0.875rem',
+                        fontWeight: 700,
+                        padding: '0 0.5rem',
+                        textAlign: 'right'
+                    }}
+                    placeholder="0"
+                    value={classPrices[cls] || ''}
+                    onChange={e => onChange({ ...classPrices, [cls]: Number(e.target.value) })}
+                    disabled={disabled}
+                    min={0}
+                />
+            </div>
+        ))}
+    </div>
+);
+
+// -- Pricing Type Toggle Component --
+const PricingTypeToggle = ({ value, onChange }: { value: 'fixed' | 'classwise'; onChange: (v: 'fixed' | 'classwise') => void }) => (
+    <div style={{ display: 'flex', gap: '0.5rem' }}>
+        {[
+            { id: 'fixed' as const, label: '💲 Fixed Price', desc: 'Same for all' },
+            { id: 'classwise' as const, label: '📚 Class-wise', desc: 'Varies by class' }
+        ].map(opt => (
+            <button
+                key={opt.id}
+                type="button"
+                onClick={() => onChange(opt.id)}
+                style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    borderRadius: '10px',
+                    border: `2px solid ${value === opt.id ? (opt.id === 'fixed' ? '#10b981' : 'var(--primary)') : '#e2e8f0'}`,
+                    background: value === opt.id
+                        ? (opt.id === 'fixed' ? 'rgba(16, 185, 129, 0.06)' : 'rgba(99, 102, 241, 0.06)')
+                        : 'white',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.2s ease'
+                }}
+            >
+                <div style={{
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                    color: value === opt.id ? 'var(--text-main)' : 'var(--text-muted)'
+                }}>{opt.label}</div>
+                <div style={{
+                    fontSize: '0.6875rem',
+                    color: 'var(--text-muted)',
+                    marginTop: '2px'
+                }}>{opt.desc}</div>
+            </button>
+        ))}
+    </div>
+);
+
 export function InventoryMaster() {
     const { currentSchool } = useSchool();
     const { data: allSettings, loading } = useFirestore<any>('settings');
-    const [newItem, setNewItem] = useState({ name: '', price: 0 });
+    const [isSaving, setIsSaving] = useState(false);
+    const [expandedItem, setExpandedItem] = useState<string | null>(null);
+
+    // Add item form
+    const [newItem, setNewItem] = useState({ name: '', price: 0, pricingType: 'fixed' as 'fixed' | 'classwise' });
+    const [newClassPrices, setNewClassPrices] = useState<Record<string, number>>({});
+
+    // Edit state
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editPrice, setEditPrice] = useState<number>(0);
-    const [isSaving, setIsSaving] = useState(false);
+    const [editClassPrices, setEditClassPrices] = useState<Record<string, number>>({});
+    const [editPricingType, setEditPricingType] = useState<'fixed' | 'classwise'>('fixed');
+
+    // Classes from school configuration
+    const activeClasses = (allSettings && allSettings.length > 0)
+        ? getActiveClasses(allSettings.filter((d: any) => d.type === 'class' && d.schoolId === currentSchool?.id))
+        : [];
+    const sortedClassNames = activeClasses.map((c: any) => c.name);
 
     const handleAddItem = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newItem.name || !currentSchool?.id) return;
         setIsSaving(true);
         try {
-            const docId = `inv_${newItem.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id} `;
-            await setDoc(doc(db, 'settings', docId), {
-                ...newItem,
+            const docId = `inv_${newItem.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id}`;
+            const itemData: any = {
+                name: newItem.name,
                 schoolId: currentSchool.id,
                 type: 'inventory',
+                pricingType: newItem.pricingType,
                 createdAt: new Date().toISOString()
-            });
-            setNewItem({ name: '', price: 0 });
+            };
+            if (newItem.pricingType === 'fixed') {
+                itemData.price = newItem.price;
+            } else {
+                itemData.classPrices = newClassPrices;
+                itemData.price = 0; // Default fallback
+            }
+            await setDoc(doc(db, 'settings', docId), itemData);
+            setNewItem({ name: '', price: 0, pricingType: 'fixed' });
+            setNewClassPrices({});
         } catch (err) {
             alert('Failed to add item: ' + (err as Error).message);
         } finally {
@@ -1810,16 +1931,24 @@ export function InventoryMaster() {
         }
     };
 
-    const handleUpdatePrice = async (id: string) => {
+    const handleUpdateItem = async (id: string) => {
         setIsSaving(true);
         try {
-            await updateDoc(doc(db, 'settings', id), {
-                price: editPrice,
+            const updateData: any = {
+                pricingType: editPricingType,
                 updatedAt: new Date().toISOString()
-            });
+            };
+            if (editPricingType === 'fixed') {
+                updateData.price = editPrice;
+                updateData.classPrices = {}; // Clear class prices
+            } else {
+                updateData.classPrices = editClassPrices;
+                updateData.price = 0;
+            }
+            await updateDoc(doc(db, 'settings', id), updateData);
             setEditingId(null);
         } catch (err) {
-            alert('Failed to update price: ' + (err as Error).message);
+            alert('Failed to update: ' + (err as Error).message);
         } finally {
             setIsSaving(false);
         }
@@ -1837,121 +1966,356 @@ export function InventoryMaster() {
         }
     };
 
-    const items = allSettings?.filter((d: any) => d.type === 'inventory') || [];
+    const startEditing = (item: any) => {
+        setEditingId(item.id);
+        setEditPricingType(item.pricingType || 'fixed');
+        setEditPrice(item.price || 0);
+        setEditClassPrices(item.classPrices || {});
+    };
+
+    const items = allSettings?.filter((d: any) => d.type === 'inventory' && d.schoolId === currentSchool?.id) || [];
+
+    const getDisplayPrice = (item: any) => {
+        if (item.pricingType === 'classwise' && item.classPrices) {
+            const prices = Object.values(item.classPrices).filter((p: any) => p > 0) as number[];
+            if (prices.length === 0) return '—';
+            const minP = Math.min(...prices);
+            const maxP = Math.max(...prices);
+            if (minP === maxP) return `₹${minP}`;
+            return `₹${minP} – ₹${maxP}`;
+        }
+        return `₹${item.price || 0}`;
+    };
 
     return (
-        <div className="glass-card" style={{ padding: '1.5rem', gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ShoppingBag size={20} />
+        <div className="animate-fade-in no-scrollbar" style={{ paddingBottom: '2rem' }}>
+            {/* Header */}
+            <div className="page-header" style={{ marginBottom: '2rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{
+                        width: '52px', height: '52px', borderRadius: '16px',
+                        background: 'linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%)',
+                        color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: '0 8px 16px -4px rgba(99, 102, 241, 0.4)'
+                    }}>
+                        <ShoppingBag size={26} />
+                    </div>
+                    <div>
+                        <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.025em' }}>Inventory Master</h1>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
+                            Manage school items — books, uniforms, stationery and more.
+                        </p>
+                    </div>
                 </div>
-                <h3 style={{ fontWeight: 700 }}>Inventory Master</h3>
             </div>
 
-            <form onSubmit={handleAddItem} style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div className="input-group" style={{ flex: 1, minWidth: '200px' }}>
-                    <label>Item Name</label>
-                    <input
-                        type="text"
-                        className="input-field"
-                        placeholder="e.g. School Bag"
-                        value={newItem.name}
-                        onChange={e => setNewItem({ ...newItem, name: e.target.value })}
-                        required
-                    />
-                </div>
-                <div className="input-group" style={{ width: '120px' }}>
-                    <label>Price (₹)</label>
-                    <input
-                        type="number"
-                        className="input-field"
-                        value={newItem.price}
-                        onChange={e => setNewItem({ ...newItem, price: Number(e.target.value) })}
-                        required
-                    />
-                </div>
-                <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ height: '2.75rem' }}>
-                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
-                    Add Item
-                </button>
-            </form>
+            {/* Add New Item Card */}
+            <div className="glass-card" style={{ padding: '1.75rem', marginBottom: '1.5rem' }}>
+                <h3 style={{ fontWeight: 700, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Plus size={18} style={{ color: 'var(--primary)' }} /> Add New Item
+                </h3>
 
-            <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                            <th style={{ padding: '0.75rem 1rem' }}>Item Name</th>
-                            <th style={{ padding: '0.75rem 1rem' }}>Price (₹)</th>
-                            <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
-                            <tr><td colSpan={3} style={{ padding: '2rem', textAlign: 'center' }}>Loading items...</td></tr>
-                        ) : items.length > 0 ? [...items].sort((a, b) => a.name.localeCompare(b.name)).map((item: any) => (
-                            <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                <td style={{ padding: '1rem', fontWeight: 600 }}>{item.name}</td>
-                                <td style={{ padding: '1rem' }}>
-                                    {editingId === item.id ? (
-                                        <input
-                                            type="number"
-                                            className="input-field"
-                                            style={{ width: '100px', height: '2rem' }}
-                                            value={editPrice}
-                                            onChange={e => setEditPrice(Number(e.target.value))}
-                                            autoFocus
+                <form onSubmit={handleAddItem}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+                        {/* Row 1: Name + Pricing Type */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div className="input-group" style={{ marginBottom: 0 }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Item Name *</label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    placeholder="e.g. School Bag, Books, ID Card..."
+                                    value={newItem.name}
+                                    onChange={e => setNewItem({ ...newItem, name: e.target.value })}
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>Pricing Type</label>
+                                <PricingTypeToggle value={newItem.pricingType} onChange={v => setNewItem({ ...newItem, pricingType: v })} />
+                            </div>
+                        </div>
+
+                        {/* Row 2: Price Input OR Class-wise Grid */}
+                        {newItem.pricingType === 'fixed' ? (
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                                <div className="input-group" style={{ width: '180px', marginBottom: 0 }}>
+                                    <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Price (₹)</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        style={{ fontWeight: 700, fontSize: '1.125rem' }}
+                                        value={newItem.price}
+                                        onChange={e => setNewItem({ ...newItem, price: Number(e.target.value) })}
+                                        required
+                                        min={0}
+                                    />
+                                </div>
+                                <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ height: '2.75rem', gap: '0.5rem' }}>
+                                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                                    Add Item
+                                </button>
+                            </div>
+                        ) : (
+                            <div>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>
+                                    Set Price for Each Class
+                                </label>
+                                {sortedClassNames.length === 0 ? (
+                                    <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '10px', color: '#dc2626', fontSize: '0.875rem', fontWeight: 600 }}>
+                                        ⚠️ No classes found. Please configure classes in Class & Section Master first.
+                                    </div>
+                                ) : (
+                                    <>
+                                        <ClassPriceGrid
+                                            classPrices={newClassPrices}
+                                            onChange={setNewClassPrices}
+                                            sortedClassNames={sortedClassNames}
+                                            useRomanNumerals={currentSchool?.useRomanNumerals}
                                         />
-                                    ) : (
-                                        <span style={{ color: '#10b981', fontWeight: 700 }}>₹{item.price}</span>
-                                    )}
-                                </td>
-                                <td style={{ padding: '1rem', textAlign: 'right' }}>
-                                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                                        {editingId === item.id ? (
-                                            <>
+                                        <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ height: '2.75rem', gap: '0.5rem', marginTop: '1rem' }}>
+                                            {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                                            Add Item
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </form>
+            </div>
+
+            {/* Items List */}
+            <div className="glass-card" style={{ padding: '1.75rem' }}>
+                <h3 style={{ fontWeight: 700, marginBottom: '1.25rem' }}>
+                    Inventory Items
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '0.75rem' }}>
+                        ({items.length} item{items.length !== 1 ? 's' : ''})
+                    </span>
+                </h3>
+
+                {loading ? (
+                    <div style={{ padding: '3rem', textAlign: 'center' }}>
+                        <Loader2 size={32} className="animate-spin" color="var(--primary)" />
+                        <p style={{ color: 'var(--text-muted)', marginTop: '1rem' }}>Loading items...</p>
+                    </div>
+                ) : items.length === 0 ? (
+                    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <ShoppingBag size={48} style={{ opacity: 0.15, marginBottom: '1rem' }} />
+                        <p style={{ fontSize: '1rem', fontWeight: 600 }}>No inventory items yet</p>
+                        <p style={{ fontSize: '0.875rem' }}>Add items using the form above.</p>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {[...items].sort((a, b) => a.name.localeCompare(b.name)).map((item: any) => {
+                            const isClasswise = item.pricingType === 'classwise';
+                            const isEditing = editingId === item.id;
+                            const isExpanded = expandedItem === item.id;
+
+                            return (
+                                <div key={item.id} style={{
+                                    border: '1px solid var(--border)',
+                                    borderRadius: '1rem',
+                                    overflow: 'hidden',
+                                    transition: 'all 0.2s ease',
+                                    background: isEditing ? 'rgba(99, 102, 241, 0.02)' : 'white'
+                                }}>
+                                    {/* Item Row */}
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: '1rem 1.25rem',
+                                        cursor: isClasswise && !isEditing ? 'pointer' : 'default'
+                                    }}
+                                        onClick={() => {
+                                            if (isClasswise && !isEditing) {
+                                                setExpandedItem(isExpanded ? null : item.id);
+                                            }
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '10px',
+                                                background: isClasswise ? 'rgba(99, 102, 241, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                color: isClasswise ? 'var(--primary)' : '#10b981',
+                                                flexShrink: 0
+                                            }}>
+                                                {isClasswise ? <BookOpen size={20} /> : <ShoppingBag size={20} />}
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontWeight: 700, fontSize: '0.9375rem' }}>{item.name}</div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                                                    <span style={{
+                                                        fontSize: '0.625rem', fontWeight: 800, textTransform: 'uppercase',
+                                                        padding: '0.15rem 0.5rem', borderRadius: '100px',
+                                                        background: isClasswise ? 'rgba(99, 102, 241, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                                                        color: isClasswise ? 'var(--primary)' : '#059669',
+                                                        letterSpacing: '0.05em'
+                                                    }}>
+                                                        {isClasswise ? '📚 Class-wise' : '💲 Fixed'}
+                                                    </span>
+                                                    {isClasswise && (
+                                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                            {isExpanded ? '▲ collapse' : '▼ expand'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Price Display */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                            {!isEditing && (
+                                                <div style={{
+                                                    fontWeight: 800,
+                                                    fontSize: isClasswise ? '0.9375rem' : '1.125rem',
+                                                    color: isClasswise ? 'var(--primary)' : '#10b981',
+                                                    textAlign: 'right'
+                                                }}>
+                                                    {getDisplayPrice(item)}
+                                                </div>
+                                            )}
+
+                                            {/* Action Buttons */}
+                                            {!isEditing && (
+                                                <div style={{ display: 'flex', gap: '0.375rem' }} onClick={e => e.stopPropagation()}>
+                                                    <button
+                                                        onClick={() => startEditing(item)}
+                                                        style={{
+                                                            background: 'rgba(99, 102, 241, 0.08)', border: 'none', cursor: 'pointer',
+                                                            color: 'var(--primary)', width: '32px', height: '32px', borderRadius: '8px',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                    >
+                                                        <Edit2 size={15} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteItem(item.id)}
+                                                        style={{
+                                                            background: 'rgba(239, 68, 68, 0.08)', border: 'none', cursor: 'pointer',
+                                                            color: '#ef4444', width: '32px', height: '32px', borderRadius: '8px',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                    >
+                                                        <Trash2 size={15} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Edit Mode */}
+                                    {isEditing && (
+                                        <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid var(--border)' }}>
+                                            <div style={{ paddingTop: '1rem' }}>
+                                                <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>Pricing Type</label>
+                                                <PricingTypeToggle value={editPricingType} onChange={setEditPricingType} />
+                                            </div>
+
+                                            <div style={{ marginTop: '1rem' }}>
+                                                {editPricingType === 'fixed' ? (
+                                                    <div className="input-group" style={{ width: '200px', marginBottom: 0 }}>
+                                                        <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Price (₹)</label>
+                                                        <input
+                                                            type="number"
+                                                            className="input-field"
+                                                            style={{ fontWeight: 700, fontSize: '1.125rem' }}
+                                                            value={editPrice}
+                                                            onChange={e => setEditPrice(Number(e.target.value))}
+                                                            autoFocus
+                                                            min={0}
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <label style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>
+                                                            Price for Each Class
+                                                        </label>
+                                                        <ClassPriceGrid
+                                                            classPrices={editClassPrices}
+                                                            onChange={setEditClassPrices}
+                                                            sortedClassNames={sortedClassNames}
+                                                            useRomanNumerals={currentSchool?.useRomanNumerals}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
                                                 <button
-                                                    onClick={() => handleUpdatePrice(item.id)}
-                                                    className="btn"
-                                                    style={{ background: '#10b981', color: 'white', padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                                                    onClick={() => handleUpdateItem(item.id)}
+                                                    className="btn btn-primary"
+                                                    style={{ gap: '0.5rem' }}
                                                     disabled={isSaving}
                                                 >
-                                                    Save
+                                                    {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                                    Save Changes
                                                 </button>
                                                 <button
                                                     onClick={() => setEditingId(null)}
                                                     className="btn"
-                                                    style={{ background: 'var(--border)', color: 'var(--text-main)', padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                                                    style={{ background: 'var(--bg-main)', border: '1px solid var(--border)', color: 'var(--text-main)' }}
                                                 >
                                                     Cancel
                                                 </button>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <button
-                                                    onClick={() => {
-                                                        setEditingId(item.id);
-                                                        setEditPrice(item.price);
-                                                    }}
-                                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteItem(item.id)}
-                                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444' }}
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
-                                </td>
-                            </tr>
-                        )) : (
-                            <tr><td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No inventory items found. Add one above.</td></tr>
-                        )}
-                    </tbody>
-                </table>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Expanded Class-wise Prices (read-only) */}
+                                    {isClasswise && isExpanded && !isEditing && item.classPrices && (
+                                        <div style={{
+                                            padding: '0 1.25rem 1.25rem',
+                                            borderTop: '1px solid var(--border)'
+                                        }}>
+                                            <div style={{
+                                                display: 'grid',
+                                                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                                                gap: '0.5rem',
+                                                paddingTop: '1rem'
+                                            }}>
+                                                {sortedClassNames.map((cls: string) => {
+                                                    const p = item.classPrices[cls];
+                                                    return (
+                                                        <div key={cls} style={{
+                                                            display: 'flex',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'center',
+                                                            padding: '0.5rem 0.75rem',
+                                                            borderRadius: '8px',
+                                                            background: p > 0 ? 'rgba(16, 185, 129, 0.06)' : 'rgba(0,0,0,0.02)',
+                                                            border: '1px solid',
+                                                            borderColor: p > 0 ? 'rgba(16, 185, 129, 0.15)' : 'var(--border)'
+                                                        }}>
+                                                            <span style={{
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 700,
+                                                                color: 'var(--text-muted)'
+                                                            }}>
+                                                                {formatClassName(cls, currentSchool?.useRomanNumerals)}
+                                                            </span>
+                                                            <span style={{
+                                                                fontSize: '0.8125rem',
+                                                                fontWeight: 800,
+                                                                color: p > 0 ? '#059669' : 'var(--text-muted)'
+                                                            }}>
+                                                                {p > 0 ? `₹${p}` : '—'}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     );

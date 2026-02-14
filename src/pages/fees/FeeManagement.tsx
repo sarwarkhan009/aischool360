@@ -4,7 +4,10 @@ import {
     ArrowLeft,
     X,
     Check,
-    ShoppingBag
+    ShoppingBag,
+    ArrowUp,
+    ArrowDown,
+    ArrowUpDown
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
@@ -57,6 +60,8 @@ const FeeManagement: React.FC = () => {
     const [currentReceipt, setCurrentReceipt] = useState<any>(null);
     const [dynamicFees, setDynamicFees] = useState<Record<string, number>>({});
     const [selectedClass, setSelectedClass] = useState('ALL');
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'admissionNo', direction: 'asc' });
+    const [saleDiscount, setSaleDiscount] = useState(0);
 
     // Fee Form State
     const [selectedMonths, setSelectedMonths] = useState<Record<string, Record<string, number>>>({});
@@ -143,20 +148,6 @@ const FeeManagement: React.FC = () => {
     const allMonths = getAcademicYearMonths(currentSchool?.academicYearStartMonth || 'April');
     const months = allMonths.filter(m => m !== 'Admission_month');
 
-    const filteredStudents = students.filter(stu => {
-        const matchesSearch = !searchTerm || (
-            (stu.admissionNo && stu.admissionNo.toLowerCase().includes(searchTerm.toLowerCase())) ||
-            (stu.fullName && stu.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-            (stu.fatherName && stu.fatherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-            (stu.motherName && stu.motherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-            (stu.mobileNo && stu.mobileNo.includes(searchTerm))
-        );
-        const matchesClass = selectedClass === 'ALL' || stu.class === selectedClass;
-        return matchesSearch && matchesClass;
-    }).slice(0, (searchTerm || selectedClass !== 'ALL') ? 100 : 10);
-
-    const activeClasses = (dbItems && dbItems.length > 0) ? getActiveClasses(dbItems.filter((d: any) => d.type === 'class')) : [];
-
     // Calculate real-time dues for each student (same logic as DueReport)
     const studentDuesMap = useMemo(() => {
         const duesMap = new Map<string, number>();
@@ -199,8 +190,20 @@ const FeeManagement: React.FC = () => {
                 const matchesAdmType = type.admissionTypes?.includes(admType);
                 if (!matchesAdmType) return;
 
-                const matchesClass = type.classes?.includes(student.class || '');
                 const matchesStudentType = type.studentTypes?.includes(student.studentCategory || 'GENERAL');
+
+                // Check if fee type's classes array includes the student's class
+                let matchesClass = type.classes?.includes(student.class || '');
+
+                // Fallback: If fee type's classes list is stale (e.g. has "KG" instead of "LKG"),
+                // check if a fee_amount entry exists for this student's class + fee type.
+                // This handles cases where Class Master was updated but fee types weren't re-saved.
+                if (!matchesClass && student.class) {
+                    const hasAmountForClass = feeAmounts.some(fa => fa.feeTypeId === type.id && fa.className === student.class);
+                    if (hasAmountForClass) {
+                        matchesClass = true;
+                    }
+                }
 
                 if (matchesClass && matchesStudentType) {
                     const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === student.class);
@@ -252,6 +255,52 @@ const FeeManagement: React.FC = () => {
 
         return duesMap;
     }, [students, feeCollections, feeTypes, feeAmounts]);
+
+    const processedStudents = useMemo(() => {
+        let result = students.filter(stu => {
+            const matchesSearch = !searchTerm || (
+                (stu.admissionNo && stu.admissionNo.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (stu.fullName && stu.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (stu.fatherName && stu.fatherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (stu.motherName && stu.motherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (stu.mobileNo && stu.mobileNo.includes(searchTerm))
+            );
+            const matchesClass = selectedClass === 'ALL' || stu.class === selectedClass;
+            return matchesSearch && matchesClass;
+        });
+
+        // Apply Sorting
+        if (sortConfig.key) {
+            result.sort((a, b) => {
+                let aValue: any;
+                let bValue: any;
+
+                if (sortConfig.key === 'tillDate') {
+                    aValue = studentDuesMap.get(a.admissionNo) || 0;
+                    bValue = studentDuesMap.get(b.admissionNo) || 0;
+                } else if (sortConfig.key === 'fullName') {
+                    aValue = (a.fullName || '').toLowerCase();
+                    bValue = (b.fullName || '').toLowerCase();
+                } else if (sortConfig.key === 'rollNo') {
+                    aValue = parseInt(a.classRollNo) || 0;
+                    bValue = parseInt(b.classRollNo) || 0;
+                } else {
+                    aValue = (a[sortConfig.key] || '').toString().toLowerCase();
+                    bValue = (b[sortConfig.key] || '').toString().toLowerCase();
+                }
+
+                if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        return result.slice(0, (searchTerm || selectedClass !== 'ALL') ? 100 : 10);
+    }, [students, searchTerm, selectedClass, sortConfig, studentDuesMap]);
+
+    const filteredStudents = processedStudents;
+
+    const activeClasses = (dbItems && dbItems.length > 0) ? getActiveClasses(dbItems.filter((d: any) => d.type === 'class')) : [];
 
 
     const handleNewBill = () => {
@@ -511,11 +560,23 @@ const FeeManagement: React.FC = () => {
     };
 
     const handleAddToCart = (item: any) => {
+        // Resolve price: for class-wise items, use the student's class price
+        let resolvedPrice = item.price || 0;
+        if (item.pricingType === 'classwise' && item.classPrices && selectedStudent?.class) {
+            const classPrice = item.classPrices[selectedStudent.class];
+            if (classPrice !== undefined && classPrice > 0) {
+                resolvedPrice = classPrice;
+            } else {
+                alert(`No price configured for "${item.name}" in ${selectedStudent.class}. Please set the price in Inventory Master.`);
+                return;
+            }
+        }
+
         const existing = cart.find(c => c.name === item.name);
         if (existing) {
             setCart(cart.map(c => c.name === item.name ? { ...c, qty: c.qty + 1 } : c));
         } else {
-            setCart([...cart, { ...item, qty: 1 }]);
+            setCart([...cart, { name: item.name, price: resolvedPrice, qty: 1 }]);
         }
     };
 
@@ -526,7 +587,8 @@ const FeeManagement: React.FC = () => {
     const handleSaleCheckout = async () => {
         if (cart.length === 0) return;
         setProcessing(true);
-        const total = cart.reduce((acc, curr) => acc + (curr.price * curr.qty), 0);
+        const grossTotal = cart.reduce((acc, curr) => acc + (curr.price * curr.qty), 0);
+        const finalTotal = Math.max(0, grossTotal - saleDiscount);
 
         try {
             // Sequential Sale Receipt Number Generation using Firestore Transaction
@@ -552,24 +614,39 @@ const FeeManagement: React.FC = () => {
 
                 return `${prefix}-${nextNumber.toString().padStart(4, '0')}`;
             });
+            // Build fee breakdown from cart items for receipt display
+            const feeBreakdown: Record<string, number> = {};
+            cart.forEach(item => {
+                feeBreakdown[item.name] = item.price * item.qty;
+            });
+
             const saleData = {
                 admissionNo: selectedStudent.admissionNo,
                 studentName: selectedStudent.fullName,
+                class: selectedStudent.class || '',
+                section: selectedStudent.section || '',
+                mobileNo: selectedStudent.mobileNo || '',
                 date: Timestamp.now(),
                 items: cart,
-                total: total,
-                paid: total,
+                total: grossTotal, // Store gross total
+                paid: finalTotal,  // Paid amount is the discounted net
+                previousDues: 0,
+                discount: saleDiscount,
+                grossTotal: grossTotal,
                 paymentMode: 'Cash', // Default
                 receiptNo,
+                feeBreakdown,
+                paidFor: 'Inventory Sale',
                 schoolId: currentSchool?.id,
                 status: 'PAID',
                 type: 'SALE'
             };
 
             await addDoc(collection(db, 'fee_collections'), saleData);
-            alert(`Sale Successful! Receipt: ${receiptNo}`);
             setCart([]);
-            setView('SEARCH');
+            setSaleDiscount(0);
+            setCurrentReceipt(saleData);
+            setView('RECEIPT');
         } catch (error) {
             console.error("Sale failed:", error);
         } finally {
@@ -598,7 +675,7 @@ const FeeManagement: React.FC = () => {
                                 type="text"
                                 placeholder="Search by Adm No, Name, Parents or Mobile..."
                                 className="input-field"
-                                style={{ paddingLeft: '3.5rem', height: '3.5rem', fontSize: '1.125rem', borderRadius: '1.25rem' }}
+                                style={{ padding: '0 1rem 0 3.5rem', height: '3.5rem', fontSize: '1.125rem', borderRadius: '1.25rem', lineHeight: '3.5rem' }}
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 autoFocus
@@ -607,13 +684,15 @@ const FeeManagement: React.FC = () => {
                         <div>
                             <select
                                 className="input-field"
-                                style={{ height: '3.5rem', borderRadius: '1.25rem', fontWeight: 600 }}
+                                style={{ height: '3.5rem', borderRadius: '1.25rem', fontWeight: 600, padding: '0 2.5rem 0 1.25rem', lineHeight: 'normal' }}
                                 value={selectedClass}
                                 onChange={(e) => setSelectedClass(e.target.value)}
                             >
                                 <option value="ALL">All Classes</option>
                                 {activeClasses.map((cls: any) => (
-                                    <option key={cls.id} value={cls.name}>{cls.name}</option>
+                                    <option key={cls.id || cls.name} value={cls.name}>
+                                        {formatClassName(cls.name, currentSchool?.useRomanNumerals)}
+                                    </option>
                                 ))}
                             </select>
                         </div>
@@ -636,15 +715,37 @@ const FeeManagement: React.FC = () => {
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead style={{ background: '#1e293b', color: 'white' }}>
                                 <tr>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Adm No.</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Student Name</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Father Name</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Area/Fare</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Class</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Roll No.</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Student Type</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Mobile No</th>
-                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Till Date</th>
+                                    {[
+                                        { label: 'Adm No.', key: 'admissionNo' },
+                                        { label: 'Student Name', key: 'fullName' },
+                                        { label: 'Father Name', key: 'fatherName' },
+                                        { label: 'Area/Fare', key: 'district' },
+                                        { label: 'Class', key: 'class' },
+                                        { label: 'Roll No.', key: 'rollNo' },
+                                        { label: 'Student Type', key: 'financeType' },
+                                        { label: 'Mobile No', key: 'mobileNo' },
+                                        { label: 'Till Date', key: 'tillDate' }
+                                    ].map((col) => (
+                                        <th
+                                            key={col.key}
+                                            style={{ padding: '1rem', textAlign: 'left', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                                            onClick={() => {
+                                                setSortConfig(prev => ({
+                                                    key: col.key,
+                                                    direction: prev.key === col.key && prev.direction === 'asc' ? 'desc' : 'asc'
+                                                }));
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                {col.label}
+                                                {sortConfig.key === col.key ? (
+                                                    sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />
+                                                ) : (
+                                                    <ArrowUpDown size={14} style={{ opacity: 0.3 }} />
+                                                )}
+                                            </div>
+                                        </th>
+                                    ))}
                                     <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>Operation</th>
                                 </tr>
                             </thead>
@@ -1268,20 +1369,28 @@ const FeeManagement: React.FC = () => {
                     <div className="glass-card" style={{ padding: '1.5rem' }}>
                         <h3 style={{ fontWeight: 700, marginBottom: '1.5rem' }}>Available Items</h3>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '1rem' }}>
-                            {inventoryItems.map(item => (
-                                <div
-                                    key={item.name}
-                                    className="hover-lift"
-                                    onClick={() => handleAddToCart(item)}
-                                    style={{ padding: '1.25rem', border: '1px solid var(--border)', borderRadius: '16px', textAlign: 'center', cursor: 'pointer', background: 'white' }}
-                                >
-                                    <div style={{ width: '40px', height: '40px', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem', color: 'var(--primary)' }}>
-                                        <ShoppingBag size={20} />
+                            {inventoryItems.map(item => {
+                                const displayPrice = (item.pricingType === 'classwise' && item.classPrices && selectedStudent?.class)
+                                    ? (item.classPrices[selectedStudent.class] || 0)
+                                    : (item.price || 0);
+                                return (
+                                    <div
+                                        key={item.name}
+                                        className="hover-lift"
+                                        onClick={() => handleAddToCart(item)}
+                                        style={{ padding: '1.25rem', border: '1px solid var(--border)', borderRadius: '16px', textAlign: 'center', cursor: 'pointer', background: 'white' }}
+                                    >
+                                        <div style={{ width: '40px', height: '40px', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem', color: 'var(--primary)' }}>
+                                            <ShoppingBag size={20} />
+                                        </div>
+                                        <div style={{ fontWeight: 700, fontSize: '0.875rem', marginBottom: '0.25rem' }}>{item.name}</div>
+                                        <div style={{ color: '#10b981', fontWeight: 800 }}>₹{displayPrice}</div>
+                                        {item.pricingType === 'classwise' && (
+                                            <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginTop: '0.25rem', fontWeight: 600 }}>Class-wise</div>
+                                        )}
                                     </div>
-                                    <div style={{ fontWeight: 700, fontSize: '0.875rem', marginBottom: '0.25rem' }}>{item.name}</div>
-                                    <div style={{ color: '#10b981', fontWeight: 800 }}>₹{item.price}</div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
 
@@ -1312,9 +1421,36 @@ const FeeManagement: React.FC = () => {
 
                         {cart.length > 0 && (
                             <div style={{ borderTop: '2px solid var(--border)', paddingTop: '1.5rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.25rem', fontWeight: 800, marginBottom: '1.5rem' }}>
-                                    <span>Total</span>
-                                    <span>₹{total}</span>
+                                {/* Discount Input */}
+                                <div className="input-group" style={{ marginBottom: '1rem' }}>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-muted)' }}>Discount (₹)</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        placeholder="Enter discount amount"
+                                        value={saleDiscount || ''}
+                                        onChange={e => setSaleDiscount(Number(e.target.value))}
+                                        min={0}
+                                        max={total}
+                                        style={{ background: '#fff' }}
+                                    />
+                                </div>
+
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                        <span>Subtotal</span>
+                                        <span>₹{total}</span>
+                                    </div>
+                                    {saleDiscount > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', color: '#ef4444' }}>
+                                            <span>Discount</span>
+                                            <span>-₹{saleDiscount}</span>
+                                        </div>
+                                    )}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.25rem', fontWeight: 800, marginTop: '0.5rem', color: '#10b981' }}>
+                                        <span>Total</span>
+                                        <span>₹{Math.max(0, total - saleDiscount)}</span>
+                                    </div>
                                 </div>
                                 <button
                                     className="btn btn-primary"
@@ -1349,7 +1485,7 @@ const FeeManagement: React.FC = () => {
                             item.type === 'Institution Information'
                         )
                     }
-                    onClose={() => setView('PAY')}
+                    onClose={() => setView(currentReceipt?.type === 'SALE' ? 'SEARCH' : 'PAY')}
                 />
             </div>
         );

@@ -469,7 +469,12 @@ const DashboardLayout: React.FC = () => {
 
                                 // 3. School Module Gate (Tenant level)
                                 if (currentSchool && (child as any).moduleId) {
-                                    if (currentSchool.allowedModules && !currentSchool.allowedModules.includes((child as any).moduleId)) return false;
+                                    if (currentSchool.allowedModules) {
+                                        const cMid = (child as any).moduleId as string;
+                                        // Direct match OR base-module match (e.g. '/settings/inventory' → 'inventory')
+                                        const baseModule = cMid.startsWith('/settings/') ? cMid.replace('/settings/', '') : null;
+                                        if (!currentSchool.allowedModules.includes(cMid) && !(baseModule && currentSchool.allowedModules.includes(baseModule))) return false;
+                                    }
                                 }
 
                                 // 4. Global Module filtering (Master Control)

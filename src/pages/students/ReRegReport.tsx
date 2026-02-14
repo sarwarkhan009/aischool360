@@ -22,7 +22,7 @@ const ReRegReport: React.FC = () => {
             (s.id && String(s.id).toLowerCase().includes(searchQuery.toLowerCase()));
 
         // Logic: Students who need re-registration (can be customized)
-        const currentActiveSession = SESSIONS[2]; // 2025-26
+        const currentActiveSession = SESSIONS[0]; // 2025-26
         const needsReReg = s.status !== 'ACTIVE' || !s.session || s.session !== currentActiveSession;
 
         return matchesSession && matchesClass && matchesSearch && needsReReg;

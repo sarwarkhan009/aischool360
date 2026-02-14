@@ -104,8 +104,15 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
             const matchesAdmType = type.admissionTypes?.includes(admType);
             if (!matchesAdmType) return;
 
-            const matchesClass = type.classes?.includes(studentData.class || '');
             const matchesStudentType = type.studentTypes?.includes(studentData.studentCategory || 'GENERAL');
+
+            // Check if fee type's classes array includes the student's class
+            let matchesClass = type.classes?.includes(studentData.class || '');
+            // Fallback: check fee_amounts if fee type classes list is stale
+            if (!matchesClass && studentData.class) {
+                const hasAmountForClass = feeAmounts.some(fa => fa.feeTypeId === type.id && fa.className === studentData.class);
+                if (hasAmountForClass) matchesClass = true;
+            }
 
             if (matchesClass && matchesStudentType) {
                 const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === studentData.class);

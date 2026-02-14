@@ -415,8 +415,15 @@ const ParentDashboard: React.FC = () => {
                         const matchesAdmType = type.admissionTypes?.includes(admType);
                         if (!matchesAdmType) return;
 
-                        const matchesClass = type.classes?.includes(currentStudentData?.class || '');
                         const matchesStudentType = type.studentTypes?.includes(currentStudentData?.studentCategory || 'GENERAL');
+
+                        // Check if fee type's classes array includes the student's class
+                        let matchesClass = type.classes?.includes(currentStudentData?.class || '');
+                        // Fallback: check fee_amounts if fee type classes list is stale
+                        if (!matchesClass && currentStudentData?.class) {
+                            const hasAmountForClass = fAmounts.some(fa => fa.feeTypeId === type.id && fa.className === currentStudentData.class);
+                            if (hasAmountForClass) matchesClass = true;
+                        }
 
                         if (matchesClass && matchesStudentType) {
                             const amountConf = fAmounts.find(fa => fa.feeTypeId === type.id && fa.className === currentStudentData?.class);
@@ -538,8 +545,15 @@ const ParentDashboard: React.FC = () => {
                     const matchesAdmType = type.admissionTypes?.includes(admType);
                     if (!matchesAdmType) return;
 
-                    const matchesClass = type.classes?.includes(studentData?.class || '');
                     const matchesStudentType = type.studentTypes?.includes(studentData?.studentCategory || 'GENERAL');
+
+                    // Check if fee type's classes array includes the student's class
+                    let matchesClass = type.classes?.includes(studentData?.class || '');
+                    // Fallback: check fee_amounts if fee type classes list is stale
+                    if (!matchesClass && studentData?.class) {
+                        const hasAmountForClass = fAmounts.some(fa => fa.feeTypeId === type.id && fa.className === studentData.class);
+                        if (hasAmountForClass) matchesClass = true;
+                    }
 
                     if (matchesClass && matchesStudentType) {
                         const amountConf = fAmounts.find(fa => fa.feeTypeId === type.id && fa.className === studentData?.class);

@@ -837,16 +837,6 @@ const StudentManagement: React.FC = () => {
                                                         <Edit2 size={16} />
                                                     </button>
                                                     <button className="btn-icon" onClick={() => handlePrint(stu)} title="Print ID Card"><FileText size={16} /></button>
-                                                    <button
-                                                        className="btn-icon"
-                                                        style={{ color: '#ef4444' }}
-                                                        onClick={() => {
-                                                            if (confirm('Are you sure you want to delete this student?')) removeStudent(stu.id);
-                                                        }}
-                                                        title="Delete"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -915,7 +905,8 @@ const StudentManagement: React.FC = () => {
                     .printable-form { position: absolute; left: 0; top: 0; width: 100%; }
                     .printable-report { position: absolute; left: 0; top: 0; width: 100%; }
                     .no-print { display: none !important; }
-                    @page { size: A4; margin: 1cm; }
+                    @page { size: A4; margin: 0; }
+                    .printable-form, .printable-report { padding: 1.5cm; }
                 }
 
                 .admission-form-print {

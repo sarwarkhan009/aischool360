@@ -64,7 +64,10 @@ const HomeworkManagement: React.FC = () => {
     const [isFetchingAssigned, setIsFetchingAssigned] = useState(false);
 
     useEffect(() => {
-        if (!user || user.role !== 'TEACHER' || !currentSchool?.id) return;
+        if (!user?.id || user.role !== 'TEACHER' || !currentSchool?.id) return;
+
+        const currentUserId = user.id;
+        const currentSchoolId = currentSchool.id;
 
         const fetchAssigned = async () => {
             setIsFetchingAssigned(true);
@@ -72,7 +75,7 @@ const HomeworkManagement: React.FC = () => {
                 const classes = new Set<string>();
 
                 // 1. Fetch from Routine
-                const routineDoc = await getDoc(doc(db, 'settings', `school_routine_${currentSchool.id}`));
+                const routineDoc = await getDoc(doc(db, 'settings', `school_routine_${currentSchoolId}`));
                 if (routineDoc.exists()) {
                     const days = routineDoc.data().days || {};
                     Object.values(days).forEach((day: any) => {
@@ -85,7 +88,7 @@ const HomeworkManagement: React.FC = () => {
                 }
 
                 // 2. Fetch from Teacher Profile (Employee Management)
-                const teacherDoc = await getDoc(doc(db, 'teachers', user.id));
+                const teacherDoc = await getDoc(doc(db, 'teachers', currentUserId));
                 if (teacherDoc.exists()) {
                     const teacherData = teacherDoc.data();
                     if (teacherData.teachingClasses && Array.isArray(teacherData.teachingClasses)) {
@@ -96,8 +99,8 @@ const HomeworkManagement: React.FC = () => {
                 // 3. Fetch from Previous Homework History (as fallback or additional info)
                 const q = query(
                     collection(db, 'homework'),
-                    where('schoolId', '==', currentSchool.id),
-                    where('teacherId', '==', user.id)
+                    where('schoolId', '==', currentSchoolId),
+                    where('teacherId', '==', currentUserId)
                 );
                 const snap = await getDocs(q);
                 snap.docs.forEach(d => classes.add(d.data().class));

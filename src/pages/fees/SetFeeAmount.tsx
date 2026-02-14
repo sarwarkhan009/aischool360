@@ -14,12 +14,15 @@ import {
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
 import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { getActiveClasses, CLASS_ORDER } from '../../constants/app';
+import { getActiveClasses, CLASS_ORDER, sortClasses } from '../../constants/app';
+import { formatClassName } from '../../utils/formatters';
+import { useSchool } from '../../context/SchoolContext';
 
 
 const SetFeeAmount: React.FC = () => {
     const navigate = useNavigate();
     const { schoolId } = useParams();
+    const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
     const { data: feeTypes } = useFirestore<any>('fee_types');
     const { data: existingFeeAmounts, add: addFeeAmount, update: updateFeeAmount, remove: removeFeeAmount } = useFirestore<any>('fee_amounts');
@@ -351,13 +354,13 @@ const SetFeeAmount: React.FC = () => {
                                     }}
                                 >
                                     {selectedClasses.includes(cls) && <Check size={14} />}
-                                    {cls}
+                                    {formatClassName(cls, currentSchool?.useRomanNumerals)}
                                 </button>
                             ))}
                         </div>
                         {selectedClasses.length > 0 && (
                             <div style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: '#10b981', fontWeight: 600 }}>
-                                ✓ {selectedClasses.length} class(es) selected: {selectedClasses.join(', ')}
+                                ✓ {selectedClasses.length} class(es) selected: {selectedClasses.map(c => formatClassName(c, currentSchool?.useRomanNumerals)).join(', ')}
                             </div>
                         )}
                     </div>
@@ -583,18 +586,7 @@ const SetFeeAmount: React.FC = () => {
                             });
 
                             // Sort classes and fee types
-                            // Custom sort order for classes
-                            const classOrder: Record<string, number> = {};
-                            CLASS_ORDER.forEach((c, idx) => {
-                                classOrder[c] = idx;
-                            });
-
-                            uniqueClasses.sort((a, b) => {
-                                const orderA = classOrder[a] !== undefined ? classOrder[a] : 999;
-                                const orderB = classOrder[b] !== undefined ? classOrder[b] : 999;
-                                if (orderA !== orderB) return orderA - orderB;
-                                return a.localeCompare(b); // Fallback to alphabetical for unknown classes
-                            });
+                            const sortedClasses = sortClasses(uniqueClasses);
                             uniqueFeeTypes.sort();
 
                             return (
@@ -645,7 +637,7 @@ const SetFeeAmount: React.FC = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {uniqueClasses.map((className, rowIdx) => {
+                                        {sortedClasses.map((className, rowIdx) => {
                                             const classData = pivotData[className] || {};
                                             // Get all fee IDs for this class for delete all functionality
                                             const classIds = Object.values(classData).map(d => d.id);
@@ -684,7 +676,7 @@ const SetFeeAmount: React.FC = () => {
                                                             fontWeight: 700,
                                                             display: 'inline-block'
                                                         }}>
-                                                            {className}
+                                                            {formatClassName(className, currentSchool?.useRomanNumerals)}
                                                         </span>
                                                     </td>
                                                     {uniqueFeeTypes.map(feeType => {

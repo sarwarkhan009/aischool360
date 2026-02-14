@@ -18,6 +18,7 @@ import { db } from '../../lib/firebase';
 import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { getActiveClasses } from '../../constants/app';
 import { useSchool } from '../../context/SchoolContext';
+import { formatClassName } from '../../utils/formatters';
 import { getAcademicYearMonths } from '../../utils/academicYear';
 
 const FeeStructure: React.FC = () => {
@@ -106,6 +107,17 @@ const FeeStructure: React.FC = () => {
     };
 
     const handleEdit = (fee: any) => {
+        // When editing, filter out any stale class names that are no longer in active classes.
+        // This happens when Class Master is updated (e.g., "KG" disabled, "LKG" enabled) 
+        // but the fee type wasn't re-saved.
+        const savedClasses: string[] = fee.classes || [];
+        const validClasses = savedClasses.filter((c: string) => activeClasses.includes(c));
+        const staleClasses = savedClasses.filter((c: string) => !activeClasses.includes(c));
+
+        if (staleClasses.length > 0) {
+            console.warn(`⚠️ Fee type "${fee.feeHeadName}" has stale class references: [${staleClasses.join(', ')}]. These classes are no longer active and have been removed from the selection. Please add the correct active classes and save.`);
+        }
+
         setFormData({
             feeHeadName: fee.feeHeadName || '',
             displayOrder: fee.displayOrder || '',
@@ -113,11 +125,19 @@ const FeeStructure: React.FC = () => {
             status: fee.status || 'ACTIVE',
             studentTypes: fee.studentTypes || [],
             months: fee.months || [],
-            classes: fee.classes || [],
+            classes: validClasses,
             financeTypes: fee.financeTypes || [],
             admissionTypes: fee.admissionTypes || [],
         });
         setEditingId(fee.id);
+
+        // Alert admin if stale classes were found
+        if (staleClasses.length > 0) {
+            setTimeout(() => {
+                alert(`Note: This fee type had classes [${staleClasses.join(', ')}] which are no longer active in Class Master. They have been removed. Please verify the Academic Classes selection and save.`);
+            }, 300);
+        }
+
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -336,7 +356,7 @@ const FeeStructure: React.FC = () => {
                             {activeClasses.map(cls => (
                                 <SelectChip
                                     key={cls}
-                                    label={cls}
+                                    label={formatClassName(cls, currentSchool?.useRomanNumerals)}
                                     isSelected={formData.classes.includes(cls)}
                                     onClick={() => toggleList(formData.classes, cls, val => setFormData({ ...formData, classes: val }))}
                                 />
@@ -501,6 +521,9 @@ const FeeStructure: React.FC = () => {
                                     </td>
                                     <td style={{ padding: '0.75rem', borderRight: '1px solid var(--border)', maxWidth: '150px', fontSize: '0.75rem', color: '#64748b' }}>
                                         {fee.classes?.join(', ')}
+                                        {fee.classes?.some((c: string) => !activeClasses.includes(c)) && (
+                                            <span title="Contains classes not in active Class Master. Click Edit to fix." style={{ color: '#f59e0b', marginLeft: '4px', cursor: 'help' }}>⚠️</span>
+                                        )}
                                     </td>
                                     <td style={{ padding: '0.75rem', borderRight: '1px solid var(--border)', fontSize: '0.75rem', color: '#64748b' }}>{fee.studentTypes?.join(', ')}</td>
                                     <td style={{ padding: '0.75rem', borderRight: '1px solid var(--border)', fontSize: '0.75rem', color: '#64748b' }}>{fee.feeNature?.toUpperCase().includes('STUDENT') ? 'STUDENT' : 'CLASS'}</td>

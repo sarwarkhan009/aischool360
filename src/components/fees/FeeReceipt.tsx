@@ -286,7 +286,19 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                                 <td style={{ border: '1px solid #000', padding: '3px 6px', width: '50%' }}><strong>Previous Dues</strong></td>
                                 <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right' }}>{previousDues.toFixed(2)}</td>
                             </tr>
-                            {receipt.feeBreakdown ? (
+                            {receipt.items && receipt.items.length > 0 ? (
+                                receipt.items.map((item: any, idx: number) => (
+                                    <tr key={idx}>
+                                        <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
+                                            {item.name}
+                                            <span style={{ fontSize: '9px', fontWeight: 'normal', display: 'inline-block', marginLeft: '4px' }}>
+                                                (₹{item.price} x {item.qty})
+                                            </span>
+                                        </td>
+                                        <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right' }}>{(item.price * item.qty).toFixed(2)}</td>
+                                    </tr>
+                                ))
+                            ) : receipt.feeBreakdown ? (
                                 Object.entries(receipt.feeBreakdown).map(([feeName, amount]: [string, any]) => {
                                     const isMonthlyFee = feeName.toLowerCase().includes('monthly') ||
                                         feeName.toLowerCase().includes('tuition') ||
