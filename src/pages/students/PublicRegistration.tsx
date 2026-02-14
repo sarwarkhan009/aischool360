@@ -479,7 +479,7 @@ const PublicRegistration: React.FC = () => {
                                     {isFieldEnabled('fullName') && (
                                         <div className="form-group full-width">
                                             <label className="form-label">Student Full Name {isFieldRequired('fullName') && <span className="required">*</span>}</label>
-                                            <input type="text" name="fullName" required={isFieldRequired('fullName')} className="form-input" value={formData.fullName} onChange={handleChange} placeholder="Full Name as per records" />
+                                            <input type="text" name="fullName" required={isFieldRequired('fullName')} className="form-input" value={formData.fullName} onChange={handleChange} onBlur={e => setFormData({ ...formData, fullName: toProperCase(e.target.value) })} placeholder="Full Name as per records" />
                                         </div>
                                     )}
 
@@ -565,7 +565,7 @@ const PublicRegistration: React.FC = () => {
                                     {isFieldEnabled('diseaseAllergy') && (
                                         <div className="form-group full-width">
                                             <label className="form-label">Any disease or allergy? Specify {isFieldRequired('diseaseAllergy') && <span className="required">*</span>}</label>
-                                            <input type="text" name="diseaseAllergy" required={isFieldRequired('diseaseAllergy')} className="form-input" value={formData.diseaseAllergy} onChange={handleChange} placeholder="Specify if any, otherwise leave empty or type None" />
+                                            <input type="text" name="diseaseAllergy" required={isFieldRequired('diseaseAllergy')} className="form-input" value={formData.diseaseAllergy} onChange={handleChange} onBlur={e => setFormData({ ...formData, diseaseAllergy: toProperCase(e.target.value) })} placeholder="Specify if any, otherwise leave empty or type None" />
                                         </div>
                                     )}
 
@@ -579,7 +579,7 @@ const PublicRegistration: React.FC = () => {
                                     {isFieldEnabled('previousSchool') && (
                                         <div className="form-group full-width">
                                             <label className="form-label">Previous School Name {isFieldRequired('previousSchool') && <span className="required">*</span>}</label>
-                                            <input type="text" name="previousSchool" required={isFieldRequired('previousSchool')} className="form-input" value={formData.previousSchool} onChange={handleChange} />
+                                            <input type="text" name="previousSchool" required={isFieldRequired('previousSchool')} className="form-input" value={formData.previousSchool} onChange={handleChange} onBlur={e => setFormData({ ...formData, previousSchool: toProperCase(e.target.value) })} />
                                         </div>
                                     )}
 
@@ -600,7 +600,7 @@ const PublicRegistration: React.FC = () => {
                                     {isFieldEnabled('presentAddress') && (
                                         <div className="form-group full-width">
                                             <label className="form-label">Present Address {isFieldRequired('presentAddress') && <span className="required">*</span>}</label>
-                                            <textarea name="presentAddress" required={isFieldRequired('presentAddress')} className="form-textarea" value={formData.presentAddress} onChange={handleChange} rows={2}></textarea>
+                                            <textarea name="presentAddress" required={isFieldRequired('presentAddress')} className="form-textarea" value={formData.presentAddress} onChange={handleChange} onBlur={e => setFormData({ ...formData, presentAddress: toProperCase(e.target.value), permanentAddress: formData.isPermanentAddressSame ? toProperCase(e.target.value) : formData.permanentAddress })} rows={2}></textarea>
                                         </div>
                                     )}
 
@@ -612,7 +612,7 @@ const PublicRegistration: React.FC = () => {
                                                     {formData.isPermanentAddressSame ? <CheckCircle size={14} /> : <div className="circle-icon"></div>} Same as Present
                                                 </button>
                                             </div>
-                                            <textarea name="permanentAddress" required={isFieldRequired('permanentAddress')} className="form-textarea" value={formData.permanentAddress} onChange={handleChange} rows={2} disabled={formData.isPermanentAddressSame}></textarea>
+                                            <textarea name="permanentAddress" required={isFieldRequired('permanentAddress')} className="form-textarea" value={formData.permanentAddress} onChange={handleChange} onBlur={e => setFormData({ ...formData, permanentAddress: toProperCase(e.target.value) })} rows={2} disabled={formData.isPermanentAddressSame}></textarea>
                                         </div>
                                     )}
 
@@ -673,7 +673,7 @@ const PublicRegistration: React.FC = () => {
                                     {isFieldEnabled('fatherName') && (
                                         <div className="form-group full-width">
                                             <label className="form-label">Father's Name {isFieldRequired('fatherName') && <span className="required">*</span>}</label>
-                                            <input type="text" name="fatherName" required={isFieldRequired('fatherName')} className="form-input" value={formData.fatherName} onChange={handleChange} />
+                                            <input type="text" name="fatherName" required={isFieldRequired('fatherName')} className="form-input" value={formData.fatherName} onChange={handleChange} onBlur={e => setFormData({ ...formData, fatherName: toProperCase(e.target.value) })} />
                                         </div>
                                     )}
 
@@ -736,7 +736,7 @@ const PublicRegistration: React.FC = () => {
                                                     {formData.isFatherAddressSame ? <CheckCircle size={14} /> : <div className="circle-icon"></div>} Same as Student
                                                 </button>
                                             </div>
-                                            <textarea name="fatherAddress" required={isFieldRequired('fatherAddress')} className="form-textarea" value={formData.fatherAddress} onChange={handleChange} rows={2} disabled={formData.isFatherAddressSame}></textarea>
+                                            <textarea name="fatherAddress" required={isFieldRequired('fatherAddress')} className="form-textarea" value={formData.fatherAddress} onChange={handleChange} onBlur={e => setFormData({ ...formData, fatherAddress: toProperCase(e.target.value) })} rows={2} disabled={formData.isFatherAddressSame}></textarea>
                                         </div>
                                     )}
 
@@ -772,7 +772,7 @@ const PublicRegistration: React.FC = () => {
                                     {isFieldEnabled('motherName') && (
                                         <div className="form-group full-width">
                                             <label className="form-label">Mother's Name {isFieldRequired('motherName') && <span className="required">*</span>}</label>
-                                            <input type="text" name="motherName" required={isFieldRequired('motherName')} className="form-input" value={formData.motherName} onChange={handleChange} />
+                                            <input type="text" name="motherName" required={isFieldRequired('motherName')} className="form-input" value={formData.motherName} onChange={handleChange} onBlur={e => setFormData({ ...formData, motherName: toProperCase(e.target.value) })} />
                                         </div>
                                     )}
 

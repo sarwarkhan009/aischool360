@@ -12,6 +12,7 @@ import {
 import { useFirestore } from '../../hooks/useFirestore';
 import { sortClasses } from '../../constants/app';
 import { formatDate } from '../../utils/dateUtils';
+import { toProperCase } from '../../utils/formatters';
 
 const ExamManagement: React.FC = () => {
     const { data: allSettings } = useFirestore<any>('settings');
@@ -708,6 +709,7 @@ const ExamManagement: React.FC = () => {
                                     placeholder="Enter exam name..."
                                     value={newExam.name}
                                     onChange={e => setNewExam({ ...newExam, name: e.target.value })}
+                                    onBlur={e => setNewExam({ ...newExam, name: toProperCase(e.target.value) })}
                                     required
                                 />
                             </div>

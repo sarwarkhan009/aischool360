@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
+import { toProperCase } from '../../utils/formatters';
 
 interface AssessmentType {
     id: string;
@@ -793,6 +794,11 @@ const ExamConfiguration: React.FC = () => {
                                     placeholder="e.g., Unit Test 1, Mid-Term Exam"
                                     value={newAssessment.name}
                                     onChange={(e) => setNewAssessment({ ...newAssessment, name: e.target.value })}
+                                    onBlur={(e) => {
+                                        setNewAssessment({ ...newAssessment, name: toProperCase(e.target.value) });
+                                        e.currentTarget.style.borderColor = '#e5e7eb';
+                                        e.currentTarget.style.boxShadow = 'none';
+                                    }}
                                     style={{
                                         width: '100%',
                                         padding: '0.75rem 1rem',
@@ -804,10 +810,6 @@ const ExamConfiguration: React.FC = () => {
                                     onFocus={(e) => {
                                         e.currentTarget.style.borderColor = '#6366f1';
                                         e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                                    }}
-                                    onBlur={(e) => {
-                                        e.currentTarget.style.borderColor = '#e5e7eb';
-                                        e.currentTarget.style.boxShadow = 'none';
                                     }}
                                 />
                             </div>
@@ -1138,6 +1140,11 @@ const ExamConfiguration: React.FC = () => {
                                     placeholder="e.g., 10-Point GPA, Letter Grades"
                                     value={newGrading.name}
                                     onChange={(e) => setNewGrading({ ...newGrading, name: e.target.value })}
+                                    onBlur={(e) => {
+                                        setNewGrading({ ...newGrading, name: toProperCase(e.target.value) });
+                                        e.currentTarget.style.borderColor = '#e5e7eb';
+                                        e.currentTarget.style.boxShadow = 'none';
+                                    }}
                                     style={{
                                         width: '100%',
                                         padding: '0.75rem 1rem',
@@ -1149,10 +1156,6 @@ const ExamConfiguration: React.FC = () => {
                                     onFocus={(e) => {
                                         e.currentTarget.style.borderColor = '#6366f1';
                                         e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                                    }}
-                                    onBlur={(e) => {
-                                        e.currentTarget.style.borderColor = '#e5e7eb';
-                                        e.currentTarget.style.boxShadow = 'none';
                                     }}
                                 />
                             </div>

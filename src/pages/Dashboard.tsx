@@ -16,8 +16,9 @@ import TeacherDashboard from './portals/TeacherDashboard';
 import ParentDashboard from './portals/ParentDashboard';
 import DriverDashboard from './portals/DriverDashboard';
 import { db } from '../lib/firebase';
-import { collection, query, where, onSnapshot, Timestamp, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, Timestamp, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { useSchool } from '../context/SchoolContext';
+import { useFirestore } from '../hooks/useFirestore';
 
 
 
@@ -57,8 +58,9 @@ const CountUp: React.FC<{ value: number, prefix?: string, suffix?: string, decim
 
 const AdminDashboard: React.FC = () => {
     const navigate = useNavigate();
-    const { currentSchool, loading: schoolLoading } = useSchool();
+    const { currentSchool, loading: schoolLoading, updateSchoolData } = useSchool();
     const filterSchoolId = currentSchool?.id;
+    const { data: academicYears, update: updateAcademicYear } = useFirestore<any>('academic_years');
 
     if (schoolLoading || !filterSchoolId) {
         return (
@@ -82,6 +84,35 @@ const AdminDashboard: React.FC = () => {
     const [girlsCount, setGirlsCount] = useState(0);
     const [boysCount, setBoysCount] = useState(0);
     const [totalHomework, setTotalHomework] = useState(0);
+    const [switchingYear, setSwitchingYear] = useState(false);
+
+    // Academic years for this school
+    const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === filterSchoolId && !y.isArchived).sort((a: any, b: any) => a.name.localeCompare(b.name));
+    const activeFY = currentSchool?.activeFinancialYear || '';
+
+    const handleSwitchYear = async (yearId: string, yearName: string) => {
+        if (yearName === activeFY || switchingYear) return;
+        setSwitchingYear(true);
+        try {
+            // Update isActive flags
+            for (const year of schoolYears) {
+                if (year.id === yearId) {
+                    await updateAcademicYear(year.id, { isActive: true, updatedAt: new Date().toISOString() });
+                } else if (year.isActive) {
+                    await updateAcademicYear(year.id, { isActive: false, updatedAt: new Date().toISOString() });
+                }
+            }
+            // Sync to school document
+            if (updateSchoolData) {
+                await updateSchoolData({ activeFinancialYear: yearName });
+            }
+        } catch (error) {
+            console.error('Error switching year:', error);
+            alert('Failed to switch academic year');
+        } finally {
+            setSwitchingYear(false);
+        }
+    };
 
     // Quick Access Items with icons
     const allQuickAccessItems = [
@@ -136,6 +167,7 @@ const AdminDashboard: React.FC = () => {
         const feesQuery = query(
             collection(db, 'fee_collections'),
             where('schoolId', '==', filterSchoolId || 'NONE'),
+            where('financialYear', '==', activeFY),
             where('date', '>=', Timestamp.fromDate(startOfDay)),
             where('date', '<=', Timestamp.fromDate(endOfDay))
         );
@@ -155,6 +187,7 @@ const AdminDashboard: React.FC = () => {
         const monthlyFeesQuery = query(
             collection(db, 'fee_collections'),
             where('schoolId', '==', filterSchoolId || 'NONE'),
+            where('financialYear', '==', activeFY),
             where('date', '>=', Timestamp.fromDate(startOfMonth)),
             where('date', '<=', Timestamp.fromDate(endOfDay))
         );
@@ -173,7 +206,8 @@ const AdminDashboard: React.FC = () => {
         // Real-time listener for monthly admissions (createdAt is stored as ISO string)
         const admissionsQuery = query(
             collection(db, 'students'),
-            where('schoolId', '==', filterSchoolId || 'NONE')
+            where('schoolId', '==', filterSchoolId || 'NONE'),
+            where('session', '==', activeFY)
         );
         const unsubscribeAdmissions = onSnapshot(admissionsQuery, (snapshot) => {
             // Filter students created this month (createdAt is ISO string)
@@ -194,7 +228,11 @@ const AdminDashboard: React.FC = () => {
         });
 
         // Real-time listener for total students and categories
-        const studentsQuery = query(collection(db, 'students'), where('schoolId', '==', filterSchoolId || 'NONE'));
+        const studentsQuery = query(
+            collection(db, 'students'),
+            where('schoolId', '==', filterSchoolId || 'NONE'),
+            where('session', '==', activeFY)
+        );
         const unsubscribeTotalStudents = onSnapshot(studentsQuery, (snapshot) => {
             setTotalStudents(snapshot.size);
 
@@ -268,7 +306,8 @@ const AdminDashboard: React.FC = () => {
         // Real-time listener for total homework assigned this month
         const homeworkQuery = query(
             collection(db, 'homework'),
-            where('schoolId', '==', filterSchoolId || 'NONE')
+            where('schoolId', '==', filterSchoolId || 'NONE'),
+            where('session', '==', activeFY)
         );
         const unsubscribeHomework = onSnapshot(homeworkQuery, (snapshot) => {
             const thisMonthHomework = snapshot.docs.filter(doc => {
@@ -288,7 +327,7 @@ const AdminDashboard: React.FC = () => {
             unsubscribeTeacherAttendance();
             unsubscribeHomework();
         };
-    }, [filterSchoolId]);
+    }, [filterSchoolId, activeFY]);
 
     const getGreeting = () => {
         const hour = new Date().getHours();
@@ -301,13 +340,49 @@ const AdminDashboard: React.FC = () => {
         <div className="animate-fade-in no-scrollbar" style={{ paddingBottom: '2rem' }}>
             {/* Modern Welcome Banner */}
             <div className="animate-slide-up" style={{
-                marginBottom: '2rem',
+                marginBottom: '1rem',
                 padding: '0.5rem 0'
             }}>
                 <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)' }}>
                     {getGreeting()}, {(user as any)?.name || 'Admin'}! 👋
                 </h2>
             </div>
+
+            {/* Academic Year Switcher Chips */}
+            {schoolYears.length > 0 && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginBottom: '1.5rem',
+                    flexWrap: 'wrap'
+                }}>
+                    <Calendar size={16} style={{ color: '#6366f1', flexShrink: 0 }} />
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#64748b', whiteSpace: 'nowrap' }}>Session:</span>
+                    {schoolYears.map((yr: any) => (
+                        <button
+                            key={yr.id}
+                            onClick={() => handleSwitchYear(yr.id, yr.name)}
+                            disabled={switchingYear}
+                            style={{
+                                padding: '0.375rem 0.875rem',
+                                borderRadius: '20px',
+                                border: yr.name === activeFY ? '2px solid #6366f1' : '1.5px solid var(--border)',
+                                background: yr.name === activeFY ? '#6366f1' : 'white',
+                                color: yr.name === activeFY ? 'white' : 'var(--text-main)',
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                cursor: switchingYear ? 'wait' : 'pointer',
+                                transition: 'all 0.2s',
+                                opacity: switchingYear && yr.name !== activeFY ? 0.6 : 1,
+                                whiteSpace: 'nowrap'
+                            }}
+                        >
+                            {yr.name}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Statistics Cards - Reordered as requested */}
             <div className="responsive-grid-auto" style={{ marginBottom: '2.5rem' }}>

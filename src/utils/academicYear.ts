@@ -60,7 +60,10 @@ export function getAllMonths(): string[] {
 export function getMonthIndexMap(): Record<string, number> {
     const map: Record<string, number> = {};
     ALL_MONTHS.forEach((month, index) => {
-        map[month] = index; // January = 0, February = 1, ..., December = 11
+        map[month] = index; // January = 0, ...
+        map[month.substring(0, 3)] = index; // Jan = 0, ...
+        // Special case for Sept
+        if (month === 'September') map['Sept'] = index;
     });
     return map;
 }

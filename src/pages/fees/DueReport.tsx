@@ -7,6 +7,7 @@ import { db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { sortClasses } from '../../constants/app';
 import { formatClassName } from '../../utils/formatters';
+import { getMonthIndexMap } from '../../utils/academicYear';
 
 interface Student {
     id: string;
@@ -56,7 +57,7 @@ const DueReport: React.FC = () => {
     const { data: students, loading: studentsLoading } = useFirestore<Student>('students');
     const { data: feeCollections, loading: collectionsLoading } = useFirestore<FeeCollection>('fee_collections');
     const { data: feeTypes, loading: typesLoading } = useFirestore<FeeType>('fee_types');
-    const { data: feeAmounts, loading: amountsLoading } = useFirestore<FeeAmount>('fee_amounts');
+    const { data: allFeeAmounts, loading: amountsLoading } = useFirestore<FeeAmount>('fee_amounts');
 
     const [searchTerm, setSearchTerm] = useState('');
     const [filterClass, setFilterClass] = useState('ALL');
@@ -68,10 +69,13 @@ const DueReport: React.FC = () => {
     const { data: schoolData } = useFirestore<any>('settings');
     const actualSchool = schoolData?.find((s: any) => s.id === `school_${schoolId}`);
 
-    const MONTH_MAP: Record<string, number> = {
-        'April': 3, 'May': 4, 'June': 5, 'July': 6, 'August': 7, 'September': 8,
-        'October': 9, 'November': 10, 'December': 11, 'January': 0, 'February': 1, 'March': 2
-    };
+    // Dynamic month index mapping
+    const MONTH_MAP = getMonthIndexMap();
+    const academicStartMonthIdx = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];
+
+    // Filter fee amounts by active financial year
+    const activeFY = currentSchool?.activeFinancialYear || '2025-26';
+    const feeAmounts = allFeeAmounts.filter(fa => ((fa as any).financialYear || '2025-26') === activeFY);
 
     // Load WhatsApp templates from payment settings
     useEffect(() => {
@@ -150,7 +154,7 @@ const DueReport: React.FC = () => {
                     }
                 }
             } else {
-                startMonthIdx = 3; // April
+                startMonthIdx = academicStartMonthIdx;
                 startYear = sessionStartYear;
             }
 
@@ -194,15 +198,17 @@ const DueReport: React.FC = () => {
 
                         if (monthName === 'Admission_month') {
                             // One-time fees (Admission, Registration, Exam) should be charged 
-                            // based on actual admission date, regardless of start rule
-                            if (admType === 'NEW' && admDateRaw) {
+                            // for NEW students on join, and OLD students at session start
+                            if (admType === 'OLD') {
+                                isDue = true;
+                            } else if (admType === 'NEW' && admDateRaw) {
                                 // Fee is due if today is on or after admission date
                                 isDue = today >= admDateRaw;
                             }
                         } else {
                             const targetMonthIdx = MONTH_MAP[monthName];
                             if (targetMonthIdx !== undefined) {
-                                const targetYear = targetMonthIdx < 3 ? sessionStartYear + 1 : sessionStartYear;
+                                const targetYear = targetMonthIdx < academicStartMonthIdx ? sessionStartYear + 1 : sessionStartYear;
 
                                 // Calculate due date based on collection type
                                 let dueDate;
@@ -242,6 +248,58 @@ const DueReport: React.FC = () => {
                         }
                     });
                 }
+            });
+
+            // Sort payableDetails: Admission/Annual Charges first, then by academic month order
+            const academicStartMonth = currentSchool?.academicYearStartMonth || 'April';
+            const startMonthIndex = MONTH_MAP[academicStartMonth] ?? 3;
+
+            payableDetails.sort((a, b) => {
+                const headA = a.head.toLowerCase();
+                const headB = b.head.toLowerCase();
+
+                // NEW Students: Admission Fee on top
+                if (admType === 'NEW') {
+                    const aIsAdmission = headA.includes('admission');
+                    const bIsAdmission = headB.includes('admission');
+                    if (aIsAdmission && !bIsAdmission) return -1;
+                    if (!aIsAdmission && bIsAdmission) return 1;
+                }
+                // OLD Students: Annual Charges on top
+                else {
+                    const aIsAnnual = headA.includes('annual');
+                    const bIsAnnual = headB.includes('annual');
+                    if (aIsAnnual && !bIsAnnual) return -1;
+                    if (!aIsAnnual && bIsAnnual) return 1;
+
+                    // Fallback for old students if admission fee exists (rare but possible)
+                    const aIsAdmission = headA.includes('admission');
+                    const bIsAdmission = headB.includes('admission');
+                    if (aIsAdmission && !bIsAdmission) return -1;
+                    if (!aIsAdmission && bIsAdmission) return 1;
+                }
+
+                // Sort by month
+                const getMonthSortValue = (monthStr: string) => {
+                    // Check for Admission/Joining month specifically
+                    if (monthStr.toLowerCase().includes('admission') || monthStr.toLowerCase().includes('joining month')) {
+                        return -1;
+                    }
+
+                    const cleanMonth = monthStr.split(' ')[0];
+                    const idx = MONTH_MAP[cleanMonth];
+                    if (idx === undefined) return 100;
+
+                    // Calculate position relative to academic start month
+                    return (idx - startMonthIndex + 12) % 12;
+                };
+
+                const valA = getMonthSortValue(a.month);
+                const valB = getMonthSortValue(b.month);
+
+                if (valA !== valB) return valA - valB;
+
+                return headA.localeCompare(headB);
             });
 
             const studentPayments = feeCollections
@@ -361,7 +419,7 @@ const DueReport: React.FC = () => {
                         Full Breakdown of Payables & Payments
                     </p>
                     <p style={{ opacity: 0.8, fontWeight: 600, fontSize: 'clamp(0.75rem, 2vw, 0.875rem)' }}>
-                        Session 2025-26
+                        Session {activeFY}
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>

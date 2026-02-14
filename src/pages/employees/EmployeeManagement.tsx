@@ -472,7 +472,7 @@ Thank you!`;
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                                 <div className="input-group">
                                     <label className="field-label">Full Name *</label>
-                                    <input type="text" className="input-field" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+                                    <input type="text" className="input-field" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={e => setFormData({ ...formData, name: toProperCase(e.target.value) })} />
                                 </div>
                                 <div className="input-group">
                                     <label className="field-label">Employee Type *</label>
@@ -503,7 +503,7 @@ Thank you!`;
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                                 <div className="input-group">
                                     <label className="field-label">Designation / Role</label>
-                                    <input type="text" className="input-field" placeholder={formData.employeeType} value={formData.designation} onChange={e => setFormData({ ...formData, designation: e.target.value })} />
+                                    <input type="text" className="input-field" placeholder={formData.employeeType} value={formData.designation} onChange={e => setFormData({ ...formData, designation: e.target.value })} onBlur={e => setFormData({ ...formData, designation: toProperCase(e.target.value) })} />
                                 </div>
                                 <div className="input-group">
                                     <label className="field-label">Monthly Base Salary (₹) *</label>

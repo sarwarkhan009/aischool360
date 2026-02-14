@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSchool } from '../../context/SchoolContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { formatDate, formatDateTime } from '../../utils/dateUtils';
-import { formatClassSectionShort } from '../../utils/formatters';
+import { formatClassSectionShort, toProperCase } from '../../utils/formatters';
 import { Search, Edit2, Trash2, UserPlus, FileText, Settings, Download } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { collection, query, where, orderBy, limit, getDocs, doc, writeBatch } from 'firebase/firestore';
-import { getActiveClasses, SESSIONS } from '../../constants/app';
+import { getActiveClasses } from '../../constants/app';
 
 const StudentManagement: React.FC = () => {
     const navigate = useNavigate();
@@ -18,6 +18,7 @@ const StudentManagement: React.FC = () => {
     const [isPrintingReport, setIsPrintingReport] = useState(false);
     const { data: students, loading, update: updateStudent, remove: removeStudent } = useFirestore<any>('students');
     const { data: feeAmounts } = useFirestore<any>('fee_amounts');
+    const { data: academicYears } = useFirestore<any>('academic_years');
 
     const { data: allSettings } = useFirestore<any>('settings');
     const printSettings = allSettings?.find((s: any) => s.id === `print_form_${schoolId}`);
@@ -25,8 +26,11 @@ const StudentManagement: React.FC = () => {
     const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
     const classesList = activeClasses.map((c: any) => c.name);
 
+    const activeFY = currentSchool?.activeFinancialYear || '';
+    const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived).map((y: any) => y.name).sort();
+
     const [isProcessing, setIsProcessing] = useState(false);
-    const [selectedSession, setSelectedSession] = useState('');
+    const [selectedSession, setSelectedSession] = useState(activeFY);
     const [selectedClass, setSelectedClass] = useState('');
     const [selectedSection, setSelectedSection] = useState('');
 
@@ -35,6 +39,14 @@ const StudentManagement: React.FC = () => {
     const [selectedGenders, setSelectedGenders] = useState<string[]>(['Male', 'Female']);
     const [searchQuery, setSearchQuery] = useState('');
     const [entriesToShow, setEntriesToShow] = useState(10);
+    const [showCleanButton, setShowCleanButton] = useState(false);
+
+    // Sync selectedSession when activeFY loads from Firestore
+    useEffect(() => {
+        if (activeFY && !selectedSession) {
+            setSelectedSession(activeFY);
+        }
+    }, [activeFY]);
 
     const handlePrint = async (stu: any) => {
         // Fetch first receipt number
@@ -217,9 +229,48 @@ const StudentManagement: React.FC = () => {
         }
     };
 
+    const handleFixSessions = async () => {
+        const activeFY = currentSchool?.activeFinancialYear;
+        if (!activeFY) {
+            alert('Please set an active academic year in settings first.');
+            return;
+        }
+
+        const studentsToFix = allFilteredStudents.filter(s => s.session !== activeFY);
+        if (studentsToFix.length === 0) {
+            alert(`All currently filtered students are already assigned to session ${activeFY}.`);
+            return;
+        }
+
+        const confirmMsg = `This will set the Session to "${activeFY}" for ${studentsToFix.length} students. \n\nContinue?`;
+        if (!window.confirm(confirmMsg)) return;
+
+        try {
+            setIsProcessing(true);
+            let updateCount = 0;
+
+            for (let i = 0; i < studentsToFix.length; i += 500) {
+                const chunk = studentsToFix.slice(i, i + 500);
+                const batch = writeBatch(db);
+                chunk.forEach(student => {
+                    batch.update(doc(db, 'students', student.id), { session: activeFY });
+                    updateCount++;
+                });
+                await batch.commit();
+            }
+
+            alert(`Successfully updated session for ${updateCount} students.`);
+        } catch (error) {
+            console.error('Error fixing sessions:', error);
+            alert('An error occurred: ' + (error as Error).message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const allFilteredStudents = students.filter(s => {
         // Robust filtering: match if filter is empty OR property includes selection (to handle "Class VI" vs "VI")
-        const matchesSession = !selectedSession || (s.session && s.session.includes(selectedSession)) || !s.session;
+        const matchesSession = !selectedSession || (s.session && s.session === selectedSession);
         const matchesClass = !selectedClass || (s.class && (s.class === selectedClass || s.class.endsWith(' ' + selectedClass)));
         const matchesSection = !selectedSection || (s.section && s.section.toUpperCase() === selectedSection.toUpperCase()) || !s.section;
         const matchesStatus = selectedStatus === 'ALL' || (s.status && s.status.toUpperCase() === selectedStatus.toUpperCase());
@@ -565,7 +616,7 @@ const StudentManagement: React.FC = () => {
             <div className="no-print">
                 <div className="student-management-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', gap: '1rem', flexWrap: 'wrap' }}>
                     <div style={{ flex: '1 1 300px', display: 'flex', alignItems: 'center', gap: '2rem' }}>
-                        <div>
+                        <div onClick={() => setShowCleanButton(!showCleanButton)} style={{ cursor: 'pointer' }}>
                             <h1 className="main-title" style={{ fontSize: '2.25rem', fontWeight: 800, marginBottom: '0.5rem', letterSpacing: '-0.025em' }}>Student Database</h1>
                             <p style={{ color: 'var(--text-muted)', fontSize: '1.0625rem' }}>Comprehensive records management system.</p>
                         </div>
@@ -634,21 +685,32 @@ const StudentManagement: React.FC = () => {
                             >
                                 <Settings size={14} /> {isProcessing ? 'FIXING...' : 'FIX MONTHLY FEES'}
                             </button>
-                            <button
-                                className="btn hover-lift"
-                                onClick={handleCleanData}
-                                style={{ background: '#ef4444', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                            >
-                                <Trash2 size={14} /> CLEAN DATA
-                            </button>
+                            {showCleanButton && (
+                                <button
+                                    className="btn hover-lift"
+                                    onClick={handleFixSessions}
+                                    disabled={isProcessing}
+                                    style={{ background: '#ec4899', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                >
+                                    <Settings size={14} /> {isProcessing ? 'FIXING...' : 'FIX SESSION'}
+                                </button>
+                            )}
+                            {showCleanButton && (
+                                <button
+                                    className="btn hover-lift"
+                                    onClick={handleCleanData}
+                                    style={{ background: '#ef4444', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                >
+                                    <Trash2 size={14} /> CLEAN DATA
+                                </button>
+                            )}
                             <select
                                 className="input-field"
                                 style={{ padding: '0.5rem', width: 'auto', background: 'white' }}
                                 value={selectedSession}
                                 onChange={(e) => setSelectedSession(e.target.value)}
                             >
-                                <option value="">All Session</option>
-                                {SESSIONS.map(s => (
+                                {schoolYears.map(s => (
                                     <option key={s} value={s}>{s}</option>
                                 ))}
                             </select>
@@ -776,7 +838,7 @@ const StudentManagement: React.FC = () => {
                                                         {(stu.name || stu.fullName || 'S')[0]}
                                                     </div>
                                                     <div>
-                                                        <div style={{ fontWeight: 700 }}>{stu.name || stu.fullName}</div>
+                                                        <div style={{ fontWeight: 700 }}>{toProperCase(stu.name || stu.fullName)}</div>
                                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatClassSectionShort(stu.class, stu.section, currentSchool?.useRomanNumerals)}</div>
                                                         {stu.admissionDate && (
                                                             <div style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 600, marginTop: '2px' }}>
@@ -787,7 +849,7 @@ const StudentManagement: React.FC = () => {
                                                 </div>
                                             </td>
                                             <td style={{ padding: '1.25rem 1rem' }}>
-                                                <div style={{ fontWeight: 500 }}>{stu.parentName || stu.fatherName}</div>
+                                                <div style={{ fontWeight: 500 }}>{toProperCase(stu.parentName || stu.fatherName)}</div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {stu.admissionNo || stu.id}</div>
                                             </td>
                                             <td style={{ padding: '1.25rem 1rem', fontSize: '0.875rem' }}>

@@ -216,6 +216,7 @@ const menuItems = [
             { to: '/students/report', label: 'Student Report', permission: Permission.VIEW_STUDENT_REPORTS, moduleId: '/students/report' },
             { to: '/students/re-reg', label: 'Re-Registration Report', permission: Permission.VIEW_RE_REGISTRATION_REPORTS, moduleId: '/students/re-reg' },
             { to: '/students/dues', label: 'Dues List', permission: Permission.VIEW_DUES_LIST, moduleId: '/students/dues' },
+            { to: '/students/promotion', label: 'Promote Students', permission: Permission.ADMIT_STUDENT, moduleId: '/students/promotion' },
         ]
     },
     {
@@ -344,16 +345,7 @@ const DashboardLayout: React.FC = () => {
     const [openMenuLabel, setOpenMenuLabel] = useState<string | null>(null);
     const location = useLocation();
 
-    // Sync Browser Tab Title
-    useEffect(() => {
-        if (currentSchool?.customTitle) {
-            document.title = currentSchool.customTitle;
-        } else {
-            document.title = APP_CONFIG.fullName;
-        }
-    }, [currentSchool?.customTitle]);
-
-    // Bridge Firestore roles/overrides to localStorage for synchronous hasPermission checks
+    // Sync Global Role & Overrides to localStorage for synchronous checks
     useEffect(() => {
         if (!allSettings || !currentSchool?.id) return;
 

@@ -3,6 +3,8 @@ import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebas
 import { db } from '../../lib/firebase';
 import { Receipt, History, Info, Wallet, Loader2 } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
+import { getMonthIndexMap } from '../../utils/academicYear';
+import { useSchool } from '../../context/SchoolContext';
 
 interface Props {
     admissionNo: string;
@@ -10,6 +12,7 @@ interface Props {
 }
 
 const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
+    const { currentSchool } = useSchool();
     const [history, setHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [feeTypes, setFeeTypes] = useState<any[]>([]);
@@ -62,10 +65,8 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
         }
     };
 
-    const MONTH_MAP: Record<string, number> = {
-        'April': 3, 'May': 4, 'June': 5, 'July': 6, 'August': 7, 'September': 8,
-        'October': 9, 'November': 10, 'December': 11, 'January': 0, 'February': 1, 'March': 2
-    };
+    const MONTH_MAP = getMonthIndexMap();
+    const academicStartMonthIdx = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];
 
     const feeMetrics = React.useMemo(() => {
         if (!studentData || feeTypes.length === 0 || feeAmounts.length === 0) {
@@ -76,8 +77,8 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
         const today = new Date();
         const currentYear = today.getFullYear();
         const currentMonth = today.getMonth(); // 0-11
-        const sessionStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
-        const sessionStartDate = new Date(sessionStartYear, 3, 1);
+        const sessionStartYear = currentMonth >= academicStartMonthIdx ? currentYear : currentYear - 1;
+        const sessionStartDate = new Date(sessionStartYear, academicStartMonthIdx, 1);
 
         const admType = studentData.admissionType || 'NEW';
         const admDateRaw = studentData.admissionDate ? new Date(studentData.admissionDate) : null;
@@ -89,7 +90,7 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
             startMonthIdx = admDateRaw.getMonth();
             startYear = admDateRaw.getFullYear();
         } else {
-            startMonthIdx = 3; // April
+            startMonthIdx = academicStartMonthIdx;
             startYear = sessionStartYear;
         }
 
@@ -122,13 +123,15 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                     let isDue = false;
 
                     if (monthName === 'Admission_month') {
-                        if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
+                        if (admType === 'OLD') {
+                            isDue = true;
+                        } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
                             isDue = true;
                         }
                     } else {
                         const targetMonthIdx = MONTH_MAP[monthName];
                         if (targetMonthIdx !== undefined) {
-                            const targetYear = targetMonthIdx < 3 ? sessionStartYear + 1 : sessionStartYear;
+                            const targetYear = targetMonthIdx < academicStartMonthIdx ? sessionStartYear + 1 : sessionStartYear;
                             const dueDate = new Date(targetYear, targetMonthIdx, 5);
 
                             if (today >= dueDate) {

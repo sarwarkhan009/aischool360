@@ -14,11 +14,13 @@ export const DynamicPWAConfig = () => {
     const { currentSchool, loading } = useSchool();
 
     useEffect(() => {
-        if (loading || !currentSchool) return;
+        if (loading) return;
 
         // 1. Update Document Title
-        const pageTitle = currentSchool.customTitle || currentSchool.name || 'AI School 360';
+        const pageTitle = currentSchool?.customTitle || currentSchool?.name || 'AI School 360';
         document.title = pageTitle;
+
+        if (!currentSchool) return;
 
         // 2. Update Favicon
         if (currentSchool.logoUrl || currentSchool.logo) {
@@ -136,6 +138,33 @@ export const DynamicPWAConfig = () => {
             document.head.appendChild(appleTitle);
         }
         appleTitle.setAttribute('content', currentSchool.name);
+
+        // 9. Update Open Graph Meta Tags
+        let ogTitle = document.querySelector('meta[property="og:title"]');
+        if (!ogTitle) {
+            ogTitle = document.createElement('meta');
+            ogTitle.setAttribute('property', 'og:title');
+            document.head.appendChild(ogTitle);
+        }
+        ogTitle.setAttribute('content', pageTitle);
+
+        let ogSiteName = document.querySelector('meta[property="og:site_name"]');
+        if (!ogSiteName) {
+            ogSiteName = document.createElement('meta');
+            ogSiteName.setAttribute('property', 'og:site_name');
+            document.head.appendChild(ogSiteName);
+        }
+        ogSiteName.setAttribute('content', currentSchool.name);
+
+        if (currentSchool.logoUrl || currentSchool.logo) {
+            let ogImage = document.querySelector('meta[property="og:image"]');
+            if (!ogImage) {
+                ogImage = document.createElement('meta');
+                ogImage.setAttribute('property', 'og:image');
+                document.head.appendChild(ogImage);
+            }
+            ogImage.setAttribute('content', currentSchool.logoUrl || currentSchool.logo || '');
+        }
 
     }, [currentSchool, loading]);
 

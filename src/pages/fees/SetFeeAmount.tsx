@@ -9,11 +9,12 @@ import {
     AlertCircle,
     Edit,
     Plus,
-    X
+    X,
+    Copy
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { getActiveClasses, CLASS_ORDER, sortClasses } from '../../constants/app';
 import { formatClassName } from '../../utils/formatters';
 import { useSchool } from '../../context/SchoolContext';
@@ -25,13 +26,30 @@ const SetFeeAmount: React.FC = () => {
     const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
     const { data: feeTypes } = useFirestore<any>('fee_types');
-    const { data: existingFeeAmounts, add: addFeeAmount, update: updateFeeAmount, remove: removeFeeAmount } = useFirestore<any>('fee_amounts');
+    const { data: allFeeAmounts, add: addFeeAmount, update: updateFeeAmount, remove: removeFeeAmount } = useFirestore<any>('fee_amounts');
+
+    const activeFY = currentSchool?.activeFinancialYear || '2025-26';
+
+    // Detect fee amounts without a financialYear tag
+    const untaggedFeeAmounts = allFeeAmounts.filter((fa: any) => !fa.financialYear);
+
+    // Filter fee amounts and fee types by active financial year
+    const existingFeeAmounts = allFeeAmounts.filter((fa: any) => fa.financialYear === activeFY);
+    const fyFeeTypes = feeTypes.filter((ft: any) => !ft.financialYear || ft.financialYear === activeFY);
 
     const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []).map(c => c.name);
 
     // Form State
     const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
+    const [isCopying, setIsCopying] = useState(false);
+
+    // Academic Years for copy feature
+    const { data: academicYears } = useFirestore<any>('academic_years');
+    const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived).map((y: any) => y.name).sort();
+    const currentYearIndex = schoolYears.indexOf(activeFY);
+    const previousFY = currentYearIndex > 0 ? schoolYears[currentYearIndex - 1] : '';
+    const previousFeeAmounts = allFeeAmounts.filter((fa: any) => (fa.financialYear || '2025-26') === previousFY);
 
     // Edit Modal State
     const [editingClass, setEditingClass] = useState<string | null>(null);
@@ -48,8 +66,8 @@ const SetFeeAmount: React.FC = () => {
         { id: Date.now().toString(), feeTypeId: '', amount: 0 }
     ]);
 
-    // Filter fee types - only show active ones
-    const activeFeeTypes = feeTypes.filter((ft: any) => ft.status === 'ACTIVE')
+    // Filter fee types - only show active ones for current FY
+    const activeFeeTypes = fyFeeTypes.filter((ft: any) => ft.status === 'ACTIVE')
         .sort((a: any, b: any) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
 
     // Toggle class selection
@@ -149,6 +167,7 @@ const SetFeeAmount: React.FC = () => {
                             feeTypeName: feeType.feeHeadName,
                             className,
                             amount: row.amount,
+                            financialYear: activeFY,
                             createdAt: new Date().toISOString()
                         });
                     }
@@ -222,6 +241,7 @@ const SetFeeAmount: React.FC = () => {
                         feeTypeName: feeType.feeHeadName,
                         className: editingClass,
                         amount: row.amount,
+                        financialYear: activeFY,
                         createdAt: new Date().toISOString()
                     });
                 }
@@ -248,8 +268,84 @@ const SetFeeAmount: React.FC = () => {
         setFeeRows([{ id: Date.now().toString(), feeTypeId: '', amount: 0 }]);
     };
 
+    // Copy Fee Amounts from Previous Session
+    const handleCopyFromPreviousSession = async () => {
+        if (!previousFY) {
+            alert('No previous session found to copy from.');
+            return;
+        }
 
+        if (previousFeeAmounts.length === 0) {
+            alert(`No fee amounts found in session ${previousFY} to copy.`);
+            return;
+        }
 
+        if (existingFeeAmounts.length > 0) {
+            const confirm = window.confirm(`Current session (${activeFY}) already has ${existingFeeAmounts.length} fee amount(s) configured.\n\nCopying will only add missing entries and will NOT overwrite existing ones.\n\nContinue?`);
+            if (!confirm) return;
+        } else {
+            const confirm = window.confirm(`This will copy ${previousFeeAmounts.length} fee amount(s) from ${previousFY} to ${activeFY}.\n\nContinue?`);
+            if (!confirm) return;
+        }
+
+        setIsCopying(true);
+        try {
+            let copiedCount = 0;
+
+            for (const fa of previousFeeAmounts) {
+                // Check if this class + feeType combo already exists in current FY
+                const alreadyExists = existingFeeAmounts.find(
+                    (efa: any) => efa.className === fa.className && efa.feeTypeId === fa.feeTypeId
+                );
+
+                if (!alreadyExists) {
+                    await addFeeAmount({
+                        feeTypeId: fa.feeTypeId,
+                        feeTypeName: fa.feeTypeName,
+                        className: fa.className,
+                        amount: fa.amount,
+                        financialYear: activeFY,
+                        createdAt: new Date().toISOString(),
+                        copiedFrom: previousFY
+                    });
+                    copiedCount++;
+                }
+            }
+
+            alert(`Successfully copied ${copiedCount} fee amount(s) from ${previousFY} to ${activeFY}.`);
+        } catch (error) {
+            console.error('Error copying fee amounts:', error);
+            alert('Error copying fee amounts: ' + (error as Error).message);
+        } finally {
+            setIsCopying(false);
+        }
+    };
+
+    // Tag untagged fee amounts with a financial year
+    const handleTagFeeAmounts = async (targetFY: string) => {
+        if (untaggedFeeAmounts.length === 0) return;
+
+        const confirmMsg = `This will tag ${untaggedFeeAmounts.length} fee amount(s) that don't have a session to "${targetFY}".\n\nContinue?`;
+        if (!window.confirm(confirmMsg)) return;
+
+        setIsCopying(true);
+        try {
+            for (let i = 0; i < untaggedFeeAmounts.length; i += 500) {
+                const chunk = untaggedFeeAmounts.slice(i, i + 500);
+                const batch = writeBatch(db);
+                chunk.forEach((fa: any) => {
+                    batch.update(doc(db, 'fee_amounts', fa.id), { financialYear: targetFY });
+                });
+                await batch.commit();
+            }
+            alert(`Successfully tagged ${untaggedFeeAmounts.length} fee amount(s) to session ${targetFY}.`);
+        } catch (error) {
+            console.error('Error tagging fee amounts:', error);
+            alert('Error: ' + (error as Error).message);
+        } finally {
+            setIsCopying(false);
+        }
+    };
 
     return (
         <div className="animate-fade-in no-scrollbar" style={{ paddingBottom: '4rem' }}>
@@ -271,9 +367,34 @@ const SetFeeAmount: React.FC = () => {
                     </h1>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8125rem', opacity: 0.9 }}>
                         <Home size={14} /> Home <ChevronRight size={12} /> Fee <ChevronRight size={12} /> Set Amount for Classes
+                        <span style={{ background: 'rgba(255,255,255,0.25)', padding: '0.2rem 0.6rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.75rem' }}>FY: {activeFY}</span>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
+                    {previousFY && (
+                        <button
+                            onClick={handleCopyFromPreviousSession}
+                            disabled={isCopying}
+                            style={{
+                                background: 'rgba(255,255,255,0.2)',
+                                color: 'white',
+                                padding: '0.6rem 1.25rem',
+                                fontSize: '0.875rem',
+                                fontWeight: 700,
+                                border: '1px solid rgba(255,255,255,0.3)',
+                                backdropFilter: 'blur(10px)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                borderRadius: '12px',
+                                cursor: isCopying ? 'not-allowed' : 'pointer',
+                                opacity: isCopying ? 0.7 : 1,
+                                transition: 'all 0.3s ease'
+                            }}
+                        >
+                            <Copy size={18} /> {isCopying ? 'Copying...' : `Copy from ${previousFY}`}
+                        </button>
+                    )}
                     <button
                         onClick={() => navigate(`/${schoolId}/fees/structure`)}
                         style={{
@@ -296,6 +417,54 @@ const SetFeeAmount: React.FC = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Warning: Untagged Fee Amounts */}
+            {untaggedFeeAmounts.length > 0 && (
+                <div style={{
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '12px',
+                    padding: '1rem 1.5rem',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    flexWrap: 'wrap'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <AlertCircle size={22} style={{ color: '#d97706', flexShrink: 0 }} />
+                        <div>
+                            <div style={{ fontWeight: 800, color: '#92400e', fontSize: '0.9375rem' }}>
+                                {untaggedFeeAmounts.length} fee amount(s) found without a session tag!
+                            </div>
+                            <div style={{ fontSize: '0.8125rem', color: '#a16207', marginTop: '2px' }}>
+                                These fees were saved before session tagging was introduced. Tag them to make them visible.
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => handleTagFeeAmounts(activeFY)}
+                        disabled={isCopying}
+                        style={{
+                            background: '#f59e0b',
+                            color: 'white',
+                            padding: '0.6rem 1.25rem',
+                            fontSize: '0.8125rem',
+                            fontWeight: 800,
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            whiteSpace: 'nowrap'
+                        }}
+                    >
+                        <Check size={16} /> {isCopying ? 'Tagging...' : `Tag to ${activeFY}`}
+                    </button>
+                </div>
+            )}
 
             {/* Input Form Section */}
             <div className="glass-card" style={{ padding: '2rem', marginBottom: '2rem' }}>

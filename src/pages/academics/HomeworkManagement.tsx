@@ -28,6 +28,7 @@ import {
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
 import { sortClasses } from '../../constants/app';
+import { toProperCase } from '../../utils/formatters';
 
 interface Homework {
     id: string;
@@ -566,6 +567,7 @@ const HomeworkManagement: React.FC = () => {
                                             placeholder="e.g. Algebra Exercise 2.1"
                                             value={formData.title}
                                             onChange={e => setFormData({ ...formData, title: e.target.value })}
+                                            onBlur={e => setFormData({ ...formData, title: toProperCase(e.target.value) })}
                                             required
                                         />
                                     </div>
@@ -578,6 +580,7 @@ const HomeworkManagement: React.FC = () => {
                                             placeholder="Write details about the task..."
                                             value={formData.description}
                                             onChange={e => setFormData({ ...formData, description: e.target.value })}
+                                            onBlur={e => setFormData({ ...formData, description: toProperCase(e.target.value) })}
                                             required
                                         />
                                     </div>

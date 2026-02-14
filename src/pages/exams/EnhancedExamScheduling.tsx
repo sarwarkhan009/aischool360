@@ -21,6 +21,7 @@ import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
 import { useAuth } from '../../context/AuthContext';
 import { sortClasses } from '../../constants/app';
+import { toProperCase } from '../../utils/formatters';
 
 interface ExamSubject {
     subjectId: string;
@@ -868,6 +869,14 @@ const EnhancedExamScheduling: React.FC = () => {
                                                     displayName: (prev.displayName === prev.name || !prev.displayName) ? val : prev.displayName
                                                 }));
                                             }}
+                                            onBlur={(e) => {
+                                                const val = toProperCase(e.target.value);
+                                                setNewExam(prev => ({
+                                                    ...prev,
+                                                    name: val,
+                                                    displayName: (prev.displayName === prev.name || !prev.displayName) ? val : prev.displayName
+                                                }));
+                                            }}
                                             style={{ fontSize: '1rem', padding: '0.875rem 1rem', borderRadius: '0.75rem' }}
                                         />
                                     </div>
@@ -881,6 +890,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                             placeholder="e.g. Unit Test 3"
                                             value={newExam.displayName}
                                             onChange={(e) => setNewExam({ ...newExam, displayName: e.target.value })}
+                                            onBlur={(e) => setNewExam({ ...newExam, displayName: toProperCase(e.target.value) })}
                                             style={{ fontSize: '1rem', padding: '0.875rem 1rem', borderRadius: '0.75rem' }}
                                         />
                                     </div>

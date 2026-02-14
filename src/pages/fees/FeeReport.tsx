@@ -18,7 +18,8 @@ const FeeReport: React.FC = () => {
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [selectedClass, setSelectedClass] = useState('');
-    const [paymentStatus, setPaymentStatus] = useState('');
+    const [selectedPeriod, setSelectedPeriod] = useState('TODAY');
+    const [selectedCategories, setSelectedCategories] = useState(['FEES', 'INVENTORY']);
     const [searchQuery, setSearchQuery] = useState('');
     const [view, setView] = useState('REPORT');
     const [currentReceipt, setCurrentReceipt] = useState<any>(null);
@@ -27,6 +28,47 @@ const FeeReport: React.FC = () => {
     const [wipeConfirmationText, setWipeConfirmationText] = useState('');
     const [isWiping, setIsWiping] = useState(false);
     const [showWipeButton, setShowWipeButton] = useState(false);
+
+    const getPeriodDates = (period: string) => {
+        const today = new Date();
+        const toISOLocal = (date: Date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
+        let start = toISOLocal(today);
+        let end = toISOLocal(today);
+
+        if (period === 'THIS_MONTH') {
+            const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+            start = toISOLocal(firstDay);
+        } else if (period === 'LAST_MONTH') {
+            const firstDayLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            const lastDayLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+            start = toISOLocal(firstDayLastMonth);
+            end = toISOLocal(lastDayLastMonth);
+        } else if (period === 'ACADEMIC_YEAR') {
+            const MONTH_MAP: Record<string, number> = {
+                'January': 0, 'February': 1, 'March': 2, 'April': 3, 'May': 4, 'June': 5,
+                'July': 6, 'August': 7, 'September': 8, 'October': 9, 'November': 10, 'December': 11
+            };
+            const institutionInfo = allSettings?.find((item: any) =>
+                item.id === 'school_info' || item.type === 'school_info' || item.type === 'institution'
+            );
+            const academicStartMonthName = currentSchool?.academicYearStartMonth || institutionInfo?.sessionStartMonth || 'April';
+            const sessionMonth = MONTH_MAP[academicStartMonthName] !== undefined ? MONTH_MAP[academicStartMonthName] : 3;
+
+            const currentMonth = today.getMonth();
+            const startYear = currentMonth < sessionMonth ? today.getFullYear() - 1 : today.getFullYear();
+            const startDateObj = new Date(startYear, sessionMonth, 1);
+            const endDateObj = new Date(startYear + 1, sessionMonth, 0);
+            start = toISOLocal(startDateObj);
+            end = toISOLocal(endDateObj);
+        }
+        return { startDate: start, endDate: end };
+    };
 
     const filteredRecords = feeRecords.filter(record => {
         // Extract date for filtering (need ISO format for comparison)
@@ -39,14 +81,17 @@ const FeeReport: React.FC = () => {
             dateStr = record.createdAt.split('T')[0];
         }
 
+        const isInventory = record.paidFor === 'Inventory Sale' || record.receiptNo?.startsWith('INV');
+        const isFee = !isInventory;
+        const matchesCategory = (selectedCategories.includes('FEES') && isFee) || (selectedCategories.includes('INVENTORY') && isInventory);
+
         const matchesDate = dateStr && dateStr >= startDate && dateStr <= endDate;
         const matchesClass = !selectedClass || record.class === selectedClass;
-        const matchesStatus = !paymentStatus || record.status === paymentStatus;
         const matchesSearch = !searchQuery ||
             (record.studentName && record.studentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
             (record.admissionNo && String(record.admissionNo).toLowerCase().includes(searchQuery.toLowerCase()));
 
-        return matchesDate && matchesClass && matchesStatus && matchesSearch;
+        return matchesDate && matchesClass && matchesCategory && matchesSearch;
     });
 
     const totalAmount = filteredRecords.reduce((sum, r) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
@@ -481,10 +526,6 @@ const FeeReport: React.FC = () => {
                             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#22c55e' }}>₹{paidAmount.toFixed(2)}</div>
                         </div>
                         <div className="glass-card" style={{ padding: '1.5rem' }}>
-                            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Pending</div>
-                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ef4444' }}>₹{pendingAmount.toFixed(2)}</div>
-                        </div>
-                        <div className="glass-card" style={{ padding: '1.5rem' }}>
                             <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Records</div>
                             <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)' }}>{filteredRecords.length}</div>
                         </div>
@@ -492,6 +533,69 @@ const FeeReport: React.FC = () => {
 
                     {/* Filters */}
                     <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                            {['TODAY', 'THIS_MONTH', 'LAST_MONTH', 'ACADEMIC_YEAR'].map(period => (
+                                <button
+                                    key={period}
+                                    onClick={() => {
+                                        setSelectedPeriod(period);
+                                        const { startDate, endDate } = getPeriodDates(period);
+                                        setStartDate(startDate);
+                                        setEndDate(endDate);
+                                    }}
+                                    style={{
+                                        padding: '0.5rem 1.25rem',
+                                        borderRadius: '2rem',
+                                        border: '1px solid',
+                                        borderColor: selectedPeriod === period ? 'var(--primary)' : 'var(--border)',
+                                        background: selectedPeriod === period ? 'var(--primary)' : 'white',
+                                        color: selectedPeriod === period ? 'white' : 'var(--text-muted)',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        boxShadow: selectedPeriod === period ? '0 4px 12px var(--primary-glow)' : 'none',
+                                        textTransform: 'capitalize'
+                                    }}
+                                >
+                                    {period.replace('_', ' ').toLowerCase()}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)', marginRight: '0.5rem' }}>Category:</span>
+                            {['FEES', 'INVENTORY'].map(cat => (
+                                <button
+                                    key={cat}
+                                    onClick={() => {
+                                        if (selectedCategories.includes(cat)) {
+                                            if (selectedCategories.length > 1) {
+                                                setSelectedCategories(selectedCategories.filter(c => c !== cat));
+                                            }
+                                        } else {
+                                            setSelectedCategories([...selectedCategories, cat]);
+                                        }
+                                    }}
+                                    style={{
+                                        padding: '0.5rem 1.25rem',
+                                        borderRadius: '2rem',
+                                        border: '1px solid',
+                                        borderColor: selectedCategories.includes(cat) ? 'var(--primary)' : 'var(--border)',
+                                        background: selectedCategories.includes(cat) ? 'var(--primary)' : 'white',
+                                        color: selectedCategories.includes(cat) ? 'white' : 'var(--text-muted)',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        boxShadow: selectedCategories.includes(cat) ? '0 4px 12px var(--primary-glow)' : 'none'
+                                    }}
+                                >
+                                    {cat.charAt(0) + cat.slice(1).toLowerCase()}
+                                </button>
+                            ))}
+                        </div>
+
                         <div className="responsive-grid-auto" style={{ gap: '1rem' }}>
                             <div>
                                 <label style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem', display: 'block' }}>Start Date</label>
@@ -499,7 +603,10 @@ const FeeReport: React.FC = () => {
                                     type="date"
                                     className="input-field"
                                     value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
+                                    onChange={(e) => {
+                                        setStartDate(e.target.value);
+                                        setSelectedPeriod('CUSTOM');
+                                    }}
                                 />
                             </div>
                             <div>
@@ -508,7 +615,10 @@ const FeeReport: React.FC = () => {
                                     type="date"
                                     className="input-field"
                                     value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
+                                    onChange={(e) => {
+                                        setEndDate(e.target.value);
+                                        setSelectedPeriod('CUSTOM');
+                                    }}
                                 />
                             </div>
                             <div>
@@ -522,19 +632,6 @@ const FeeReport: React.FC = () => {
                                     {classesList.map(c => (
                                         <option key={c} value={c}>{c}</option>
                                     ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem', display: 'block' }}>Payment Status</label>
-                                <select
-                                    className="input-field"
-                                    value={paymentStatus}
-                                    onChange={(e) => setPaymentStatus(e.target.value)}
-                                >
-                                    <option value="">All Status</option>
-                                    <option value="PAID">Paid</option>
-                                    <option value="PENDING">Pending</option>
-                                    <option value="PARTIAL">Partial</option>
                                 </select>
                             </div>
                             <div>

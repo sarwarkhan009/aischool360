@@ -7,10 +7,14 @@ import {
     Archive,
     Check,
     X,
-    AlertCircle
+    AlertCircle,
+    Copy,
+    Loader2
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
+import { doc, updateDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 
 interface Term {
     id: string;
@@ -34,7 +38,7 @@ interface AcademicYear {
 }
 
 const AcademicYearManager: React.FC = () => {
-    const { currentSchool } = useSchool();
+    const { currentSchool, updateSchoolData } = useSchool();
     const { data: academicYears, add: addDocument, update: updateDocument, remove: deleteDocument } = useFirestore<AcademicYear>('academic_years');
 
     const [showModal, setShowModal] = useState(false);
@@ -42,6 +46,7 @@ const AcademicYearManager: React.FC = () => {
     const [showTermModal, setShowTermModal] = useState(false);
     const [editingTerm, setEditingTerm] = useState<Term | null>(null);
     const [selectedYearForTerm, setSelectedYearForTerm] = useState<string | null>(null);
+    const [copyingData, setCopyingData] = useState(false);
 
     const [newYear, setNewYear] = useState<Partial<AcademicYear>>({
         name: '',
@@ -62,6 +67,89 @@ const AcademicYearManager: React.FC = () => {
     // Filter years for current school
     const schoolYears = academicYears?.filter(y => y.schoolId === currentSchool?.id) || [];
     const activeYear = schoolYears.find(y => y.isActive && !y.isArchived);
+
+    // Auto-copy fee_types, fee_amounts, and inventory from source FY to target FY
+    const copyDataToNewFY = async (sourceFY: string, targetFY: string) => {
+        if (!currentSchool?.id) return;
+        setCopyingData(true);
+        try {
+            const schoolId = currentSchool.id;
+
+            // 1. Copy fee_types
+            const feeTypesQuery = query(
+                collection(db, 'fee_types'),
+                where('schoolId', '==', schoolId)
+            );
+            const feeTypesSnap = await getDocs(feeTypesQuery);
+            const feeTypeCopyPromises = feeTypesSnap.docs
+                .filter(d => (d.data().financialYear || '2025-26') === sourceFY)
+                .map(d => {
+                    const data = d.data();
+                    const { id, ...rest } = data as any;
+                    return addDoc(collection(db, 'fee_types'), {
+                        ...rest,
+                        financialYear: targetFY,
+                        copiedFrom: d.id,
+                        createdAt: new Date().toISOString()
+                    });
+                });
+
+            // 2. Copy fee_amounts
+            const feeAmountsQuery = query(
+                collection(db, 'fee_amounts'),
+                where('schoolId', '==', schoolId)
+            );
+            const feeAmountsSnap = await getDocs(feeAmountsQuery);
+            const feeAmountCopyPromises = feeAmountsSnap.docs
+                .filter(d => (d.data().financialYear || '2025-26') === sourceFY)
+                .map(d => {
+                    const data = d.data();
+                    const { id, ...rest } = data as any;
+                    return addDoc(collection(db, 'fee_amounts'), {
+                        ...rest,
+                        financialYear: targetFY,
+                        copiedFrom: d.id,
+                        createdAt: new Date().toISOString()
+                    });
+                });
+
+            // 3. Copy inventory items from settings
+            const settingsQuery = query(
+                collection(db, 'settings'),
+                where('schoolId', '==', schoolId),
+                where('type', '==', 'inventory')
+            );
+            const settingsSnap = await getDocs(settingsQuery);
+            const inventoryCopyPromises = settingsSnap.docs
+                .filter(d => (d.data().financialYear || '2025-26') === sourceFY)
+                .map(d => {
+                    const data = d.data();
+                    const { id, ...rest } = data as any;
+                    return addDoc(collection(db, 'settings'), {
+                        ...rest,
+                        financialYear: targetFY,
+                        copiedFrom: d.id,
+                        createdAt: new Date().toISOString()
+                    });
+                });
+
+            await Promise.all([
+                ...feeTypeCopyPromises,
+                ...feeAmountCopyPromises,
+                ...inventoryCopyPromises
+            ]);
+
+            const totalCopied = feeTypeCopyPromises.length + feeAmountCopyPromises.length + inventoryCopyPromises.length;
+            if (totalCopied > 0) {
+                alert(`✅ ${totalCopied} items copied from ${sourceFY} to ${targetFY} (Fee Types: ${feeTypeCopyPromises.length}, Fee Amounts: ${feeAmountCopyPromises.length}, Inventory: ${inventoryCopyPromises.length})`);
+            }
+        } catch (error) {
+            console.error('Error copying data to new FY:', error);
+            alert('Failed to copy data to new financial year');
+        } finally {
+            setCopyingData(false);
+        }
+    };
 
     const handleSaveYear = async () => {
         if (!newYear.name || !newYear.startDate || !newYear.endDate || !currentSchool?.id) {
@@ -84,6 +172,12 @@ const AcademicYearManager: React.FC = () => {
                     ...yearData,
                     createdAt: new Date().toISOString()
                 } as AcademicYear);
+
+                // Auto-copy fee_types, fee_amounts, and inventory from active FY
+                const sourceFY = currentSchool.activeFinancialYear || activeYear?.name || '2025-26';
+                if (newYear.name && newYear.name !== sourceFY) {
+                    await copyDataToNewFY(sourceFY, newYear.name);
+                }
             }
 
             setShowModal(false);
@@ -110,6 +204,7 @@ const AcademicYearManager: React.FC = () => {
 
     const handleSetActiveYear = async (yearId: string) => {
         try {
+            const targetYear = schoolYears.find(y => y.id === yearId);
             // Deactivate all other years
             const promises = schoolYears.map(async (year) => {
                 if (year.id === yearId) {
@@ -119,6 +214,11 @@ const AcademicYearManager: React.FC = () => {
                 }
             });
             await Promise.all(promises);
+
+            // Sync active FY to schools document for global access
+            if (targetYear?.name && updateSchoolData) {
+                await updateSchoolData({ activeFinancialYear: targetYear.name });
+            }
         } catch (error) {
             console.error('Error setting active year:', error);
             alert('Failed to set active year');

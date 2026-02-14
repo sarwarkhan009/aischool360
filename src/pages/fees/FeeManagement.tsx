@@ -49,8 +49,11 @@ const FeeManagement: React.FC = () => {
     const [selectedStudent, setSelectedStudent] = useState<any>(null);
     const { data: students } = useFirestore<any>('students');
     const { data: feeTypes } = useFirestore<any>('fee_types');
-    const { data: feeAmounts } = useFirestore<any>('fee_amounts');
+    const { data: allFeeAmounts } = useFirestore<any>('fee_amounts');
     const { data: feeCollections } = useFirestore<any>('fee_collections');
+
+    const activeFY = currentSchool?.activeFinancialYear || '2025-26';
+    const feeAmounts = allFeeAmounts.filter((fa: any) => fa.financialYear === activeFY || !fa.financialYear);
     const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
     const [loadingLedger, setLoadingLedger] = useState(false);
     const [processing, setProcessing] = useState(false);
@@ -213,7 +216,9 @@ const FeeManagement: React.FC = () => {
                         let isDue = false;
 
                         if (monthName === 'Admission_month') {
-                            if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
+                            if (admType === 'OLD') {
+                                isDue = true;
+                            } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
                                 isDue = true;
                             }
                         } else {
@@ -266,7 +271,8 @@ const FeeManagement: React.FC = () => {
                 (stu.mobileNo && stu.mobileNo.includes(searchTerm))
             );
             const matchesClass = selectedClass === 'ALL' || stu.class === selectedClass;
-            return matchesSearch && matchesClass;
+            const matchesSession = !activeFY || (stu.session && stu.session === activeFY);
+            return matchesSearch && matchesClass && matchesSession;
         });
 
         // Apply Sorting
@@ -532,6 +538,7 @@ const FeeManagement: React.FC = () => {
                 remarks: feeDetails.remarks,
                 receiptNo,
                 schoolId: currentSchool?.id,
+                financialYear: activeFY,
                 status: 'PAID'
             };
 
@@ -638,6 +645,7 @@ const FeeManagement: React.FC = () => {
                 feeBreakdown,
                 paidFor: 'Inventory Sale',
                 schoolId: currentSchool?.id,
+                financialYear: activeFY,
                 status: 'PAID',
                 type: 'SALE'
             };
@@ -655,7 +663,7 @@ const FeeManagement: React.FC = () => {
     };
 
 
-    const inventoryItems = (dbItems && dbItems.length > 0) ? [...dbItems].filter(d => d.type === 'inventory').sort((a, b) => a.name.localeCompare(b.name)) : [];
+    const inventoryItems = (dbItems && dbItems.length > 0) ? [...dbItems].filter(d => d.type === 'inventory' && (d.financialYear === activeFY || !d.financialYear)).sort((a, b) => a.name.localeCompare(b.name)) : [];
 
     const renderSearch = () => {
         return (

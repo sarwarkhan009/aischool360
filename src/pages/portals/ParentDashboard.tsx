@@ -35,6 +35,7 @@ import { useSchool } from '../../context/SchoolContext';
 import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { formatDate } from '../../utils/dateUtils';
+import { getMonthIndexMap } from '../../utils/academicYear';
 
 // New Portal Components
 import ParentOverview from '../../components/portals/ParentOverview';
@@ -380,11 +381,14 @@ const ParentDashboard: React.FC = () => {
                     const fAmounts = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
                     const fHistory = collSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
+                    const MONTH_IDX = getMonthIndexMap();
+                    const academicStartMonthIdx = MONTH_IDX[currentSchool?.academicYearStartMonth || 'April'];
+
                     const today = new Date();
                     const currentYear = today.getFullYear();
                     const currentMonth = today.getMonth(); // 0-11
-                    const sessionStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
-                    const sessionStartDate = new Date(sessionStartYear, 3, 1);
+                    const sessionStartYear = currentMonth >= academicStartMonthIdx ? currentYear : currentYear - 1;
+                    const sessionStartDate = new Date(sessionStartYear, academicStartMonthIdx, 1);
 
                     const admType = currentStudentData?.admissionType || 'NEW';
                     const admDateRaw = currentStudentData?.admissionDate ? new Date(currentStudentData.admissionDate) : null;
@@ -396,15 +400,11 @@ const ParentDashboard: React.FC = () => {
                         startMonthIdx = admDateRaw.getMonth();
                         startYear = admDateRaw.getFullYear();
                     } else {
-                        startMonthIdx = 3; // April
+                        startMonthIdx = academicStartMonthIdx;
                         startYear = sessionStartYear;
                     }
 
                     let totalPayable = 0;
-                    const MONTH_IDX: Record<string, number> = {
-                        'April': 3, 'May': 4, 'June': 5, 'July': 6, 'August': 7, 'September': 8,
-                        'October': 9, 'November': 10, 'December': 11, 'January': 0, 'February': 1, 'March': 2
-                    };
 
                     const studentAdmMonth = admDateRaw ? admDateRaw.getMonth() : -1;
                     const studentAdmYear = admDateRaw ? admDateRaw.getFullYear() : -1;
@@ -433,13 +433,15 @@ const ParentDashboard: React.FC = () => {
                                 let isDue = false;
 
                                 if (monthName === 'Admission_month') {
-                                    if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
+                                    if (admType === 'OLD') {
+                                        isDue = true;
+                                    } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
                                         isDue = true;
                                     }
                                 } else {
                                     const targetMonthIdx = MONTH_IDX[monthName];
                                     if (targetMonthIdx !== undefined) {
-                                        const targetYear = targetMonthIdx < 3 ? sessionStartYear + 1 : sessionStartYear;
+                                        const targetYear = targetMonthIdx < academicStartMonthIdx ? sessionStartYear + 1 : sessionStartYear;
                                         const dueDate = new Date(targetYear, targetMonthIdx, 5);
 
                                         if (today >= dueDate) {
@@ -510,11 +512,14 @@ const ParentDashboard: React.FC = () => {
                 const fAmounts = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
                 const fHistory = collSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
+                const MONTH_IDX = getMonthIndexMap();
+                const academicStartMonthIdx = MONTH_IDX[currentSchool?.academicYearStartMonth || 'April'];
+
                 const today = new Date();
                 const currentYear = today.getFullYear();
                 const currentMonth = today.getMonth(); // 0-11
-                const sessionStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
-                const sessionStartDate = new Date(sessionStartYear, 3, 1);
+                const sessionStartYear = currentMonth >= academicStartMonthIdx ? currentYear : currentYear - 1;
+                const sessionStartDate = new Date(sessionStartYear, academicStartMonthIdx, 1);
 
                 const admType = studentData?.admissionType || 'NEW';
                 const admDateRaw = studentData?.admissionDate ? new Date(studentData.admissionDate) : null;
@@ -526,15 +531,11 @@ const ParentDashboard: React.FC = () => {
                     startMonthIdx = admDateRaw.getMonth();
                     startYear = admDateRaw.getFullYear();
                 } else {
-                    startMonthIdx = 3; // April
+                    startMonthIdx = academicStartMonthIdx;
                     startYear = sessionStartYear;
                 }
 
                 let totalPayable = 0;
-                const MONTH_IDX: Record<string, number> = {
-                    'April': 3, 'May': 4, 'June': 5, 'July': 6, 'August': 7, 'September': 8,
-                    'October': 9, 'November': 10, 'December': 11, 'January': 0, 'February': 1, 'March': 2
-                };
 
                 const studentAdmMonth = admDateRaw ? admDateRaw.getMonth() : -1;
                 const studentAdmYear = admDateRaw ? admDateRaw.getFullYear() : -1;
@@ -563,13 +564,15 @@ const ParentDashboard: React.FC = () => {
                             let isDue = false;
 
                             if (monthName === 'Admission_month') {
-                                if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
+                                if (admType === 'OLD') {
+                                    isDue = true;
+                                } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
                                     isDue = true;
                                 }
                             } else {
                                 const targetMonthIdx = MONTH_IDX[monthName];
                                 if (targetMonthIdx !== undefined) {
-                                    const targetYear = targetMonthIdx < 3 ? sessionStartYear + 1 : sessionStartYear;
+                                    const targetYear = targetMonthIdx < academicStartMonthIdx ? sessionStartYear + 1 : sessionStartYear;
                                     const dueDate = new Date(targetYear, targetMonthIdx, 5);
 
                                     if (today >= dueDate) {

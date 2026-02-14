@@ -7,11 +7,21 @@ import {
     Bookmark,
     Calendar,
     Clock,
-    BookOpen
+    BookOpen,
+    X,
+    Save
 } from 'lucide-react';
+import { toProperCase } from '../../utils/formatters';
 
 const LibraryManagement: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [newBook, setNewBook] = useState({
+        title: '',
+        author: '',
+        category: 'Fiction',
+        isbn: ''
+    });
 
     // Mock Book Data
     const books = [
@@ -25,6 +35,13 @@ const LibraryManagement: React.FC = () => {
         { id: 'BK008', title: '1984', author: 'George Orwell', category: 'Fiction', status: 'RESERVED', dueDate: null },
     ];
 
+    const handleAddBook = (e: React.FormEvent) => {
+        e.preventDefault();
+        alert(`Adding book: ${newBook.title} by ${newBook.author}`);
+        setShowAddModal(false);
+        setNewBook({ title: '', author: '', category: 'Fiction', isbn: '' });
+    };
+
     return (
         <div className="animate-fade-in no-scrollbar">
             <div className="page-header">
@@ -32,7 +49,11 @@ const LibraryManagement: React.FC = () => {
                     <h1 style={{ fontSize: '1.875rem', fontWeight: 800, marginBottom: '0.5rem' }}>Library Management</h1>
                     <p style={{ color: 'var(--text-muted)' }}>Manage school library catalog, track book issuance and returns.</p>
                 </div>
-                <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                    className="btn btn-primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    onClick={() => setShowAddModal(true)}
+                >
                     <Plus size={18} /> Add New Book
                 </button>
             </div>
@@ -146,8 +167,98 @@ const LibraryManagement: React.FC = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Add New Book Modal */}
+            {showAddModal && (
+                <div className="auth-overlay" style={{ display: 'flex', zIndex: 1000, backdropFilter: 'blur(8px)', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                    <div className="animate-scale-in" style={{
+                        width: '100%',
+                        maxWidth: '500px',
+                        padding: '2.5rem',
+                        background: 'white',
+                        borderRadius: '24px',
+                        position: 'relative',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+                    }}>
+                        <button
+                            className="btn-icon"
+                            style={{ position: 'absolute', right: '1.5rem', top: '1.5rem' }}
+                            onClick={() => setShowAddModal(false)}
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{ background: 'rgba(99, 102, 241, 0.1)', padding: '0.5rem', borderRadius: '12px', display: 'flex' }}>
+                                <Book size={28} color="var(--primary)" />
+                            </div>
+                            Add New Book
+                        </h2>
+
+                        <form onSubmit={handleAddBook}>
+                            <div className="input-group-vertical" style={{ marginBottom: '1.25rem' }}>
+                                <label className="field-label">Book Title *</label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    required
+                                    value={newBook.title}
+                                    onChange={e => setNewBook({ ...newBook, title: e.target.value })}
+                                    onBlur={e => setNewBook({ ...newBook, title: toProperCase(e.target.value) })}
+                                    placeholder="e.g. The Adventures of Tom Sawyer"
+                                />
+                            </div>
+
+                            <div className="input-group-vertical" style={{ marginBottom: '1.25rem' }}>
+                                <label className="field-label">Author Name *</label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    required
+                                    value={newBook.author}
+                                    onChange={e => setNewBook({ ...newBook, author: e.target.value })}
+                                    onBlur={e => setNewBook({ ...newBook, author: toProperCase(e.target.value) })}
+                                    placeholder="e.g. Mark Twain"
+                                />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
+                                <div className="input-group-vertical">
+                                    <label className="field-label">Category</label>
+                                    <select
+                                        className="input-field"
+                                        value={newBook.category}
+                                        onChange={e => setNewBook({ ...newBook, category: e.target.value })}
+                                    >
+                                        <option value="Fiction">Fiction</option>
+                                        <option value="Science">Science</option>
+                                        <option value="History">History</option>
+                                        <option value="Literature">Literature</option>
+                                        <option value="Technology">Technology</option>
+                                    </select>
+                                </div>
+                                <div className="input-group-vertical">
+                                    <label className="field-label">ISBN (Optional)</label>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        value={newBook.isbn}
+                                        onChange={e => setNewBook({ ...newBook, isbn: e.target.value.toUpperCase() })}
+                                        placeholder="ISBN-13"
+                                    />
+                                </div>
+                            </div>
+
+                            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', height: '3.5rem', fontSize: '1.1rem' }}>
+                                <Save size={20} /> Save Book to Catalog
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
 export default LibraryManagement;
+

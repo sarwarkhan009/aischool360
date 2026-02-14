@@ -4,6 +4,7 @@ import { collection, addDoc, query, where, getDocs, getDoc, doc } from 'firebase
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useSchool } from '../../context/SchoolContext';
+import { toProperCase } from '../../utils/formatters';
 
 import { sortClasses } from '../../constants/app';
 
@@ -311,6 +312,7 @@ export default function AddTeachingLog() {
                                 type="text"
                                 value={entry.topic}
                                 onChange={(e) => updateEntry(index, 'topic', e.target.value)}
+                                onBlur={(e) => updateEntry(index, 'topic', toProperCase(e.target.value))}
                                 placeholder="e.g., Linear Equations, Photosynthesis, World War II"
                                 required
                                 style={{
@@ -332,6 +334,7 @@ export default function AddTeachingLog() {
                             <textarea
                                 value={entry.description}
                                 onChange={(e) => updateEntry(index, 'description', e.target.value)}
+                                onBlur={(e) => updateEntry(index, 'description', toProperCase(e.target.value))}
                                 placeholder="Additional details about what was covered..."
                                 rows={3}
                                 style={{

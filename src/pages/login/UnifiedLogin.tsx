@@ -41,17 +41,6 @@ const UnifiedLogin: React.FC = () => {
     const navigate = useNavigate();
     const { schoolId: urlSchoolId } = useParams();
 
-    // Update browser tab title based on school
-    useEffect(() => {
-        if (currentSchool?.customTitle) {
-            document.title = currentSchool.customTitle;
-        } else if (currentSchool?.name) {
-            document.title = `${currentSchool.name} - Login`;
-        } else {
-            document.title = `${APP_CONFIG.fullName} - Login`;
-        }
-    }, [currentSchool]);
-
     // Handle PWA Installation
     useEffect(() => {
         const handleBeforeInstallPrompt = (e: any) => {

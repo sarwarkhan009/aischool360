@@ -28,6 +28,7 @@ interface SchoolData {
     selectedReportCardTemplateId?: string;
     principalSignatureUrl?: string; // Principal signature image
     enableWatermark?: boolean; // Enable/disable watermark
+    activeFinancialYear?: string; // Active financial/academic year (e.g., "2025-26")
     academicYearStartMonth?: string; // Academic year start month (e.g., "April", "March")
     receiptHeaderUrl?: string; // Custom header image for fee receipt (replaces text header)
     receiptHeaderBase64?: string; // Base64 backup to bypass CORS in reports

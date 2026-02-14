@@ -42,6 +42,7 @@ import {
 import { db } from '../../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { compressImage } from '../../utils/imageUtils';
+import { toProperCase } from '../../utils/formatters';
 
 type ProfileSection = 'GENERAL' | 'SECURITY' | 'KYC' | 'PROFESSIONAL' | 'FAMILY' | 'FINANCIAL' | 'ADDRESS' | 'SOCIAL';
 
@@ -556,7 +557,7 @@ export default function UserProfile() {
                                         <label>Legal Full Name</label>
                                         <div className="input-with-icon">
                                             <User size={18} className="i-icon" />
-                                            <input type="text" value={profileData.name} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, name: e.target.value })} placeholder="Full name as per Aadhar" />
+                                            <input type="text" value={profileData.name} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, name: e.target.value })} onBlur={e => setProfileData({ ...profileData, name: toProperCase(e.target.value) })} placeholder="Full name as per Aadhar" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
@@ -600,14 +601,14 @@ export default function UserProfile() {
                                         <label>Father's Name</label>
                                         <div className="input-with-icon">
                                             <User size={18} className="i-icon" />
-                                            <input type="text" value={profileData.fatherName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, fatherName: e.target.value })} placeholder="Father's Name" />
+                                            <input type="text" value={profileData.fatherName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, fatherName: e.target.value })} onBlur={e => setProfileData({ ...profileData, fatherName: toProperCase(e.target.value) })} placeholder="Father's Name" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
                                         <label>Mother's Name</label>
                                         <div className="input-with-icon">
                                             <User size={18} className="i-icon" />
-                                            <input type="text" value={profileData.motherName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, motherName: e.target.value })} placeholder="Mother's Name" />
+                                            <input type="text" value={profileData.motherName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, motherName: e.target.value })} onBlur={e => setProfileData({ ...profileData, motherName: toProperCase(e.target.value) })} placeholder="Mother's Name" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
@@ -649,14 +650,14 @@ export default function UserProfile() {
                                         <label>Current Address</label>
                                         <div className="input-with-icon">
                                             <MapPin size={18} className="i-icon" />
-                                            <input type="text" value={profileData.address} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, address: e.target.value })} placeholder="Complete residential address" />
+                                            <input type="text" value={profileData.address} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, address: e.target.value })} onBlur={e => setProfileData({ ...profileData, address: toProperCase(e.target.value) })} placeholder="Complete residential address" />
                                         </div>
                                     </div>
                                     <div className="p-input-group full-width">
                                         <label>Permanent Address</label>
                                         <div className="input-with-icon">
                                             <Home size={18} className="i-icon" />
-                                            <input type="text" value={profileData.permanentAddress} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, permanentAddress: e.target.value })} placeholder="Permanent home address" />
+                                            <input type="text" value={profileData.permanentAddress} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, permanentAddress: e.target.value })} onBlur={e => setProfileData({ ...profileData, permanentAddress: toProperCase(e.target.value) })} placeholder="Permanent home address" />
                                         </div>
                                     </div>
                                 </div>
@@ -749,14 +750,14 @@ export default function UserProfile() {
                                         <label>Designation</label>
                                         <div className="input-with-icon">
                                             <Briefcase size={18} className="i-icon" />
-                                            <input type="text" value={profileData.designation} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, designation: e.target.value })} placeholder="e.g. Senior Teacher" />
+                                            <input type="text" value={profileData.designation} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, designation: e.target.value })} onBlur={e => setProfileData({ ...profileData, designation: toProperCase(e.target.value) })} placeholder="e.g. Senior Teacher" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
                                         <label>Department</label>
                                         <div className="input-with-icon">
                                             <Building2 size={18} className="i-icon" />
-                                            <input type="text" value={profileData.department} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, department: e.target.value })} placeholder="e.g. Mathematics" />
+                                            <input type="text" value={profileData.department} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, department: e.target.value })} onBlur={e => setProfileData({ ...profileData, department: toProperCase(e.target.value) })} placeholder="e.g. Mathematics" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
@@ -804,7 +805,7 @@ export default function UserProfile() {
                                         <label>Highest Qualification</label>
                                         <div className="input-with-icon">
                                             <GraduationCap size={18} className="i-icon" />
-                                            <input type="text" value={profileData.qualification} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, qualification: e.target.value })} placeholder="e.g. PhD in Physics, M.Ed" />
+                                            <input type="text" value={profileData.qualification} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, qualification: e.target.value })} onBlur={e => setProfileData({ ...profileData, qualification: toProperCase(e.target.value) })} placeholder="e.g. PhD in Physics, M.Ed" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
@@ -818,7 +819,7 @@ export default function UserProfile() {
                                         <label>Subjects / Specializations</label>
                                         <div className="input-with-icon">
                                             <BookOpen size={18} className="i-icon" />
-                                            <input type="text" value={profileData.specialization} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, specialization: e.target.value })} placeholder="e.g. Calculus" />
+                                            <input type="text" value={profileData.specialization} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, specialization: e.target.value })} onBlur={e => setProfileData({ ...profileData, specialization: toProperCase(e.target.value) })} placeholder="e.g. Calculus" />
                                         </div>
                                     </div>
                                     <div className="p-input-group full-width">
@@ -853,21 +854,21 @@ export default function UserProfile() {
                                         <label>Account Title</label>
                                         <div className="input-with-icon">
                                             <User size={18} className="i-icon" />
-                                            <input type="text" value={profileData.accountTitle} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, accountTitle: e.target.value })} placeholder="Name as per Bank" />
+                                            <input type="text" value={profileData.accountTitle} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, accountTitle: e.target.value })} onBlur={e => setProfileData({ ...profileData, accountTitle: toProperCase(e.target.value) })} placeholder="Name as per Bank" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
                                         <label>Bank Name</label>
                                         <div className="input-with-icon">
                                             <Landmark size={18} className="i-icon" />
-                                            <input type="text" value={profileData.bankName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, bankName: e.target.value })} placeholder="e.g. State Bank of India" />
+                                            <input type="text" value={profileData.bankName} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, bankName: e.target.value })} onBlur={e => setProfileData({ ...profileData, bankName: toProperCase(e.target.value) })} placeholder="e.g. State Bank of India" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
                                         <label>Bank Branch Name</label>
                                         <div className="input-with-icon">
                                             <MapPin size={18} className="i-icon" />
-                                            <input type="text" value={profileData.bankBranch} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, bankBranch: e.target.value })} placeholder="Branch Location" />
+                                            <input type="text" value={profileData.bankBranch} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, bankBranch: e.target.value })} onBlur={e => setProfileData({ ...profileData, bankBranch: toProperCase(e.target.value) })} placeholder="Branch Location" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">
@@ -956,7 +957,7 @@ export default function UserProfile() {
                                         <label>Emergency Contact Person</label>
                                         <div className="input-with-icon">
                                             <Users size={18} className="i-icon" />
-                                            <input type="text" value={profileData.emergencyContact} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, emergencyContact: e.target.value })} placeholder="e.g. Uncle, Neighbour, Relative" />
+                                            <input type="text" value={profileData.emergencyContact} disabled={!isEditing} onChange={e => setProfileData({ ...profileData, emergencyContact: e.target.value })} onBlur={e => setProfileData({ ...profileData, emergencyContact: toProperCase(e.target.value) })} placeholder="e.g. Uncle, Neighbour, Relative" />
                                         </div>
                                     </div>
                                     <div className="p-input-group">

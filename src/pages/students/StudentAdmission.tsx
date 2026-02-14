@@ -4,7 +4,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useSchool } from '../../context/SchoolContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { calculateAge } from '../../utils/dateUtils';
-import { getActiveClasses, SESSIONS } from '../../constants/app';
+import { getActiveClasses } from '../../constants/app';
 import { toProperCase, formatClassName } from '../../utils/formatters';
 import { compressImage } from '../../utils/imageUtils';
 
@@ -63,6 +63,10 @@ const StudentAdmission: React.FC = () => {
     const { data: allSettings, loading: settingsLoading } = useFirestore<any>('settings');
     const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
     const { data: feeAmounts } = useFirestore<any>('fee_amounts');
+    const { data: academicYears } = useFirestore<any>('academic_years');
+
+    const activeFY = currentSchool?.activeFinancialYear || '';
+    const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived).map((y: any) => y.name).sort();
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [fieldSettings, setFieldSettings] = useState<any[]>([]);
@@ -179,7 +183,7 @@ const StudentAdmission: React.FC = () => {
         guardianAddress: initialStudent?.guardianAddress || '',
 
         // Step 4: Admission Details (Office Use)
-        session: initialStudent?.session || SESSIONS[0], // Default to 2025-26 from our list
+        session: initialStudent?.session || activeFY, // Default to active academic year
         admissionDate: initialStudent?.admissionDate || new Date().toISOString().split('T')[0],
         admissionNo: initialStudent?.admissionNo || '',
         class: initialStudent?.class || initialStudent?.admissionClass || '',
@@ -443,7 +447,7 @@ const StudentAdmission: React.FC = () => {
                                 {isFieldEnabled('fullName') && (
                                     <div className="input-group-vertical">
                                         <label className="field-label">Student Full Name{isFieldRequired('fullName') && <span style={{ color: '#ef4444' }}> *</span>}</label>
-                                        <input type="text" placeholder="Enter full name" className="input-field-premium important" value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value })} />
+                                        <input type="text" placeholder="Enter full name" className="input-field-premium important" value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value })} onBlur={e => setFormData({ ...formData, fullName: toProperCase(e.target.value) })} />
                                     </div>
                                 )}
                                 {isFieldEnabled('dob') && (
@@ -528,6 +532,7 @@ const StudentAdmission: React.FC = () => {
                                             style={{ minHeight: '80px', resize: 'none' }}
                                             value={formData.permanentAddress}
                                             onChange={e => setFormData({ ...formData, permanentAddress: e.target.value, presentAddress: formData.isAddressSame ? e.target.value : formData.presentAddress })}
+                                            onBlur={e => setFormData({ ...formData, permanentAddress: toProperCase(e.target.value), presentAddress: formData.isAddressSame ? toProperCase(e.target.value) : formData.presentAddress })}
                                         />
                                     </div>
                                 )}
@@ -545,6 +550,7 @@ const StudentAdmission: React.FC = () => {
                                             style={{ minHeight: '80px', resize: 'none' }}
                                             value={formData.presentAddress}
                                             onChange={e => setFormData({ ...formData, presentAddress: e.target.value })}
+                                            onBlur={e => setFormData({ ...formData, presentAddress: toProperCase(e.target.value) })}
                                             disabled={formData.isAddressSame}
                                         />
                                     </div>
@@ -607,7 +613,7 @@ const StudentAdmission: React.FC = () => {
                                         <label className="field-label">
                                             Previous School{isFieldRequired('previousSchool') && <span style={{ color: '#ef4444' }}> *</span>}
                                         </label>
-                                        <input type="text" placeholder="Previous school name" className="input-field-premium" value={formData.previousSchool} onChange={e => setFormData({ ...formData, previousSchool: e.target.value })} />
+                                        <input type="text" placeholder="Previous school name" className="input-field-premium" value={formData.previousSchool} onChange={e => setFormData({ ...formData, previousSchool: e.target.value })} onBlur={e => setFormData({ ...formData, previousSchool: toProperCase(e.target.value) })} />
                                     </div>
                                 )}
                                 {isFieldEnabled('diseaseAllergy') && (
@@ -629,7 +635,7 @@ const StudentAdmission: React.FC = () => {
                                 <div className="field-column">
                                     <div className="input-group-vertical">
                                         <label className="field-label">Father's Name <span style={{ color: '#ef4444' }}>*</span></label>
-                                        <input type="text" placeholder="Enter father's name" className="input-field-premium" value={formData.fatherName} onChange={e => setFormData({ ...formData, fatherName: e.target.value })} />
+                                        <input type="text" placeholder="Enter father's name" className="input-field-premium" value={formData.fatherName} onChange={e => setFormData({ ...formData, fatherName: e.target.value })} onBlur={e => setFormData({ ...formData, fatherName: toProperCase(e.target.value) })} />
                                     </div>
                                     {isFieldEnabled('fatherAadharNo') && (
                                         <div className="input-group-vertical">
@@ -725,6 +731,7 @@ const StudentAdmission: React.FC = () => {
                                                 style={{ minHeight: '80px', resize: 'none' }}
                                                 value={formData.fatherAddress}
                                                 onChange={e => setFormData({ ...formData, fatherAddress: e.target.value })}
+                                                onBlur={e => setFormData({ ...formData, fatherAddress: toProperCase(e.target.value) })}
                                                 disabled={formData.isFatherAddressSame}
                                             />
                                         </div>
@@ -775,7 +782,7 @@ const StudentAdmission: React.FC = () => {
                                 <div className="field-column">
                                     <div className="input-group-vertical">
                                         <label className="field-label">Mother's Name <span style={{ color: '#ef4444' }}>*</span></label>
-                                        <input type="text" placeholder="Enter mother's name" className="input-field-premium" value={formData.motherName} onChange={e => setFormData({ ...formData, motherName: e.target.value })} />
+                                        <input type="text" placeholder="Enter mother's name" className="input-field-premium" value={formData.motherName} onChange={e => setFormData({ ...formData, motherName: e.target.value })} onBlur={e => setFormData({ ...formData, motherName: toProperCase(e.target.value) })} />
                                     </div>
                                     {isFieldEnabled('motherAadharNo') && (
                                         <div className="input-group-vertical">
@@ -955,7 +962,7 @@ const StudentAdmission: React.FC = () => {
                                 {isFieldEnabled('session') && (
                                     <SegmentedControl
                                         label={`Session ${isFieldRequired('session') ? '*' : ''}`}
-                                        options={SESSIONS}
+                                        options={schoolYears.length > 0 ? schoolYears : [activeFY]}
                                         value={formData.session}
                                         onChange={val => setFormData({ ...formData, session: val })}
                                     />

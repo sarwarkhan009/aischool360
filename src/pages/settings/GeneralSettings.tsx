@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Edit2, Plus, BrainCircuit, Database, Save, Loader2, ShoppingBag, Shield, CreditCard, Image as ImageIcon, FileText, BookOpen, Upload } from 'lucide-react';
+import { Trash2, Edit2, Plus, BrainCircuit, Database, Save, Loader2, ShoppingBag, Shield, CreditCard, Image as ImageIcon, FileText, BookOpen, Upload, Copy, Check } from 'lucide-react';
 import { usePersistence } from '../../hooks/usePersistence';
 import { seedDatabase, clearDatabase } from '../../lib/dbSeeder';
 import { APP_CONFIG, CLASS_ORDER, getActiveClasses } from '../../constants/app';
 import { db, storage } from '../../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
-import { formatClassName } from '../../utils/formatters';
+import { formatClassName, toProperCase } from '../../utils/formatters';
 
 /**
  * Main Settings Page (Legacy/Overview)
@@ -102,7 +102,9 @@ export function BankSettings() {
                     <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>ACCOUNT NAME</label>
                     <input
                         type="text" className="input-field"
-                        value={config.accountName} onChange={e => setConfig({ ...config, accountName: e.target.value })}
+                        value={config.accountName}
+                        onChange={e => setConfig({ ...config, accountName: e.target.value })}
+                        onBlur={e => setConfig({ ...config, accountName: toProperCase(e.target.value) })}
                     />
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem' }}>
@@ -126,14 +128,18 @@ export function BankSettings() {
                         <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>BANK NAME</label>
                         <input
                             type="text" className="input-field"
-                            value={config.bankName} onChange={e => setConfig({ ...config, bankName: e.target.value })}
+                            value={config.bankName}
+                            onChange={e => setConfig({ ...config, bankName: e.target.value })}
+                            onBlur={e => setConfig({ ...config, bankName: toProperCase(e.target.value) })}
                         />
                     </div>
                     <div className="input-group">
                         <label style={{ fontSize: '0.75rem', fontWeight: 800 }}>BRANCH</label>
                         <input
                             type="text" className="input-field"
-                            value={config.branch} onChange={e => setConfig({ ...config, branch: e.target.value })}
+                            value={config.branch}
+                            onChange={e => setConfig({ ...config, branch: e.target.value })}
+                            onBlur={e => setConfig({ ...config, branch: toProperCase(e.target.value) })}
                         />
                     </div>
                 </div>
@@ -1171,6 +1177,7 @@ export function InstitutionInfo() {
                                 className="input-field"
                                 value={info.name}
                                 onChange={e => setInfo({ ...info, name: e.target.value })}
+                                onBlur={e => setInfo({ ...info, name: toProperCase(e.target.value) })}
                                 placeholder=""
                             />
                         </div>
@@ -1181,6 +1188,7 @@ export function InstitutionInfo() {
                                 className="input-field"
                                 value={info.fullName}
                                 onChange={e => setInfo({ ...info, fullName: e.target.value })}
+                                onBlur={e => setInfo({ ...info, fullName: toProperCase(e.target.value) })}
                                 placeholder="e.g., Paramount Public High School"
                             />
                         </div>
@@ -1192,6 +1200,7 @@ export function InstitutionInfo() {
                             className="input-field"
                             value={info.customTitle}
                             onChange={e => setInfo({ ...info, customTitle: e.target.value })}
+                            onBlur={e => setInfo({ ...info, customTitle: toProperCase(e.target.value) })}
                             placeholder="e.g., Paramount Public High School - School Management"
                         />
                         <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -1278,6 +1287,7 @@ export function InstitutionInfo() {
                                 className="input-field"
                                 value={info.contactPerson}
                                 onChange={e => setInfo({ ...info, contactPerson: e.target.value })}
+                                onBlur={e => setInfo({ ...info, contactPerson: toProperCase(e.target.value) })}
                             />
                         </div>
                         <div className="input-group">
@@ -1403,6 +1413,7 @@ export function InstitutionInfo() {
                             style={{ minHeight: '80px' }}
                             value={info.address}
                             onChange={e => setInfo({ ...info, address: e.target.value })}
+                            onBlur={e => setInfo({ ...info, address: toProperCase(e.target.value) })}
                         />
                     </div>
 
@@ -1883,8 +1894,16 @@ const PricingTypeToggle = ({ value, onChange }: { value: 'fixed' | 'classwise'; 
 export function InventoryMaster() {
     const { currentSchool } = useSchool();
     const { data: allSettings, loading } = useFirestore<any>('settings');
+    const { data: academicYears } = useFirestore<any>('academic_years');
     const [isSaving, setIsSaving] = useState(false);
+    const [isCopying, setIsCopying] = useState(false);
     const [expandedItem, setExpandedItem] = useState<string | null>(null);
+
+    const activeFY = currentSchool?.activeFinancialYear || '';
+    const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived).map((y: any) => y.name).sort();
+    const currentYearIndex = schoolYears.indexOf(activeFY);
+    const nextFY = currentYearIndex >= 0 && currentYearIndex < schoolYears.length - 1 ? schoolYears[currentYearIndex + 1] : '';
+    const previousFY = currentYearIndex > 0 ? schoolYears[currentYearIndex - 1] : '';
 
     // Add item form
     const [newItem, setNewItem] = useState({ name: '', price: 0, pricingType: 'fixed' as 'fixed' | 'classwise' });
@@ -1902,24 +1921,44 @@ export function InventoryMaster() {
         : [];
     const sortedClassNames = activeClasses.map((c: any) => c.name);
 
+    // All inventory items for this school
+    const allInventoryItems = allSettings?.filter((d: any) => d.type === 'inventory' && d.schoolId === currentSchool?.id) || [];
+    // Untagged items (no financialYear field)
+    const untaggedItems = allInventoryItems.filter((d: any) => !d.financialYear);
+    // Items for active FY
+    const items = allInventoryItems.filter((d: any) => d.financialYear === activeFY) || [];
+
+    const getDisplayPrice = (item: any) => {
+        if (item.pricingType === 'classwise' && item.classPrices) {
+            const prices = Object.values(item.classPrices).filter((p: any) => p > 0) as number[];
+            if (prices.length === 0) return '—';
+            const minP = Math.min(...prices);
+            const maxP = Math.max(...prices);
+            if (minP === maxP) return `₹${minP}`;
+            return `₹${minP} – ₹${maxP}`;
+        }
+        return `₹${item.price || 0}`;
+    };
+
     const handleAddItem = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newItem.name || !currentSchool?.id) return;
         setIsSaving(true);
         try {
-            const docId = `inv_${newItem.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id}`;
+            const docId = `inv_${newItem.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id}_${activeFY.replace(/[^a-z0-9]/gi, '')}`;
             const itemData: any = {
                 name: newItem.name,
                 schoolId: currentSchool.id,
                 type: 'inventory',
                 pricingType: newItem.pricingType,
+                financialYear: activeFY,
                 createdAt: new Date().toISOString()
             };
             if (newItem.pricingType === 'fixed') {
                 itemData.price = newItem.price;
             } else {
                 itemData.classPrices = newClassPrices;
-                itemData.price = 0; // Default fallback
+                itemData.price = 0;
             }
             await setDoc(doc(db, 'settings', docId), itemData);
             setNewItem({ name: '', price: 0, pricingType: 'fixed' });
@@ -1940,7 +1979,7 @@ export function InventoryMaster() {
             };
             if (editPricingType === 'fixed') {
                 updateData.price = editPrice;
-                updateData.classPrices = {}; // Clear class prices
+                updateData.classPrices = {};
             } else {
                 updateData.classPrices = editClassPrices;
                 updateData.price = 0;
@@ -1973,41 +2012,162 @@ export function InventoryMaster() {
         setEditClassPrices(item.classPrices || {});
     };
 
-    const items = allSettings?.filter((d: any) => d.type === 'inventory' && d.schoolId === currentSchool?.id) || [];
-
-    const getDisplayPrice = (item: any) => {
-        if (item.pricingType === 'classwise' && item.classPrices) {
-            const prices = Object.values(item.classPrices).filter((p: any) => p > 0) as number[];
-            if (prices.length === 0) return '—';
-            const minP = Math.min(...prices);
-            const maxP = Math.max(...prices);
-            if (minP === maxP) return `₹${minP}`;
-            return `₹${minP} – ₹${maxP}`;
+    // Copy inventory items to another session
+    const handleCopyToSession = async (targetFY: string, sourceFY: string) => {
+        const sourceItems = allInventoryItems.filter((d: any) => d.financialYear === sourceFY);
+        if (sourceItems.length === 0) {
+            alert(`No inventory items found in ${sourceFY} to copy.`);
+            return;
         }
-        return `₹${item.price || 0}`;
+        const targetItems = allInventoryItems.filter((d: any) => d.financialYear === targetFY);
+        if (targetItems.length > 0) {
+            if (!window.confirm(`Session ${targetFY} already has ${targetItems.length} item(s). Copying will only add missing ones.\n\nContinue?`)) return;
+        } else {
+            if (!window.confirm(`Copy ${sourceItems.length} item(s) from ${sourceFY} to ${targetFY}?`)) return;
+        }
+
+        setIsCopying(true);
+        try {
+            let copiedCount = 0;
+            for (const item of sourceItems) {
+                const existsInTarget = targetItems.some((t: any) => t.name === item.name);
+                if (!existsInTarget) {
+                    const newDocId = `inv_${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool?.id}_${targetFY.replace(/[^a-z0-9]/gi, '')}`;
+                    await setDoc(doc(db, 'settings', newDocId), {
+                        name: item.name,
+                        schoolId: currentSchool?.id,
+                        type: 'inventory',
+                        pricingType: item.pricingType || 'fixed',
+                        price: item.price || 0,
+                        classPrices: item.classPrices || {},
+                        financialYear: targetFY,
+                        copiedFrom: sourceFY,
+                        createdAt: new Date().toISOString()
+                    });
+                    copiedCount++;
+                }
+            }
+            alert(`Successfully copied ${copiedCount} item(s) from ${sourceFY} to ${targetFY}.`);
+        } catch (err) {
+            alert('Failed to copy: ' + (err as Error).message);
+        } finally {
+            setIsCopying(false);
+        }
+    };
+
+    // Tag untagged inventory items
+    const handleTagItems = async () => {
+        if (untaggedItems.length === 0) return;
+        if (!window.confirm(`Tag ${untaggedItems.length} item(s) without a session to "${activeFY}"?`)) return;
+
+        setIsCopying(true);
+        try {
+            for (let i = 0; i < untaggedItems.length; i += 500) {
+                const chunk = untaggedItems.slice(i, i + 500);
+                const batch = writeBatch(db);
+                chunk.forEach((item: any) => {
+                    batch.update(doc(db, 'settings', item.id), { financialYear: activeFY });
+                });
+                await batch.commit();
+            }
+            alert(`Successfully tagged ${untaggedItems.length} item(s) to ${activeFY}.`);
+        } catch (err) {
+            alert('Failed to tag: ' + (err as Error).message);
+        } finally {
+            setIsCopying(false);
+        }
     };
 
     return (
         <div className="animate-fade-in no-scrollbar" style={{ paddingBottom: '2rem' }}>
             {/* Header */}
             <div className="page-header" style={{ marginBottom: '2rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <div style={{
-                        width: '52px', height: '52px', borderRadius: '16px',
-                        background: 'linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%)',
-                        color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 8px 16px -4px rgba(99, 102, 241, 0.4)'
-                    }}>
-                        <ShoppingBag size={26} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div style={{
+                            width: '52px', height: '52px', borderRadius: '16px',
+                            background: 'linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%)',
+                            color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 8px 16px -4px rgba(99, 102, 241, 0.4)'
+                        }}>
+                            <ShoppingBag size={26} />
+                        </div>
+                        <div>
+                            <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.025em' }}>Inventory Master</h1>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                Manage school items — books, uniforms, stationery and more.
+                                <span style={{ background: 'var(--primary)', color: 'white', padding: '0.15rem 0.6rem', borderRadius: '6px', fontWeight: 700, fontSize: '0.75rem' }}>FY: {activeFY}</span>
+                            </p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.025em' }}>Inventory Master</h1>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-                            Manage school items — books, uniforms, stationery and more.
-                        </p>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        {previousFY && (
+                            <button
+                                onClick={() => handleCopyToSession(activeFY, previousFY)}
+                                disabled={isCopying}
+                                style={{
+                                    background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)',
+                                    padding: '0.5rem 1rem', fontSize: '0.8125rem', fontWeight: 700,
+                                    border: '1px solid rgba(99, 102, 241, 0.2)', borderRadius: '10px',
+                                    cursor: isCopying ? 'not-allowed' : 'pointer', display: 'flex',
+                                    alignItems: 'center', gap: '0.4rem', opacity: isCopying ? 0.6 : 1
+                                }}
+                            >
+                                <Copy size={16} /> {isCopying ? 'Copying...' : `Copy from ${previousFY}`}
+                            </button>
+                        )}
+                        {nextFY && (
+                            <button
+                                onClick={() => handleCopyToSession(nextFY, activeFY)}
+                                disabled={isCopying}
+                                style={{
+                                    background: 'rgba(16, 185, 129, 0.1)', color: '#059669',
+                                    padding: '0.5rem 1rem', fontSize: '0.8125rem', fontWeight: 700,
+                                    border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '10px',
+                                    cursor: isCopying ? 'not-allowed' : 'pointer', display: 'flex',
+                                    alignItems: 'center', gap: '0.4rem', opacity: isCopying ? 0.6 : 1
+                                }}
+                            >
+                                <Copy size={16} /> {isCopying ? 'Copying...' : `Copy to ${nextFY}`}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {/* Untagged Items Warning */}
+            {untaggedItems.length > 0 && (
+                <div style={{
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '1px solid #f59e0b', borderRadius: '12px',
+                    padding: '1rem 1.5rem', marginBottom: '1.5rem',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: '1rem', flexWrap: 'wrap'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <ShoppingBag size={22} style={{ color: '#d97706', flexShrink: 0 }} />
+                        <div>
+                            <div style={{ fontWeight: 800, color: '#92400e', fontSize: '0.9375rem' }}>
+                                {untaggedItems.length} inventory item(s) found without a session tag!
+                            </div>
+                            <div style={{ fontSize: '0.8125rem', color: '#a16207', marginTop: '2px' }}>
+                                These items were saved before session tagging. Tag them to see them here.
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleTagItems}
+                        disabled={isCopying}
+                        style={{
+                            background: '#f59e0b', color: 'white', padding: '0.6rem 1.25rem',
+                            fontSize: '0.8125rem', fontWeight: 800, border: 'none', borderRadius: '8px',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap'
+                        }}
+                    >
+                        <Check size={16} /> {isCopying ? 'Tagging...' : `Tag to ${activeFY}`}
+                    </button>
+                </div>
+            )}
 
             {/* Add New Item Card */}
             <div className="glass-card" style={{ padding: '1.75rem', marginBottom: '1.5rem' }}>
@@ -2027,6 +2187,7 @@ export function InventoryMaster() {
                                     placeholder="e.g. School Bag, Books, ID Card..."
                                     value={newItem.name}
                                     onChange={e => setNewItem({ ...newItem, name: e.target.value })}
+                                    onBlur={e => setNewItem({ ...newItem, name: toProperCase(e.target.value) })}
                                     required
                                 />
                             </div>

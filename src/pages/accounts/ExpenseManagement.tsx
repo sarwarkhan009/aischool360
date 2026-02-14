@@ -385,6 +385,7 @@ const ExpenseManagement: React.FC = () => {
                                     required
                                     value={newLedgerName}
                                     onChange={e => setNewLedgerName(e.target.value)}
+                                    onBlur={e => setNewLedgerName(toProperCase(e.target.value))}
                                     placeholder="e.g. Electricity Bill"
                                 />
                             </div>
@@ -454,6 +455,7 @@ const ExpenseManagement: React.FC = () => {
                                             rows={3}
                                             value={expenseData.description}
                                             onChange={e => setExpenseData({ ...expenseData, description: e.target.value })}
+                                            onBlur={e => setExpenseData({ ...expenseData, description: toProperCase(e.target.value) })}
                                             placeholder="Add any notes here..."
                                         />
                                     </div>
