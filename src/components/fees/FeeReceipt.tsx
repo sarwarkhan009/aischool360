@@ -315,7 +315,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                                     return (
                                         <tr key={feeName}>
                                             <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
-                                                {feeName}
+                                                {feeName.toLowerCase().includes('monthly') ? 'Tuition Fee' : feeName}
                                                 {isMonthlyFee && displayPaidFor && (
                                                     <span style={{ fontSize: '9px', fontWeight: 'normal', display: 'inline-block', marginLeft: '4px' }}>
                                                         ({displayPaidFor})

@@ -776,7 +776,7 @@ const FeeManagement: React.FC = () => {
                                             <td style={{ padding: '0.75rem 1rem', color: dues > 0 ? '#ef4444' : 'inherit', fontWeight: 700 }}>{dues.toFixed(2)}</td>
                                             <td style={{ padding: '0.75rem 1rem' }}>
                                                 <div style={{ display: 'flex', gap: '0.25rem' }}>
-                                                    <button onClick={() => handleSelectStudent(stu, 'PAY')} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '0.4rem 0.6rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>Pay</button>
+                                                    <button onClick={() => handleSelectStudent(stu, 'PAY')} style={{ background: '#22c55e', color: 'white', border: 'none', padding: '0.4rem 0.6rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>Rcpt</button>
                                                     <button onClick={() => handleSelectStudent(stu, 'LEDGER')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '0.4rem 0.6rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>Ledger</button>
                                                     <button onClick={() => handleSelectStudent(stu, 'SALE')} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '0.4rem 0.6rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>Sale</button>
                                                 </div>
