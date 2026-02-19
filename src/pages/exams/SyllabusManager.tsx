@@ -52,7 +52,10 @@ const SyllabusManager: React.FC = () => {
     const { data: syllabuses, add: addDocument, update, remove: deleteDocument } = useFirestore<ExamSyllabus>('exam_syllabus');
     const { data: allSettings } = useFirestore<any>('settings');
 
-    const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || []);
+    const activeClasses = getActiveClasses(
+        allSettings?.filter((d: any) => d.type === 'class') || [],
+        currentSchool?.activeFinancialYear
+    );
 
     const [selectedExamId, setSelectedExamId] = useState<string>('');
     const [selectedClass, setSelectedClass] = useState<string>('');

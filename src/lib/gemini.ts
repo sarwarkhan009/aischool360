@@ -1,31 +1,35 @@
 
 
 
-// List of available models to rotate through due to strict limits
+// Flagship models (2026) - Prioritizing Gemini 3 family
 const MODELS = [
-    //"gemini-3-pro-preview",
-    "gemini-3-flash-preview",
+    "gemini-3-flash-preview",    // Best combination of speed/multimodal (OCR)
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash",          // Shutdown scheduled June 2026
     "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    //"gemini-1.5-flash"
 ];
 
-// More capable models for routine generation (complex scheduling)
-const ROUTINE_MODELS = [
-   // "gemini-3-flash",
-    "gemini-3-flash-preview",
+// Dedicated OCR models for high-quality vision extraction
+const OCR_MODELS = [
+    "gemini-3-flash-preview",    // Flagship vision model
     "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-pro",
     "gemini-3-pro-preview",
 ];
 
+// Complex reasoning/logic models for scheduling
+const ROUTINE_MODELS = [
+    "gemini-3-pro-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+];
+
 // Get current model index from localStorage or default to 0
-let currentModelIndex = parseInt(localStorage.getItem('millat_ai_model_index') || '0');
+// Using consistent key: aischool360_ai_model_index
+let currentModelIndex = parseInt(localStorage.getItem('aischool360_ai_model_index') || '0');
 if (currentModelIndex >= MODELS.length) {
     currentModelIndex = 0;
-    localStorage.setItem('millat_ai_model_index', '0');
+    localStorage.setItem('aischool360_ai_model_index', '0');
 }
 
 export const transcribeAudioWithGemini = async (base64Audio: string, apiKey: string) => {
@@ -84,7 +88,7 @@ export const transcribeAudioWithGemini = async (base64Audio: string, apiKey: str
 
                     // Rotate to next model immediately
                     currentModelIndex = (currentModelIndex + 1) % MODELS.length;
-                    localStorage.setItem('millat_ai_model_index', currentModelIndex.toString());
+                    localStorage.setItem('aischool360_ai_model_index', currentModelIndex.toString());
 
                     attempts++;
                     continue; // Retry with next model
@@ -107,7 +111,7 @@ export const transcribeAudioWithGemini = async (base64Audio: string, apiKey: str
 
             // If it's a fetch error or something unexpected, try next model just in case
             currentModelIndex = (currentModelIndex + 1) % MODELS.length;
-            localStorage.setItem('millat_ai_model_index', currentModelIndex.toString());
+            localStorage.setItem('aischool360_ai_model_index', currentModelIndex.toString());
             attempts++;
         }
     }
@@ -182,7 +186,7 @@ export const analyzeDataWithGemini = async (prompt: string, contextData: any, ap
 
                     // Rotate to next model immediately
                     currentModelIndex = (currentModelIndex + 1) % MODELS.length;
-                    localStorage.setItem('millat_ai_model_index', currentModelIndex.toString());
+                    localStorage.setItem('aischool360_ai_model_index', currentModelIndex.toString());
 
                     attempts++;
                     continue; // Retry with next model
@@ -199,7 +203,7 @@ export const analyzeDataWithGemini = async (prompt: string, contextData: any, ap
 
             // If it's a fetch error or something unexpected, try next model just in case
             currentModelIndex = (currentModelIndex + 1) % MODELS.length;
-            localStorage.setItem('millat_ai_model_index', currentModelIndex.toString());
+            localStorage.setItem('aischool360_ai_model_index', currentModelIndex.toString());
             attempts++;
         }
     }
@@ -279,4 +283,117 @@ export const analyzeRoutineWithGemini = async (prompt: string, contextData: any,
     }
 
     throw new Error("All routine generation models exhausted. Please try again later.");
+};
+
+// Extract questions from an image using Gemini Vision
+export const extractQuestionsFromImage = async (
+    base64Image: string,
+    mimeType: 'image/jpeg' | 'image/png' | 'image/webp',
+    apiKey: string,
+    context?: { className?: string; subjectName?: string; chapterName?: string }
+): Promise<string> => {
+    let attempts = 0;
+    const maxAttempts = OCR_MODELS.length;
+
+    // Separate OCR model rotation index
+    let ocrModelIndex = parseInt(localStorage.getItem('aischool360_ocr_model_index') || '0');
+    if (ocrModelIndex >= OCR_MODELS.length) {
+        ocrModelIndex = 0;
+        localStorage.setItem('aischool360_ocr_model_index', '0');
+    }
+
+    while (attempts < maxAttempts) {
+        const modelName = OCR_MODELS[ocrModelIndex];
+        console.log(`[OCR AI] Attempting image extraction with model: ${modelName} (Attempt ${attempts + 1}/${maxAttempts})`);
+
+        try {
+            const contextHint = context
+                ? `This image is from ${context.className || ''} ${context.subjectName || ''} - Chapter: ${context.chapterName || ''}.`
+                : '';
+
+            const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                {
+                                    inline_data: {
+                                        mime_type: mimeType,
+                                        data: base64Image
+                                    }
+                                },
+                                {
+                                    text: `${contextHint}
+Extract ALL questions from this image accurately. Follow these rules:
+1. List EVERY question on a new line, numbered (e.g., Q1., Q2., ...).
+2. Preserve sub-questions (a, b, c) exactly as written.
+3. Include marks in brackets if shown (e.g., [2 marks]).
+4. Keep mathematical symbols and formulas as plain text (e.g., x^2, sqrt(9)).
+5. Extract Hindi/Urdu text using Devanagari/Arabic script as-is.
+6. Do NOT add any explanations or answers — only extract questions.
+7. Do NOT stop early — extract until the LAST question in the image.
+8. If no questions are found, return: "No questions found in image."
+
+Output format:
+Q1. [question text] [marks if any]
+Q2. [question text] [marks if any]
+...`
+                                }
+                            ]
+                        }],
+                        generationConfig: {
+                            maxOutputTokens: 8192,  // Prevent truncation
+                            temperature: 0.1
+                        }
+                    })
+                }
+            );
+
+            const data = await response.json();
+
+            if (data.error) {
+                const isQuotaError = data.error.message?.toLowerCase().includes('quota') ||
+                    data.error.message?.toLowerCase().includes('limit') ||
+                    data.error.code === 429;
+                const isNotFoundError = data.error.code === 404 ||
+                    data.error.message?.toLowerCase().includes('not found');
+
+                if (isQuotaError || isNotFoundError) {
+                    console.warn(`[OCR AI] Model ${modelName} failed. Rotating...`);
+                    ocrModelIndex = (ocrModelIndex + 1) % OCR_MODELS.length;
+                    localStorage.setItem('aischool360_ocr_model_index', ocrModelIndex.toString());
+                    attempts++;
+                    continue;
+                }
+                throw new Error(data.error.message || 'Image extraction failed');
+            }
+
+            // Check for truncated response (finishReason !== STOP means truncated)
+            const finishReason = data.candidates?.[0]?.finishReason;
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            if (!text) throw new Error('No text returned from Gemini');
+
+            if (finishReason && finishReason !== 'STOP') {
+                console.warn(`[OCR AI] Response may be truncated (finishReason: ${finishReason}). Trying next model...`);
+                ocrModelIndex = (ocrModelIndex + 1) % OCR_MODELS.length;
+                localStorage.setItem('aischool360_ocr_model_index', ocrModelIndex.toString());
+                attempts++;
+                continue;
+            }
+
+            console.log('[OCR AI] Extraction successful');
+            return text;
+
+        } catch (error: any) {
+            console.error(`[OCR AI] Error with model ${modelName}:`, error);
+            ocrModelIndex = (ocrModelIndex + 1) % OCR_MODELS.length;
+            localStorage.setItem('aischool360_ocr_model_index', ocrModelIndex.toString());
+            attempts++;
+        }
+    }
+
+    throw new Error('All models exhausted for image extraction. Please try again later.');
 };

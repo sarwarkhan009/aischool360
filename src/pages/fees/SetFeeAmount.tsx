@@ -37,7 +37,7 @@ const SetFeeAmount: React.FC = () => {
     const existingFeeAmounts = allFeeAmounts.filter((fa: any) => fa.financialYear === activeFY);
     const fyFeeTypes = feeTypes.filter((ft: any) => !ft.financialYear || ft.financialYear === activeFY);
 
-    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []).map(c => c.name);
+    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], activeFY).map(c => c.name);
 
     // Form State
     const [selectedClasses, setSelectedClasses] = useState<string[]>([]);

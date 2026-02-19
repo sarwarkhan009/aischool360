@@ -14,11 +14,11 @@ import {
     Edit2
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { useFirestore } from '../../hooks/useFirestore';
 import { usePersistence } from '../../hooks/usePersistence';
 import { useSchool } from '../../context/SchoolContext';
-import { sortClasses } from '../../constants/app';
+import { sortClasses, getActiveClasses } from '../../constants/app';
 
 interface QuestionType {
     name: string;
@@ -41,6 +41,19 @@ interface DifficultyLevel {
     percentage: number;
     color: string;
 }
+
+interface BankEntry {
+    id: string;
+    className: string;
+    subjectName: string;
+    chapterName: string;
+    extractedText: string;
+    imageCount: number;
+    createdAt: string;
+}
+
+type QuestionSource = 'ncert' | 'questionbank';
+type QuestionBankMode = 'exact' | 'rephrased';
 
 const DEFAULT_QUESTION_TYPES: QuestionType[] = [
     { name: 'Multiple Choice Questions', marks: 1, count: 0 },
@@ -73,8 +86,14 @@ const QuestionGenerator: React.FC = () => {
     // For managing master data
     const [classes, setClasses] = useState<ClassData[]>([]);
 
+    // Question Bank Source
+    const [questionSource, setQuestionSource] = useState<QuestionSource>('ncert');
+    const [questionBankMode, setQuestionBankMode] = useState<QuestionBankMode>('exact');
+    const [bankEntries, setBankEntries] = useState<BankEntry[]>([]);
+    const [isLoadingBank, setIsLoadingBank] = useState(false);
+
     // Fetch API Key from localStorage (same as AIAssistant)
-    const [geminiApiKey, setGeminiApiKey] = usePersistence<string>('millat_gemini_api_key', '');
+    const [geminiApiKey, setGeminiApiKey] = usePersistence<string>('aischool360_gemini_api_key', '');
     const { currentSchool } = useSchool();
     const { data: settings } = useFirestore<any>('settings');
 
@@ -163,39 +182,50 @@ const QuestionGenerator: React.FC = () => {
 
                     // Iterate through each subject
                     data.subjects.forEach((subject: { name: string; chaptersPerClass: { [className: string]: string[] }; enabledFor: string[] }) => {
-                        // For each class this subject is enabled for
-                        subject.enabledFor.forEach((className: string) => {
+                        const subjectName = (subject.name || '').trim();
+                        if (!subjectName) return;
+
+                        // Use a Set to avoid processing duplicate class tags within the same subject
+                        const uniqueClassNames = new Set((subject.enabledFor || []).map(cn => cn.trim()));
+
+                        uniqueClassNames.forEach((className: string) => {
+                            if (!className) return;
+
                             // Get or create class entry
                             if (!classesMap.has(className)) {
                                 classesMap.set(className, { name: className, subjects: [] });
                             }
 
-                            // Get chapters specific to this class
-                            const classChapters = subject.chaptersPerClass[className] || [];
+                            const classEntry = classesMap.get(className)!;
+                            const subjectNameLower = subjectName.toLowerCase();
 
-                            // Add this subject to the class with class-specific chapters
-                            classesMap.get(className)!.subjects.push({
-                                name: subject.name,
-                                chapters: classChapters
-                            });
+                            // Check if subject already exists for this class (avoid duplicates from multiple subject entries)
+                            const exists = classEntry.subjects.some(s => (s.name || '').trim().toLowerCase() === subjectNameLower);
+
+                            if (!exists) {
+                                // Get chapters specific to this class
+                                const classChapters = subject.chaptersPerClass ? subject.chaptersPerClass[className] || [] : [];
+
+                                // Add this subject to the class with class-specific chapters
+                                classEntry.subjects.push({
+                                    name: subjectName,
+                                    chapters: classChapters
+                                });
+                            }
                         });
                     });
 
                     // Convert map to array and sort
                     const allTransformedClasses = sortClasses(Array.from(classesMap.values()));
 
+                    // Filter by active status and financial year
+                    const rawClassSettings = settings?.filter((s: any) => s.type === 'class') || [];
+                    const activeClassesFromSettings = getActiveClasses(rawClassSettings, currentSchool?.activeFinancialYear);
+                    const activeClassNames = new Set(activeClassesFromSettings.map(c => c.name.toString().trim().toLowerCase()));
+
                     const transformedClasses = allTransformedClasses.filter(c => {
-                        const className = (c.name || '').toString().trim().toLowerCase();
-                        const classSetting = settings?.find((s: any) =>
-                            s.type === 'class' &&
-                            (s.name || '').toString().trim().toLowerCase() === className
-                        );
-
-                        // If class setting exists and it's explicitly inactive, hide it
-                        if (classSetting && classSetting.active === false) return false;
-
-                        // Otherwise (active or setting missing), show it
-                        return true;
+                        const name = (c.name || '').toString().trim().toLowerCase();
+                        return activeClassNames.has(name);
                     });
 
                     console.log('[Question Generator] Loaded and transformed academic data (filtered & sorted):', transformedClasses);
@@ -245,7 +275,32 @@ const QuestionGenerator: React.FC = () => {
         if (step === 3) return selectedChapters.length > 0;
         if (step === 4) return getTotalQuestions() > 0 && examName.trim() !== '';
         if (step === 5) return getTotalDifficultyPercentage() === 100;
+        if (step === 6) {
+            if (questionSource === 'ncert') return true;
+            return bankEntries.length > 0; // must have matching entries
+        }
         return false;
+    };
+
+    // Fetch question bank entries for selected class + subject
+    const fetchBankEntries = async () => {
+        if (!currentSchool?.id || !selectedClass || !selectedSubject) return;
+        setIsLoadingBank(true);
+        try {
+            const colRef = collection(db, `question_bank_${currentSchool.id}`);
+            const q = query(
+                colRef,
+                where('className', '==', selectedClass),
+                where('subjectName', '==', selectedSubject)
+            );
+            const snap = await getDocs(q);
+            setBankEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as BankEntry)));
+        } catch (e) {
+            console.error('Error fetching bank entries:', e);
+            setBankEntries([]);
+        } finally {
+            setIsLoadingBank(false);
+        }
     };
 
     const generateQuestionPaper = async () => {
@@ -276,26 +331,16 @@ const QuestionGenerator: React.FC = () => {
             const sAddress = currentSchool?.address || schoolInfo?.address || '';
             const sContact = currentSchool?.phone || currentSchool?.contactNumber || schoolInfo?.phone || schoolInfo?.contact || '';
 
-            const prompt = `You are an expert educational content creator. Generate a professional question paper with the following specifications:
-
-<div style="text-align: center;">
+            // ─── Common header & formatting block
+            const commonHeader = `<div style="text-align: center;">
 <h1 style="margin: 0; padding: 0; text-align: center; display: block;">${sName}</h1>
 ${sAddress || sContact ? `<p style="margin: 0; padding: 0; text-align: center; font-size: 14px; display: block;">${sAddress}${sAddress && sContact ? ' | Contact: ' : ''}${sContact}</p>` : ''}
 <h2 style="margin: 5px 0 0 0; padding: 5px; text-align: center; background: #f0f0f0; border: 1px solid #333; display: block;">${examName || 'Examination'} - ${selectedClass} - ${selectedSubject}</h2>
 <p style="margin: 5px 0; text-align: center; font-weight: bold; display: block;">Maximum Marks: ${getTotalMarks()}   |   Time Allowed: ${examDuration} Hours</p>
 </div>
-<hr style="margin: 0.5rem 0;">
+<hr style="margin: 0.5rem 0;">`;
 
-**Question Pattern:**
-${questionBreakdown}
-
-**Difficulty Distribution:**
-${difficultyBreakdown}
-
-**Chapters Covered:** ${selectedChapters.join(', ')}
-
----
-
+            const formattingInstructions = `
 **Formatting Instructions:**
 1. Start with the institution name as heading 1 (use single #)
 2. Class and subject as heading 2 (use ##)
@@ -352,14 +397,6 @@ Column A:
 17. Item
 Section E continues: 21. Question...
 
-**Content Instructions:**
-1. Generate high-quality, curriculum-relevant questions based on the specified chapters
-2. Ensure questions are age-appropriate for ${selectedClass}
-3. Distribute questions across difficulty levels according to the specified percentages
-4. Mix difficulty levels within each question type to maintain the overall distribution
-5. Questions should be well-distributed across all specified chapters
-6. **IMPORTANT: Use LaTeX formatting for ALL mathematical and chemical formulas**
-
 **LaTeX Formatting Rules:**
 - Wrap ALL formulas in dollar signs: $formula$
 - Chemical formulas: $H_2O$, $CO_2$, $NaCl$, $CaCO_3$
@@ -370,19 +407,110 @@ Section E continues: 21. Question...
 - Greek letters: $\\Delta$, $\\alpha$, $\\beta$, $\\pi$
 - Units: $^\\circ C$ for degrees Celsius, $\\Omega$ for Ohm
 
-**LaTeX Examples:**
-- The formula for water is $H_2O$.
-- Newton's second law: $F = ma$
-- Chemical reaction: $CaCO_3 \\rightarrow CaO + CO_2$
-- Temperature: Water boils at $100^\\circ C$
-- Resistance is measured in Ohms ($\\Omega$)
-
 **CRITICAL Formatting Rule - DO NOT DISCLOSE METADATA:**
 - DO NOT mention the difficulty level (e.g., "Easy", "Moderate") anywhere in the question paper.
 - DO NOT mention the chapter name or number (e.g., "Chapter 1") after any question.
-- The questions should look like a final exam paper for students, with NO internal analytical tags or labels.
+- The questions should look like a final exam paper for students, with NO internal analytical tags or labels.`;
+
+            // ─── Build prompt based on source
+            let prompt: string;
+
+            if (questionSource === 'ncert') {
+                // Original NCERT-based prompt
+                prompt = `You are an expert educational content creator. Generate a professional question paper with the following specifications:
+
+${commonHeader}
+
+**Question Pattern:**
+${questionBreakdown}
+
+**Difficulty Distribution:**
+${difficultyBreakdown}
+
+**Chapters Covered:** ${selectedChapters.join(', ')}
+
+---
+${formattingInstructions}
+
+**Content Instructions:**
+1. Generate high-quality, curriculum-relevant questions based on the specified chapters
+2. Ensure questions are age-appropriate for ${selectedClass}
+3. Distribute questions across difficulty levels according to the specified percentages
+4. Mix difficulty levels within each question type to maintain the overall distribution
+5. Questions should be well-distributed across all specified chapters
+6. **IMPORTANT: Use LaTeX formatting for ALL mathematical and chemical formulas**
 
 Generate the complete question paper now:`;
+
+            } else {
+                // Question Bank-based prompt
+                const bankText = bankEntries.map((e, i) =>
+                    `=== Bank Entry ${i + 1} (${e.chapterName}) ===\n${e.extractedText}`
+                ).join('\n\n');
+
+                if (questionBankMode === 'exact') {
+                    prompt = `You are an expert educational content creator formatting a question paper from an existing question bank.
+
+${commonHeader}
+
+**Question Pattern (MUST follow exactly):**
+${questionBreakdown}
+
+**Chapters Covered:** ${selectedChapters.join(', ')}
+
+---
+${formattingInstructions}
+
+**QUESTION BANK SOURCE MATERIAL:**
+${bankText}
+
+**EXACT MODE INSTRUCTIONS:**
+1. Select questions FROM THE ABOVE BANK ONLY — do NOT invent new questions
+2. Choose questions that match the required question types and count as shown in the pattern
+3. Copy the question wording EXACTLY as it appears in the bank — no rewording
+4. Format them into the proper sections (Section A, B, C...) as per the pattern
+5. Apply all formatting instructions above (numbering, LaTeX, section headers)
+6. Distribute questions across the specified chapters where possible
+7. Stay strictly within the question count per type specified in the pattern
+
+Generate the complete question paper now:`;
+
+                } else {
+                    // Rephrased + Type Conversion
+                    prompt = `You are an expert educational content creator generating a fresh question paper by transforming questions from an existing bank.
+
+${commonHeader}
+
+**Question Pattern (MUST follow exactly):**
+${questionBreakdown}
+
+**Difficulty Distribution:**
+${difficultyBreakdown}
+
+**Chapters Covered:** ${selectedChapters.join(', ')}
+
+---
+${formattingInstructions}
+
+**QUESTION BANK SOURCE MATERIAL:**
+${bankText}
+
+**REPHRASE + TYPE CONVERSION INSTRUCTIONS:**
+1. Use the bank questions ONLY AS INSPIRATION — do not copy wording directly
+2. **REPHRASE** every question — change sentence structure, word order, framing etc.
+3. **CONVERT QUESTION TYPES** as needed to match the required pattern:
+   - A bank MCQ can become a True/False, Fill in the Blank, or Short Answer
+   - A bank True/False can become Fill in the Blank or MCQ
+   - A bank Short Answer can become MCQ or Matching Column
+   - Keep the same concept/fact but present it in the required format
+4. Follow the question pattern strictly — correct type, count, and marks per section
+5. Apply difficulty distribution across questions
+6. Apply all formatting instructions above (numbering, LaTeX, section headers)
+7. The final paper should look completely fresh — students should not recognise it as coming from the bank
+
+Generate the complete question paper now:`;
+                }
+            }
 
 
             // Model rotation - try multiple models if quota exceeded
@@ -448,7 +576,7 @@ Generate the complete question paper now:`;
 
                     console.log(`[Question Generator] Success with model: ${modelName}`);
                     setGeneratedPaper(generatedText);
-                    setStep(6);
+                    setStep(7);
                     setIsGenerating(false);
                     return; // Success!
 
@@ -626,6 +754,9 @@ Generate the complete question paper now:`;
         setGeneratedPaper('');
         setExamName('');
         setExamDuration('2');
+        setQuestionSource('ncert');
+        setQuestionBankMode('exact');
+        setBankEntries([]);
     };
 
     const currentClass = classes.find(c => c.name === selectedClass);
@@ -760,7 +891,7 @@ Generate the complete question paper now:`;
 
             {/* Progress Stepper */}
             <div className="stepper">
-                {['Select Class', 'Select Subject', 'Select Chapters', 'Question Pattern', 'Difficulty Level', 'Generate'].map((label, idx) => (
+                {['Select Class', 'Select Subject', 'Select Chapters', 'Question Pattern', 'Difficulty Level', 'Question Source', 'Generate'].map((label, idx) => (
                     <div key={idx} className={`step ${step > idx + 1 ? 'completed' : step === idx + 1 ? 'active' : ''}`}>
                         <div className="step-circle">{step > idx + 1 ? '✓' : idx + 1}</div>
                         <div className="step-label">{label}</div>
@@ -1012,6 +1143,96 @@ Generate the complete question paper now:`;
                 )}
 
                 {step === 6 && (
+                    <div className="selection-card">
+                        <div className="card-header">
+                            <Sparkles size={24} />
+                            <h2>Choose Question Source</h2>
+                        </div>
+                        <p className="helper-text">Select where the AI should get questions from</p>
+
+                        {/* Source Selection */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                            <div
+                                onClick={() => setQuestionSource('ncert')}
+                                style={{
+                                    border: `2px solid ${questionSource === 'ncert' ? '#6366f1' : '#e2e8f0'}`,
+                                    borderRadius: '12px', padding: '1.5rem', cursor: 'pointer',
+                                    background: questionSource === 'ncert' ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>🌐</div>
+                                <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.5rem' }}>Based on NCERT</div>
+                                <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>AI generates questions using its own curriculum knowledge</div>
+                            </div>
+                            <div
+                                onClick={() => { setQuestionSource('questionbank'); fetchBankEntries(); }}
+                                style={{
+                                    border: `2px solid ${questionSource === 'questionbank' ? '#059669' : '#e2e8f0'}`,
+                                    borderRadius: '12px', padding: '1.5rem', cursor: 'pointer',
+                                    background: questionSource === 'questionbank' ? 'rgba(5,150,105,0.08)' : 'transparent',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>📂</div>
+                                <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.5rem' }}>Based on Question Bank</div>
+                                <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>Use questions from your uploaded image bank</div>
+                            </div>
+                        </div>
+
+                        {/* Question Bank Sub-options */}
+                        {questionSource === 'questionbank' && (
+                            <div style={{ marginTop: '0.5rem' }}>
+                                {isLoadingBank ? (
+                                    <div style={{ textAlign: 'center', padding: '1.5rem', color: '#64748b' }}>
+                                        <Loader2 size={20} style={{ display: 'inline-block', animation: 'spin 1s linear infinite', marginRight: '0.5rem' }} />
+                                        Loading question bank...
+                                    </div>
+                                ) : bankEntries.length === 0 ? (
+                                    <div style={{ padding: '1rem', background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: '0.5rem', fontSize: '0.875rem', color: '#92400e' }}>
+                                        ⚠️ No question bank entries found for <strong>{selectedClass} – {selectedSubject}</strong>. Please upload questions in the Question Bank tab first.
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div style={{ padding: '0.75rem 1rem', background: 'rgba(5,150,105,0.08)', borderRadius: '0.5rem', marginBottom: '1rem', fontSize: '0.875rem', color: '#065f46', fontWeight: 500 }}>
+                                            ✅ {bankEntries.length} entry(s) found · {bankEntries.reduce((s, e) => s + e.imageCount, 0)} image(s) total
+                                            <span style={{ marginLeft: '0.5rem', color: '#64748b', fontWeight: 400 }}>for {selectedClass} – {selectedSubject}</span>
+                                        </div>
+                                        <p style={{ fontWeight: 600, marginBottom: '0.75rem' }}>How should AI use these questions?</p>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                            <div
+                                                onClick={() => setQuestionBankMode('exact')}
+                                                style={{
+                                                    border: `2px solid ${questionBankMode === 'exact' ? '#6366f1' : '#e2e8f0'}`,
+                                                    borderRadius: '10px', padding: '1.25rem', cursor: 'pointer',
+                                                    background: questionBankMode === 'exact' ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                            >
+                                                <div style={{ fontWeight: 700, marginBottom: '0.375rem' }}>📋 Exact Questions</div>
+                                                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Pick and format questions exactly as saved in the bank — no wording changes</div>
+                                            </div>
+                                            <div
+                                                onClick={() => setQuestionBankMode('rephrased')}
+                                                style={{
+                                                    border: `2px solid ${questionBankMode === 'rephrased' ? '#6366f1' : '#e2e8f0'}`,
+                                                    borderRadius: '10px', padding: '1.25rem', cursor: 'pointer',
+                                                    background: questionBankMode === 'rephrased' ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                            >
+                                                <div style={{ fontWeight: 700, marginBottom: '0.375rem' }}>✏️ Rephrase + Type Conversion</div>
+                                                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>AI rephrases AND converts types — MCQ→T/F, T/F→Fill in Blank, etc.</div>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {step === 7 && (
                     <div className="generated-paper-card">
                         <div className="card-header">
                             <Sparkles size={24} />
@@ -1053,7 +1274,7 @@ Generate the complete question paper now:`;
             </div>
 
             {/* Navigation Buttons */}
-            {step < 6 && (
+            {step < 7 && (
                 <div className="navigation-buttons">
                     {step > 1 && (
                         <button
@@ -1065,7 +1286,7 @@ Generate the complete question paper now:`;
                         </button>
                     )}
                     <div style={{ flex: 1 }}></div>
-                    {step < 5 ? (
+                    {step < 6 ? (
                         <button
                             onClick={() => setStep(step + 1)}
                             disabled={!canProceed()}

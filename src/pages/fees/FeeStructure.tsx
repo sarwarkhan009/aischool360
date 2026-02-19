@@ -25,7 +25,8 @@ const FeeStructure: React.FC = () => {
     const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
     const { data: feeTypes, add: addFeeType, update: updateFeeType, remove: removeFeeType } = useFirestore<any>('fee_types');
-    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []).map(c => c.name);
+    const activeFY = currentSchool?.activeFinancialYear || '';
+    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], activeFY).map(c => c.name);
 
     // Form State
     const [formData, setFormData] = useState({

@@ -26,9 +26,6 @@ const StudentManagement: React.FC = () => {
     const { data: allSettings } = useFirestore<any>('settings');
     const printSettings = allSettings?.find((s: any) => s.id === `print_form_${schoolId}`);
 
-    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
-    const classesList = activeClasses.map((c: any) => c.name);
-
     const activeFY = currentSchool?.activeFinancialYear || '';
     const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived).map((y: any) => y.name).sort();
 
@@ -37,6 +34,11 @@ const StudentManagement: React.FC = () => {
     const [selectedClass, setSelectedClass] = useState('');
     const [selectedSection, setSelectedSection] = useState('');
 
+    const activeClasses = React.useMemo(() => {
+        return getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], selectedSession === 'ALL' ? undefined : selectedSession);
+    }, [allSettings, selectedSession]);
+
+    const classesList = activeClasses.map((c: any) => c.name);
     const sectionsList = selectedClass ? (activeClasses.find((c: any) => c.name === selectedClass)?.sections || []) : [];
     const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
     const [selectedGenders, setSelectedGenders] = useState<string[]>(['Male', 'Female']);

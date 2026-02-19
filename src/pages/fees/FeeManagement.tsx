@@ -165,9 +165,9 @@ const FeeManagement: React.FC = () => {
         const currentYear = today.getFullYear();
         const currentMonth = today.getMonth();
         // Get academic year start month index (default April = 3)
-        const academicStartMonth = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];
-        const sessionStartYear = currentMonth >= academicStartMonth ? currentYear : currentYear - 1;
-        const sessionStartDate = new Date(sessionStartYear, academicStartMonth, 1);
+        const academicStartMonthIdx = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];
+        const sessionStartYear = currentMonth >= academicStartMonthIdx ? currentYear : currentYear - 1;
+        const sessionStartDate = new Date(sessionStartYear, academicStartMonthIdx, 1);
 
         students.forEach(student => {
             const admType = student.admissionType || 'NEW';
@@ -180,13 +180,11 @@ const FeeManagement: React.FC = () => {
                 startMonthIdx = admDateRaw.getMonth();
                 startYear = admDateRaw.getFullYear();
             } else {
-                startMonthIdx = academicStartMonth;
+                startMonthIdx = academicStartMonthIdx;
                 startYear = sessionStartYear;
             }
 
             let totalPayable = 0;
-            const studentAdmMonth = admDateRaw ? admDateRaw.getMonth() : -1;
-            const studentAdmYear = admDateRaw ? admDateRaw.getFullYear() : -1;
 
             feeTypes.forEach(type => {
                 if (type.status !== 'ACTIVE') return;
@@ -199,9 +197,7 @@ const FeeManagement: React.FC = () => {
                 // Check if fee type's classes array includes the student's class
                 let matchesClass = type.classes?.includes(student.class || '');
 
-                // Fallback: If fee type's classes list is stale (e.g. has "KG" instead of "LKG"),
-                // check if a fee_amount entry exists for this student's class + fee type.
-                // This handles cases where Class Master was updated but fee types weren't re-saved.
+                // Fallback for stale classes
                 if (!matchesClass && student.class) {
                     const hasAmountForClass = feeAmounts.some(fa => fa.feeTypeId === type.id && fa.className === student.class);
                     if (hasAmountForClass) {
@@ -213,21 +209,26 @@ const FeeManagement: React.FC = () => {
                     const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === student.class);
                     if (!amountConfig || !amountConfig.amount) return;
 
+                    const headName = (type.feeHeadName || '').toLowerCase();
+                    const isMonthlyFee = headName.includes('tuition') || headName.includes('tution') || headName.includes('monthly');
+                    const studentMonthlyFee = student.monthlyFee ? parseFloat(student.monthlyFee) : null;
+                    const useStudentFee = isMonthlyFee && studentMonthlyFee && studentMonthlyFee > 0;
+
                     type.months?.forEach((monthName: string) => {
                         let isDue = false;
 
                         if (monthName === 'Admission_month') {
                             if (admType === 'OLD') {
                                 isDue = true;
-                            } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
-                                isDue = true;
+                            } else if (admType === 'NEW' && admDateRaw) {
+                                isDue = today >= admDateRaw;
                             }
                         } else {
                             const targetMonthIdx = MONTH_MAP[monthName];
                             if (targetMonthIdx !== undefined) {
                                 // If month is before academic start month, it belongs to next calendar year
-                                const targetYear = targetMonthIdx < academicStartMonth ? sessionStartYear + 1 : sessionStartYear;
-                                const dueDate = new Date(targetYear, targetMonthIdx, 5);
+                                const targetYear = targetMonthIdx < academicStartMonthIdx ? sessionStartYear + 1 : sessionStartYear;
+                                const dueDate = new Date(targetYear, targetMonthIdx, 5); // Using 5 as default due day
 
                                 if (today >= dueDate) {
                                     const monthDate = new Date(targetYear, targetMonthIdx, 1);
@@ -240,7 +241,7 @@ const FeeManagement: React.FC = () => {
                         }
 
                         if (isDue) {
-                            totalPayable += amountConfig.amount;
+                            totalPayable += useStudentFee ? studentMonthlyFee : amountConfig.amount;
                         }
                     });
                 }
@@ -254,13 +255,14 @@ const FeeManagement: React.FC = () => {
                 );
 
             const totalPaid = studentPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
-            const dues = totalPayable - totalPaid;
+            const totalDiscount = studentPayments.reduce((sum, c) => sum + (Number(c.discount) || 0), 0);
+            const dues = totalPayable - totalPaid - totalDiscount;
 
             duesMap.set(student.admissionNo, dues);
         });
 
         return duesMap;
-    }, [students, feeCollections, feeTypes, feeAmounts]);
+    }, [students, feeCollections, feeTypes, feeAmounts, currentSchool]);
 
     const processedStudents = useMemo(() => {
         if (!searchTerm && selectedClass === 'ALL') return [];
@@ -309,7 +311,7 @@ const FeeManagement: React.FC = () => {
 
     const filteredStudents = processedStudents;
 
-    const activeClasses = (dbItems && dbItems.length > 0) ? getActiveClasses(dbItems.filter((d: any) => d.type === 'class')) : [];
+    const activeClasses = (dbItems && dbItems.length > 0) ? getActiveClasses(dbItems.filter((d: any) => d.type === 'class'), activeFY) : [];
 
 
     const handleNewBill = () => {
@@ -372,10 +374,21 @@ const FeeManagement: React.FC = () => {
 
                 const map: Record<string, string> = {};
                 history.forEach((rec: any) => {
+                    if (rec.status === 'CANCELLED') return;
+
                     if (rec.paidFor) {
                         const paidMonths = rec.paidFor.split(',').map((m: string) => m.trim());
                         paidMonths.forEach((m: string) => {
                             if (m) map[m] = rec.receiptNo;
+                        });
+                    }
+
+                    // Also scan feeBreakdown for specific fee heads (Admission, Annual, etc.)
+                    if (rec.feeBreakdown) {
+                        Object.entries(rec.feeBreakdown).forEach(([feeName, amount]) => {
+                            if (Number(amount) > 0) {
+                                map[feeName] = rec.receiptNo;
+                            }
                         });
                     }
                 });
@@ -814,18 +827,47 @@ const FeeManagement: React.FC = () => {
     const renderPay = () => {
         // Get active fee types for this class
         const activeFeeTypesForClass = feeTypes
-            .filter((ft: any) => ft.status === 'ACTIVE')
-            .sort((a: any, b: any) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
+            .filter((ft: any) => ft.status === 'ACTIVE');
+
+        // Get academic month order for sorting additional fees
+        const academicMonthsOrder = getAcademicYearMonths(currentSchool?.academicYearStartMonth || 'April');
+        const monthSortMap: Record<string, number> = {};
+        academicMonthsOrder.forEach((m, idx) => { monthSortMap[m] = idx; });
 
         // Separate tuition fee from other fees
         const tuitionFee = activeFeeTypesForClass.find((ft: any) => {
             const name = (ft.feeHeadName || '').toLowerCase().trim();
             return name.includes('tuition') || name.includes('tution') || name.includes('monthly');
         });
-        const additionalFees = activeFeeTypesForClass.filter((ft: any) => {
-            const name = (ft.feeHeadName || '').toLowerCase().trim();
-            return !(name.includes('tuition') || name.includes('tution') || name.includes('monthly'));
-        });
+
+        const additionalFees = activeFeeTypesForClass
+            .filter((ft: any) => {
+                const name = (ft.feeHeadName || '').toLowerCase().trim();
+                return !(name.includes('tuition') || name.includes('tution') || name.includes('monthly'));
+            })
+            .sort((a: any, b: any) => {
+                const nameA = (a.feeHeadName || '').toLowerCase().trim();
+                const nameB = (b.feeHeadName || '').toLowerCase().trim();
+
+                // 1. "Form Sale" always top priority
+                if (nameA.includes('form sale')) return -1;
+                if (nameB.includes('form sale')) return 1;
+
+                // 2. Sort by earliest month in due
+                const getMinMonthIdx = (ft: any) => {
+                    if (!ft.months || ft.months.length === 0) return 999;
+                    const indices = ft.months.map((m: string) => monthSortMap[m] !== undefined ? monthSortMap[m] : 999);
+                    return Math.min(...indices);
+                };
+
+                const minIdxA = getMinMonthIdx(a);
+                const minIdxB = getMinMonthIdx(b);
+
+                if (minIdxA !== minIdxB) return minIdxA - minIdxB;
+
+                // 3. Fallback to display order
+                return Number(a.displayOrder || 0) - Number(b.displayOrder || 0);
+            });
 
         return (
             <div className="animate-fade-in" style={{ paddingBottom: '4rem' }}>
@@ -1014,6 +1056,8 @@ const FeeManagement: React.FC = () => {
                                 ) : (
                                     additionalFees.map((feeType: any) => {
                                         const headName = (feeType.feeHeadName || '').toLowerCase();
+                                        const receiptNo = paidMonthsMap[feeType.feeHeadName];
+                                        const isPaid = !!receiptNo;
 
                                         // Robust amount lookup
                                         let amount = dynamicFees[feeType.feeHeadName] || 0;
@@ -1030,62 +1074,118 @@ const FeeManagement: React.FC = () => {
                                             (monthFees: any) => monthFees[feeType.feeHeadName] !== undefined
                                         );
 
-                                        return (amount > 0) ? (
-                                            <button
-                                                key={feeType.id}
-                                                onClick={() => {
-                                                    const newMonths = { ...selectedMonths };
+                                        if (amount === 0) return null;
 
-                                                    if (isSelected) {
-                                                        // Remove from all months
-                                                        Object.keys(newMonths).forEach(month => {
-                                                            if (newMonths[month][feeType.feeHeadName] !== undefined) {
-                                                                delete newMonths[month][feeType.feeHeadName];
-                                                                if (Object.keys(newMonths[month]).length === 0) {
-                                                                    delete newMonths[month];
+                                        return (
+                                            <div key={feeType.id} style={{ position: 'relative' }}>
+                                                {isPaid ? (
+                                                    <div
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '0.75rem 1rem',
+                                                            borderRadius: '8px',
+                                                            border: '2px solid #22c55e',
+                                                            background: 'rgba(34, 197, 94, 0.1)',
+                                                            color: '#22c55e',
+                                                            fontWeight: 700,
+                                                            fontSize: '0.875rem',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            textAlign: 'left'
+                                                        }}
+                                                    >
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                            <span>✓</span>
+                                                            <span>{feeType.feeHeadName}</span>
+                                                        </div>
+                                                        <button
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                try {
+                                                                    const q = query(
+                                                                        collection(db, 'fee_collections'),
+                                                                        where('schoolId', '==', currentSchool?.id),
+                                                                        where('receiptNo', '==', receiptNo)
+                                                                    );
+                                                                    const snapshot = await getDocs(q);
+                                                                    if (!snapshot.empty) {
+                                                                        const receiptData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+                                                                        handleShowReceipt(receiptData);
+                                                                    } else {
+                                                                        alert('Receipt not found');
+                                                                    }
+                                                                } catch (error) {
+                                                                    console.error('Error fetching receipt:', error);
+                                                                    alert('Failed to load receipt');
                                                                 }
-                                                            }
-                                                        });
-                                                    } else {
-                                                        // Add to a special "additional" key
-                                                        const targetMonth = 'Additional';
-                                                        if (!newMonths[targetMonth]) newMonths[targetMonth] = {};
-                                                        newMonths[targetMonth][feeType.feeHeadName] = amount;
-                                                    }
-                                                    setSelectedMonths(newMonths);
-                                                }}
-                                                style={{
-                                                    padding: '1rem',
-                                                    borderRadius: '8px',
-                                                    border: isSelected ? '2px solid #8b5cf6' : '1px solid var(--border)',
-                                                    background: isSelected ? 'rgba(139, 92, 246, 0.1)' : 'white',
-                                                    color: isSelected ? '#8b5cf6' : '#475569',
-                                                    fontWeight: isSelected ? 800 : 600,
-                                                    fontSize: '0.875rem',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s',
-                                                    display: 'flex',
-                                                    flexDirection: 'column',
-                                                    alignItems: 'center',
-                                                    gap: '0.5rem',
-                                                    textAlign: 'center',
-                                                    opacity: 1
-                                                }}
-                                                title={`Click to add ₹${amount}`}
-                                            >
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                    {isSelected && <Check size={16} />}
-                                                    <span>{feeType.feeHeadName}</span>
-                                                </div>
-                                                {amount > 0 ? (
-                                                    <span style={{ fontSize: '1.125rem', fontWeight: 800, color: '#8b5cf6' }}>
-                                                        ₹{amount}
-                                                    </span>
+                                                            }}
+                                                            style={{
+                                                                fontSize: '0.6875rem',
+                                                                fontWeight: 700,
+                                                                background: '#22c55e',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                padding: '0.25rem 0.5rem',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            {receiptNo}
+                                                        </button>
+                                                    </div>
                                                 ) : (
-                                                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Not Configured</span>
+                                                    <button
+                                                        onClick={() => {
+                                                            const newMonths = { ...selectedMonths };
+
+                                                            if (isSelected) {
+                                                                // Remove from all months
+                                                                Object.keys(newMonths).forEach(month => {
+                                                                    if (newMonths[month][feeType.feeHeadName] !== undefined) {
+                                                                        delete newMonths[month][feeType.feeHeadName];
+                                                                        if (Object.keys(newMonths[month]).length === 0) {
+                                                                            delete newMonths[month];
+                                                                        }
+                                                                    }
+                                                                });
+                                                            } else {
+                                                                // Add to a special "additional" key
+                                                                const targetMonth = 'Additional';
+                                                                if (!newMonths[targetMonth]) newMonths[targetMonth] = {};
+                                                                newMonths[targetMonth][feeType.feeHeadName] = amount;
+                                                            }
+                                                            setSelectedMonths(newMonths);
+                                                        }}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '0.75rem 1rem',
+                                                            borderRadius: '8px',
+                                                            border: isSelected ? '2px solid #8b5cf6' : '1px solid var(--border)',
+                                                            background: isSelected ? 'rgba(139, 92, 246, 0.1)' : 'white',
+                                                            color: isSelected ? '#8b5cf6' : '#475569',
+                                                            fontWeight: isSelected ? 800 : 600,
+                                                            fontSize: '0.875rem',
+                                                            cursor: 'pointer',
+                                                            transition: 'all 0.2s',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            textAlign: 'left'
+                                                        }}
+                                                        title={`Click to add ₹${amount}`}
+                                                    >
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                                            {isSelected && <Check size={16} />}
+                                                            <span>{feeType.feeHeadName}</span>
+                                                        </div>
+                                                        <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: isSelected ? '#8b5cf6' : '#4338ca' }}>
+                                                            ₹{amount}
+                                                        </span>
+                                                    </button>
                                                 )}
-                                            </button>
-                                        ) : null;
+                                            </div>
+                                        );
                                     })
                                 )}
                             </div>

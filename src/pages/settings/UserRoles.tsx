@@ -214,6 +214,13 @@ const MENU_STRUCTURE: MenuItem[] = [
         moduleId: 'reports',
     },
     {
+        id: 'subjects_chapters',
+        label: 'Subjects & Chapters',
+        icon: BookOpen,
+        permissions: [Permission.MANAGE_ACADEMIC_STRUCTURE],
+        moduleId: '/settings/subjects-chapters',
+    },
+    {
         id: 'roles',
         label: 'Roles & Managers',
         icon: Shield,
@@ -237,7 +244,6 @@ const MENU_STRUCTURE: MenuItem[] = [
             { id: 'settings_schools', label: 'Manage Schools', permissions: [Permission.MANAGE_SCHOOLS] },
             { id: 'settings_payments', label: 'Payment Settings', permissions: [Permission.MANAGE_PAYMENT_SETTINGS] },
             { id: 'settings_holidays', label: 'Upload Holidays', permissions: [Permission.UPLOAD_HOLIDAYS] },
-            { id: 'settings_subjects', label: 'Subjects & Chapters', permissions: [Permission.MANAGE_ACADEMIC_STRUCTURE] },
         ]
     },
     {

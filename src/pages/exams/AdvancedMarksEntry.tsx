@@ -637,7 +637,7 @@ const AdvancedMarksEntry: React.FC = () => {
     const isTeacherOwner = currentEntry?.enteredBy === (user?.id || user?.username);
     const canEdit = !currentEntry ||
         currentEntry.status === 'DRAFT' ||
-        (currentEntry.status === 'REJECTED' && (isTeacherOwner || isAdmin)) ||
+        currentEntry.status === 'REJECTED' ||
         isAdmin;
 
     // Helper: format ISO date to dd-MMM-yy HH:mm

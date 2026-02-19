@@ -61,7 +61,6 @@ const StudentAdmission: React.FC = () => {
     const { currentSchool } = useSchool();
     const [step, setStep] = useState(1);
     const { data: allSettings, loading: settingsLoading } = useFirestore<any>('settings');
-    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
     const { data: feeAmounts } = useFirestore<any>('fee_amounts');
     const { data: academicYears } = useFirestore<any>('academic_years');
 
@@ -208,6 +207,10 @@ const StudentAdmission: React.FC = () => {
         // Registration number (from public registration)
         registrationNo: initialStudent?.registrationNo || ''
     });
+
+    const activeClasses = React.useMemo(() => {
+        return getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], formData.session);
+    }, [allSettings, formData.session]);
 
     const { data: students, loading: dbLoading, add: addStudent, update: updateStudent } = useFirestore<any>('students');
 

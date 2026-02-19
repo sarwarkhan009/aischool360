@@ -794,7 +794,7 @@ const ExamResultsDashboard: React.FC = () => {
 
                         {/* Results Table */}
                         <div className="card" style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '1rem', fontWeight: 600 }}>
                                 <thead>
                                     <tr style={{ background: 'var(--bg-main)', borderBottom: '2px solid var(--border)' }}>
                                         <th
@@ -952,8 +952,8 @@ const ExamResultsDashboard: React.FC = () => {
                                                         <React.Fragment key={sub.subjectId}>
                                                             <td style={{ padding: '1rem', textAlign: 'center' }}>
                                                                 <span style={{
-                                                                    color: isAbsent ? '#6b7280' : (theoryFailed ? '#ef4444' : 'inherit'),
-                                                                    fontWeight: (theoryFailed || isAbsent) ? 700 : 500,
+                                                                    color: isAbsent ? '#ef4444' : (theoryFailed ? '#ef4444' : 'inherit'),
+                                                                    fontWeight: 800,
                                                                     fontStyle: isAbsent ? 'italic' : 'normal'
                                                                 }}>
                                                                     {theoryVal}
@@ -961,8 +961,8 @@ const ExamResultsDashboard: React.FC = () => {
                                                             </td>
                                                             <td style={{ padding: '1rem', textAlign: 'center' }}>
                                                                 <span style={{
-                                                                    color: isAbsent ? '#6b7280' : (practicalFailed ? '#ef4444' : 'inherit'),
-                                                                    fontWeight: (practicalFailed || isAbsent) ? 700 : 500,
+                                                                    color: isAbsent ? '#ef4444' : (practicalFailed ? '#ef4444' : 'inherit'),
+                                                                    fontWeight: 800,
                                                                     fontStyle: isAbsent ? 'italic' : 'normal'
                                                                 }}>
                                                                     {practicalVal}
@@ -974,49 +974,41 @@ const ExamResultsDashboard: React.FC = () => {
 
                                                 const val = res.marks[sub.subjectId];
                                                 const isAbsent = val === 'AB';
-                                                const isGrade = typeof val === 'string' && val !== 'AB';
+                                                const isNA = val === 'NA';
+                                                const isGrade = typeof val === 'string' && val !== 'AB' && val !== 'NA';
                                                 const passThreshold = (sub.maxMarks * (sub.passingMarks || 0)) / 100;
-                                                const isFailed = !isGrade && !isAbsent && typeof val === 'number' && val < passThreshold;
+                                                const isFailed = !isGrade && !isAbsent && !isNA && typeof val === 'number' && val < passThreshold;
 
                                                 return (
-                                                    <td key={sub.subjectId} style={{ padding: '1rem', textAlign: 'center' }}>
-                                                        <span style={{
-                                                            color: isAbsent ? '#6b7280' : (isFailed ? '#ef4444' : 'inherit'),
-                                                            fontWeight: (isFailed || isGrade || isAbsent) ? 700 : 500,
-                                                            fontStyle: isAbsent ? 'italic' : 'normal'
-                                                        }}>
+                                                    <td key={sub.subjectId} style={{
+                                                        padding: '1rem',
+                                                        textAlign: 'center',
+                                                        fontWeight: 800,
+                                                        color: isAbsent ? '#ef4444' : (isNA ? 'var(--text-muted)' : (isFailed ? '#ef4444' : 'inherit'))
+                                                    }}>
+                                                        <span style={{ fontStyle: isAbsent ? 'italic' : 'normal' }}>
                                                             {val}
                                                         </span>
                                                     </td>
                                                 );
                                             })}
-                                            <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 600 }}>
+                                            <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 800, color: 'var(--primary)' }}>
                                                 {res.totalObtained}/{res.totalMax}
                                             </td>
-                                            <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                                <div style={{ fontWeight: 700, color: res.percentage >= 33 ? 'var(--primary)' : '#ef4444' }}>
-                                                    {res.percentage.toFixed(1)}%
-                                                </div>
+                                            <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 800, color: res.percentage >= 33 ? '#10b981' : '#ef4444' }}>
+                                                {res.percentage.toFixed(1)}%
+                                            </td>
+                                            <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 800 }}>
+                                                {res.grade}
                                             </td>
                                             <td style={{ padding: '1rem', textAlign: 'center' }}>
                                                 <span style={{
-                                                    padding: '0.25rem 0.625rem',
-                                                    borderRadius: '999px',
-                                                    background: 'var(--bg-main)',
-                                                    border: '1px solid var(--border)',
-                                                    fontWeight: 700
-                                                }}>
-                                                    {res.grade}
-                                                </span>
-                                            </td>
-                                            <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                                <span style={{
-                                                    padding: '0.25rem 0.75rem',
-                                                    borderRadius: '999px',
-                                                    fontSize: '0.75rem',
-                                                    fontWeight: 700,
-                                                    background: res.status === 'PASS' ? '#10b98120' : res.status === 'FAIL' ? '#ef444420' : '#f59e0b20',
-                                                    color: res.status === 'PASS' ? '#10b981' : res.status === 'FAIL' ? '#ef4444' : '#f59e0b'
+                                                    padding: '0.35rem 0.75rem',
+                                                    borderRadius: '2rem',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 900,
+                                                    background: res.status === 'PASS' ? '#ecfdf5' : '#fef2f2',
+                                                    color: res.status === 'PASS' ? '#10b981' : '#ef4444'
                                                 }}>
                                                     {res.status}
                                                 </span>
@@ -1037,7 +1029,7 @@ const ExamResultsDashboard: React.FC = () => {
                                                     }}>
                                                         {res.rank}
                                                     </div>
-                                                ) : <span style={{ fontWeight: 600 }}>{res.rank}</span>}
+                                                ) : <span style={{ fontWeight: 800 }}>{res.rank}</span>}
                                             </td>
                                             <td style={{ padding: '1rem', textAlign: 'center' }}>
                                                 <button
@@ -1175,84 +1167,84 @@ const ExamResultsDashboard: React.FC = () => {
                             const examName = selectedExam?.displayName || selectedExam?.name || 'Exam Results';
                             const dateStr = firstDate ? (lastDate && lastDate !== firstDate ? `${fmt(firstDate)} to ${fmt(lastDate)}` : fmt(firstDate)) : '';
                             return (
-                                <p style={{ margin: '4px 0 0', fontSize: '12px', fontWeight: 800, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                                <p style={{ margin: '4px 0 0', fontSize: '15px', fontWeight: 900, color: '#000', textTransform: 'uppercase', letterSpacing: '1px' }}>
                                     {examName}{dateStr ? ` - ${dateStr}` : ''}
                                 </p>
                             );
                         })()}
-                        <p style={{ margin: '2px 0 0', fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+                        <p style={{ margin: '4px 0 0', fontSize: '13px', fontWeight: 900, color: '#000' }}>
                             Class: {formatClassName(getClassName(selectedClass), true)}{selectedSection ? ` - Section: ${selectedSection}` : ''}
                         </p>
                     </div>
                 </div>
 
                 {/* Results Table */}
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px', marginTop: '6px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginTop: '6px' }}>
                     <thead>
                         <tr style={{ background: '#f1f5f9' }}>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>Roll No</th>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'left', fontWeight: 800, fontSize: '8px' }}>Student Name</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Roll No</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'left', fontWeight: 900, fontSize: '11px', color: '#000' }}>Student Name</th>
                             {availableSubjects.map((sub: any) => {
                                 const combinedNames = sub.combinedSubjects && sub.combinedSubjects.length > 0
                                     ? ` / ${sub.combinedSubjects.join(' / ')}`
                                     : '';
                                 const isGradeBased = sub.assessmentType === 'GRADE';
                                 return (
-                                    <th key={sub.subjectId} style={{ border: '1px solid #cbd5e1', padding: '4px 2px', textAlign: 'center', fontWeight: 800, fontSize: '7.5px', minWidth: '40px' }}>
+                                    <th key={sub.subjectId} style={{ border: '2px solid #000', padding: '5px 2px', textAlign: 'center', fontWeight: 900, fontSize: '10px', minWidth: '40px', color: '#000' }}>
                                         {sub.subjectName}{combinedNames}
-                                        <div style={{ fontSize: '6.5px', color: '#64748b', fontWeight: 500 }}>
+                                        <div style={{ fontSize: '9px', color: '#000', fontWeight: 700 }}>
                                             {isGradeBased ? '(Grade)' : `(${sub.maxMarks})`}
                                         </div>
                                     </th>
                                 );
                             })}
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>Total</th>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>%</th>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>Grade</th>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>Status</th>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>Rank</th>
-                            <th style={{ border: '1px solid #cbd5e1', padding: '4px 3px', textAlign: 'center', fontWeight: 800, fontSize: '8px', minWidth: '70px' }}>Parent's Sign</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Total</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>%</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Grade</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Status</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Rank</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', minWidth: '70px', color: '#000' }}>Parent's Sign</th>
                         </tr>
                     </thead>
                     <tbody>
                         {filteredResults.map((res, idx) => (
                             <tr key={res.studentId} style={{ background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontSize: '8px' }}>{res.rollNumber}</td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px 4px', textAlign: 'left', fontWeight: 600, fontSize: '8px', whiteSpace: 'nowrap' }}>{res.studentName}</td>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontSize: '11px', fontWeight: 900, color: '#000' }}>{res.rollNumber}</td>
+                                <td style={{ border: '2px solid #000', padding: '4px 6px', textAlign: 'left', fontWeight: 900, fontSize: '11px', whiteSpace: 'nowrap', color: '#000' }}>{res.studentName}</td>
                                 {availableSubjects.map((sub: any) => {
                                     const val = res.marks[sub.subjectId];
                                     const isAbsent = val === 'AB';
                                     const isNA = val === 'NA';
                                     return (
                                         <td key={sub.subjectId} style={{
-                                            border: '1px solid #cbd5e1',
-                                            padding: '3px',
+                                            border: '2px solid #000',
+                                            padding: '4px',
                                             textAlign: 'center',
-                                            fontSize: '8px',
-                                            fontWeight: (isAbsent || isNA) ? 700 : 500,
-                                            color: isAbsent ? '#ef4444' : (isNA ? '#6b7280' : '#1e293b'),
+                                            fontSize: '11px',
+                                            fontWeight: 900,
+                                            color: isAbsent ? '#ef4444' : (isNA ? '#6b7280' : '#000'),
                                             fontStyle: isAbsent ? 'italic' : 'normal'
                                         }}>
                                             {val}
                                         </td>
                                     );
                                 })}
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontWeight: 700, fontSize: '8px' }}>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>
                                     {res.totalObtained}/{res.totalMax}
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontWeight: 700, fontSize: '8px', color: res.percentage >= 33 ? '#059669' : '#ef4444' }}>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: res.percentage >= 33 ? '#059669' : '#000' }}>
                                     {res.percentage.toFixed(1)}%
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontWeight: 700, fontSize: '8px' }}>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>
                                     {res.grade}
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontWeight: 700, fontSize: '8px', color: res.status === 'PASS' ? '#059669' : '#ef4444' }}>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: res.status === 'PASS' ? '#059669' : '#000' }}>
                                     {res.status}
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontWeight: 800, fontSize: '8px' }}>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>
                                     {res.rank}
                                 </td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: '3px', textAlign: 'center', fontSize: '8px', minWidth: '70px' }}></td>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontSize: '11px', minWidth: '70px', fontWeight: 900, color: '#000' }}></td>
                             </tr>
                         ))}
                     </tbody>
@@ -1263,20 +1255,20 @@ const ExamResultsDashboard: React.FC = () => {
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'flex-end',
-                    marginTop: '40px',
+                    marginTop: '50px',
                     paddingTop: '0px'
                 }}>
                     <div style={{ textAlign: 'center' }}>
-                        <div style={{ borderTop: '1px solid #1e293b', paddingTop: '4px', minWidth: '150px' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 700, color: '#1e293b' }}>Class Teacher</span>
+                        <div style={{ borderTop: '2px solid #000', paddingTop: '6px', minWidth: '180px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 900, color: '#000' }}>Class Teacher</span>
                         </div>
                     </div>
                     <div style={{ textAlign: 'center' }}>
                         {principalSignatureUrl && (
                             <img src={principalSignatureUrl} alt="Principal Signature" style={{ height: `${signatureHeight}px`, objectFit: 'contain', marginBottom: '2px', display: 'block', marginLeft: 'auto', marginRight: 'auto' }} />
                         )}
-                        <div style={{ borderTop: '1px solid #1e293b', paddingTop: '4px', minWidth: '150px' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 700, color: '#1e293b' }}>Principal</span>
+                        <div style={{ borderTop: '2px solid #000', paddingTop: '6px', minWidth: '180px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 900, color: '#000' }}>Principal</span>
                         </div>
                     </div>
                 </div>

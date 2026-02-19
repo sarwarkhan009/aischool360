@@ -305,6 +305,7 @@ const menuItems = [
     { to: '/routine', icon: Clock, label: 'My Timetable', permission: Permission.VIEW_ROUTINE, roles: ['TEACHER'], moduleId: 'routine' },
     { to: '/routine', icon: Clock, label: 'Routine Management', permission: Permission.MANAGE_ROUTINE, roles: ['ADMIN', 'MANAGER'], moduleId: 'routine' },
     { to: '/profile', icon: User, label: 'My Profile', roles: ['ADMIN', 'MANAGER', 'TEACHER', 'ACCOUNTANT', 'USER', 'DRIVER'], moduleId: 'profile' },
+    { to: '/settings/subjects-chapters', icon: BookOpen, label: 'Subjects & Chapters', permission: Permission.MANAGE_ACADEMIC_STRUCTURE, roles: ['ADMIN', 'MANAGER', 'TEACHER'], moduleId: '/settings/subjects-chapters' },
     { to: '/profile-verifications', icon: Shield, label: 'Profile Verification', roles: ['ADMIN', 'MANAGER'], permission: Permission.MANAGE_SETTINGS },
     { to: '/reports', icon: FileText, label: 'Reports', permission: Permission.VIEW_REPORTS, roles: ['ADMIN', 'MANAGER'], moduleId: 'reports' },
     {
@@ -326,7 +327,6 @@ const menuItems = [
             { to: '/settings/schools', label: 'Manage Schools', permission: Permission.MANAGE_SCHOOLS, roles: ['SUPER_ADMIN', 'ADMIN'], moduleId: '/settings/schools' },
             { to: '/settings/payments', label: 'Payment Settings', permission: Permission.MANAGE_PAYMENT_SETTINGS, moduleId: '/settings/payments' },
             { to: '/settings/upload-holidays', label: 'Upload Master Holidays', permission: Permission.UPLOAD_HOLIDAYS, moduleId: '/settings/upload-holidays' },
-            { to: '/settings/subjects-chapters', label: 'Subjects & Chapters', permission: Permission.MANAGE_ACADEMIC_STRUCTURE, moduleId: '/settings/subjects-chapters' },
             { to: '/settings/roles', label: 'Roles & Permissions', permission: Permission.MANAGE_ROLES, moduleId: '/settings/roles' }
         ]
     },

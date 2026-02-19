@@ -347,7 +347,7 @@ const RoutineManager: React.FC<{
         }
 
         const apiKey = allSettings?.find((s: any) => s.id === `gemini_${currentSchool?.id}`)?.apiKey ||
-            localStorage.getItem('millat_gemini_api_key');
+            localStorage.getItem('aischool360_gemini_api_key');
 
         if (!apiKey) {
             alert('Gemini API key not configured. Please set it in Settings > API Keys');

@@ -1982,20 +1982,29 @@ export function GeminiConfig() {
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        const fetchKey = async () => {
-            if (!geminiKey && currentSchool?.id) {
-                try {
-                    const d = await getDoc(doc(db, 'settings', `gemini_${currentSchool.id}`));
-                    if (d.exists()) {
-                        setGeminiKey(d.data().apiKey);
-                    }
-                } catch (e) {
-                    console.error("Gemini fetch error:", e);
+        const fetchOrSyncKey = async () => {
+            if (!currentSchool?.id) return;
+            try {
+                const d = await getDoc(doc(db, 'settings', `gemini_${currentSchool.id}`));
+                if (d.exists() && d.data().apiKey) {
+                    // Firestore has key — sync to localStorage
+                    setGeminiKey(d.data().apiKey);
+                } else if (geminiKey) {
+                    // localStorage has key but Firestore doesn't — auto-sync NOW
+                    console.log('[GeminiConfig] Auto-syncing key to Firestore...');
+                    await setDoc(doc(db, 'settings', `gemini_${currentSchool.id}`), {
+                        apiKey: geminiKey,
+                        schoolId: currentSchool.id,
+                        updatedAt: new Date().toISOString()
+                    });
+                    console.log('[GeminiConfig] Auto-sync done');
                 }
+            } catch (e) {
+                console.error("Gemini fetch/sync error:", e);
             }
         };
-        fetchKey();
-    }, [currentSchool?.id, geminiKey]);
+        fetchOrSyncKey();
+    }, [currentSchool?.id]);
 
     const handleSaveToCloud = async () => {
         if (!geminiKey || !currentSchool?.id) {

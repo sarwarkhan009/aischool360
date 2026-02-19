@@ -83,7 +83,8 @@ const AttendanceManagement: React.FC = () => {
     const { user } = useAuth();
     const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
-    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
+    const activeFY = currentSchool?.activeFinancialYear || '';
+    const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], activeFY);
 
     const [assignedClasses, setAssignedClasses] = useState<string[]>([]);
     const [assignedLoading, setAssignedLoading] = useState(false);
