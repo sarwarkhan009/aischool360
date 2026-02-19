@@ -21,6 +21,7 @@ import { formatDate } from '../../utils/dateUtils';
 import { db } from '../../lib/firebase';
 import { doc, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
+import { sortClasses } from '../../constants/app';
 
 const HomeworkReport: React.FC = () => {
     const { user } = useAuth();
@@ -47,7 +48,7 @@ const HomeworkReport: React.FC = () => {
     const { data: allSubmissions, loading: loadingSubs } = useFirestore<any>('homeworkSubmissions', schoolFilter, { skipSchoolFilter: true });
     const { data: allStudents } = useFirestore<any>('students', schoolFilter, { skipSchoolFilter: true });
 
-    const classSettings = allSettings?.filter((s: any) => s.type === 'class' && s.active !== false) || [];
+    const classSettings = sortClasses(allSettings?.filter((s: any) => s.type === 'class' && s.active !== false) || []);
 
     // Process Overview Data (Class-wise)
     const classOverview = useMemo(() => {

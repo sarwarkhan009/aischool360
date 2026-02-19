@@ -337,18 +337,50 @@ const AdmitCards: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {(exam?.subjects || []).sort((a: any, b: any) => new Date(a.examDate).getTime() - new Date(b.examDate).getTime()).map((subject: any, idx: number) => (
-                                <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                    <td style={{ padding: '0.4rem', fontSize: '0.75rem', fontWeight: 600 }}>{new Date(subject.examDate).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                                    <td style={{ padding: '0.4rem', fontSize: '0.75rem' }}>{subject.subjectName}</td>
-                                    <td style={{ padding: '0.4rem', fontSize: '0.75rem', textAlign: 'center' }}>{subject.examTime} ({subject.duration}m)</td>
-                                </tr>
-                            ))}
-                            {(!exam?.subjects || exam.subjects.length === 0) && (
-                                <tr>
-                                    <td colSpan={3} style={{ padding: '1rem', textAlign: 'center', color: '#9ca3af', fontSize: '0.75rem' }}>Schedule not yet published</td>
-                                </tr>
-                            )}
+                            {(() => {
+                                // Try to find class-specific routine first
+                                // student.class is the class name (e.g. "Class 4")
+                                // We check both classId and className for reliability
+                                const studentClassId = classNameToId.get(student.class);
+                                const myRoutine = exam?.classRoutines?.find((cr: any) =>
+                                    cr.classId === studentClassId || cr.className === student.class
+                                );
+
+                                const subjectsToShow = (myRoutine && myRoutine.routine && myRoutine.routine.length > 0)
+                                    ? myRoutine.routine
+                                    : (exam?.subjects || []);
+
+                                const sortedSubjects = [...subjectsToShow].sort((a: any, b: any) => {
+                                    if (!a.examDate) return 1;
+                                    if (!b.examDate) return -1;
+                                    return new Date(a.examDate).getTime() - new Date(b.examDate).getTime();
+                                });
+
+                                if (sortedSubjects.length === 0) {
+                                    return (
+                                        <tr>
+                                            <td colSpan={3} style={{ padding: '1rem', textAlign: 'center', color: '#9ca3af', fontSize: '0.75rem' }}>Schedule not yet published</td>
+                                        </tr>
+                                    );
+                                }
+
+                                return sortedSubjects.map((subject: any, idx: number) => {
+                                    const combinedSuffix = subject.combinedSubjects?.length
+                                        ? ` + ${subject.combinedSubjects.join(' + ')}`
+                                        : '';
+                                    return (
+                                        <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                            <td style={{ padding: '0.4rem', fontSize: '0.75rem', fontWeight: 600 }}>
+                                                {subject.examDate ? new Date(subject.examDate).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                                            </td>
+                                            <td style={{ padding: '0.4rem', fontSize: '0.75rem' }}>
+                                                {subject.subjectName}{combinedSuffix}
+                                            </td>
+                                            <td style={{ padding: '0.4rem', fontSize: '0.75rem', textAlign: 'center' }}>{subject.examTime} {subject.duration ? `(${subject.duration}m)` : ''}</td>
+                                        </tr>
+                                    );
+                                });
+                            })()}
                         </tbody>
                     </table>
                 </div>

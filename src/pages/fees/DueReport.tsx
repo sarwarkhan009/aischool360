@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
-import { DollarSign, Calendar, User, Search, Download, AlertCircle, RefreshCw, Layers, ChevronDown, ChevronUp, Clock, CreditCard, Hash, MessageCircle } from 'lucide-react';
+import { DollarSign, Calendar, User, Search, Download, AlertCircle, RefreshCw, Layers, ChevronDown, ChevronUp, Clock, CreditCard, Hash, MessageCircle, Table2, LayoutGrid, X } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { sortClasses } from '../../constants/app';
 import { formatClassName } from '../../utils/formatters';
-import { getMonthIndexMap } from '../../utils/academicYear';
+import { getMonthIndexMap, getAcademicYearMonths } from '../../utils/academicYear';
+import FeeReceipt from '../../components/fees/FeeReceipt';
 
 interface Student {
     id: string;
@@ -23,12 +24,14 @@ interface Student {
     fatherContactNo?: string;
     fatherName?: string;
     monthlyFee?: string;
+    rollNo?: string;
 }
 
 interface FeeCollection {
     id: string;
     admissionNo: string;
     paid: number;
+    discount?: number;
     paymentDate: string;
     status: string;
     receiptNo: string;
@@ -61,8 +64,11 @@ const DueReport: React.FC = () => {
 
     const [searchTerm, setSearchTerm] = useState('');
     const [filterClass, setFilterClass] = useState('ALL');
+    const [filterSection, setFilterSection] = useState('ALL');
     const [expandedRow, setExpandedRow] = useState<string | null>(null);
     const [paymentSettings, setPaymentSettings] = useState<any>(null);
+    const [viewMode, setViewMode] = useState<'detailed' | 'ledger'>('detailed');
+    const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
 
     const [isPrinting, setIsPrinting] = useState(false);
     const { currentSchool } = useSchool();
@@ -122,7 +128,13 @@ const DueReport: React.FC = () => {
         const startRule = feeSettings.admissionFeeStartRule || 'FROM_ADMISSION_MONTH';
         const cutoffDate = feeSettings.admissionFeeCutoffDate || 15;
 
-        return students.map(student => {
+        // Filter students to only current session (consistent with StudentManagement)
+        const sessionStudents = students.filter(s => {
+            const studentSession = (s as any).session;
+            return studentSession === activeFY;
+        });
+
+        return sessionStudents.map(student => {
             const admType = student.admissionType || 'NEW';
             const admDateRaw = student.admissionDate ? new Date(student.admissionDate) : null;
 
@@ -311,7 +323,8 @@ const DueReport: React.FC = () => {
                 .sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
 
             const totalPaid = studentPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
-            const dues = totalPayable - totalPaid;
+            const totalDiscount = studentPayments.reduce((sum, c) => sum + (Number((c as any).discount) || 0), 0);
+            const dues = totalPayable - totalPaid - totalDiscount;
 
             if (dues <= 0) return null;
 
@@ -321,6 +334,7 @@ const DueReport: React.FC = () => {
                 id: student.id,
                 name: (student.fullName || student.name || 'N/A').toUpperCase(),
                 admissionNo: student.admissionNo || 'N/A',
+                rollNo: student.rollNo || '',
                 class: student.class || 'N/A',
                 section: student.section || '',
                 phone: student.fatherContactNo || student.phone || 'N/A',
@@ -329,6 +343,7 @@ const DueReport: React.FC = () => {
                 totalPayable,
                 payableDetails,
                 totalPaid,
+                totalDiscount,
                 paidDetails: studentPayments,
                 lastPaymentAmount: lastPayment ? lastPayment.paid : 0,
                 lastPaymentDate: lastPayment ? lastPayment.paymentDate : null,
@@ -337,16 +352,26 @@ const DueReport: React.FC = () => {
                 admissionDate: student.admissionDate
             };
         }).filter(Boolean);
-    }, [students, feeCollections, feeTypes, feeAmounts, studentsLoading, collectionsLoading, typesLoading, amountsLoading, paymentSettings]);
+    }, [students, feeCollections, feeTypes, feeAmounts, studentsLoading, collectionsLoading, typesLoading, amountsLoading, paymentSettings, activeFY]);
 
     const filteredResults = useMemo(() => {
         return (studentDues as any[]).filter(s => {
             const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 s.admissionNo.toLowerCase().includes(searchTerm.toLowerCase());
             const matchesClass = filterClass === 'ALL' || s.class === filterClass;
-            return matchesSearch && matchesClass;
+            const matchesSection = filterSection === 'ALL' || s.section === filterSection;
+            return matchesSearch && matchesClass && matchesSection;
+        }).sort((a, b) => {
+            const classDiff = (a.class || '').localeCompare(b.class || '');
+            if (classDiff !== 0) return classDiff;
+            const sectionDiff = (a.section || '').localeCompare(b.section || '');
+            if (sectionDiff !== 0) return sectionDiff;
+            const rollA = parseInt(a.rollNo) || 0;
+            const rollB = parseInt(b.rollNo) || 0;
+            if (rollA !== rollB) return rollA - rollB;
+            return a.name.localeCompare(b.name);
         });
-    }, [studentDues, searchTerm, filterClass]);
+    }, [studentDues, searchTerm, filterClass, filterSection]);
 
     const stats = useMemo(() => {
         return {
@@ -394,6 +419,149 @@ const DueReport: React.FC = () => {
         return sortClasses(Array.from(set));
     }, [students]);
 
+    const uniqueSections = useMemo(() => {
+        if (filterClass === 'ALL') return [];
+        const set = new Set<string>(students.filter(s => s.class === filterClass).map(s => s.section).filter((s): s is string => Boolean(s)));
+        return Array.from(set).sort();
+    }, [students, filterClass]);
+
+    // Build ledger data for spreadsheet view
+    const ledgerData = useMemo(() => {
+        const emptyResult = { rows: [] as any[], columns: [] as { key: string; label: string; receivable: number; isNonMonthly: boolean }[] };
+        if (studentsLoading || collectionsLoading || typesLoading || amountsLoading) return emptyResult;
+
+        const today = new Date();
+        const yr0 = today.getFullYear();
+        const cm = today.getMonth();
+        const academicStart = currentSchool?.academicYearStartMonth || 'April';
+        const allMonths = getAcademicYearMonths(academicStart).filter(m => m !== 'Admission_month');
+        const sesYr = cm >= (MONTH_MAP[academicStart] ?? 3) ? yr0 : yr0 - 1;
+        const sesStart = new Date(sesYr, MONTH_MAP[academicStart] ?? 3, 1);
+        const activeFT = feeTypes.filter(ft => ft.status === 'ACTIVE');
+        const targetClass = filterClass !== 'ALL' ? filterClass : '';
+
+        // Build columns with receivable amounts
+        const nmHeads: { name: string; receivable: number }[] = [];
+        const monthRcv: Record<string, number> = {};
+        // Exam fee heads: fee types with "exam" in name, tied to specific months (not Admission_month)
+        const examFeeHeads: { name: string; month: string; receivable: number }[] = [];
+
+        activeFT.forEach(ft => {
+            let amt = 0;
+            if (targetClass) {
+                const fa = feeAmounts.find(a => a.feeTypeId === ft.id && a.className === targetClass);
+                amt = fa?.amount || 0;
+            } else {
+                const fas = feeAmounts.filter(a => a.feeTypeId === ft.id);
+                amt = fas.length > 0 ? fas[0].amount : 0;
+            }
+            const isExamFee = ft.feeHeadName?.toLowerCase().includes('exam');
+            if (ft.months?.includes('Admission_month')) {
+                nmHeads.push({ name: ft.feeHeadName, receivable: amt });
+            } else if (isExamFee) {
+                // Exam fees get their own columns, placed before their associated month
+                (ft.months || []).forEach(m => {
+                    if (allMonths.includes(m)) {
+                        examFeeHeads.push({ name: ft.feeHeadName, month: m, receivable: amt });
+                    }
+                });
+            } else {
+                (ft.months || []).forEach(m => { if (allMonths.includes(m)) monthRcv[m] = (monthRcv[m] || 0) + amt; });
+            }
+        });
+
+        // Build exam fee lookup: month -> list of exam fee heads for that month
+        const examFeesByMonth: Record<string, { name: string; receivable: number }[]> = {};
+        examFeeHeads.forEach(ef => {
+            if (!examFeesByMonth[ef.month]) examFeesByMonth[ef.month] = [];
+            examFeesByMonth[ef.month].push({ name: ef.name, receivable: ef.receivable });
+        });
+
+        const columns: { key: string; label: string; receivable: number; isNonMonthly: boolean; isExamFee?: boolean }[] = [];
+        nmHeads.forEach(h => columns.push({ key: `nm_${h.name}`, label: h.name, receivable: h.receivable, isNonMonthly: true }));
+        allMonths.forEach(m => {
+            const mi = MONTH_MAP[m]; if (mi === undefined) return;
+            const y = mi < (MONTH_MAP[academicStart] ?? 3) ? sesYr + 1 : sesYr;
+            // Insert exam fee columns BEFORE the month they belong to
+            if (examFeesByMonth[m]) {
+                examFeesByMonth[m].forEach(ef => {
+                    columns.push({ key: `exam_${ef.name}_${m}`, label: ef.name, receivable: ef.receivable, isNonMonthly: true, isExamFee: true });
+                });
+            }
+            columns.push({ key: `m_${m}`, label: `${m.substring(0, 3)}'${String(y).slice(-2)}`, receivable: monthRcv[m] || 0, isNonMonthly: false });
+        });
+
+        const nmNames = new Set(nmHeads.map(h => h.name));
+        const examFeeNames = new Set(examFeeHeads.map(h => h.name));
+        // Build reverse lookup: exam fee head name -> column key
+        const examFeeColKey: Record<string, string> = {};
+        examFeeHeads.forEach(ef => { examFeeColKey[ef.name] = `exam_${ef.name}_${ef.month}`; });
+
+        const sessionStudents = students.filter(s => (s as any).session === activeFY);
+        const filtered = sessionStudents.filter(s => {
+            const ms = (s.fullName || s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (s.admissionNo || '').toLowerCase().includes(searchTerm.toLowerCase());
+            return ms && (filterClass === 'ALL' || s.class === filterClass) && (filterSection === 'ALL' || s.section === filterSection);
+        });
+
+        filtered.sort((a, b) => {
+            const d = (a.class || '').localeCompare(b.class || '');
+            if (d !== 0) return d;
+            const s = (a.section || '').localeCompare(b.section || '');
+            if (s !== 0) return s;
+            const rollA = parseInt(a.rollNo || '0') || 0;
+            const rollB = parseInt(b.rollNo || '0') || 0;
+            if (rollA !== rollB) return rollA - rollB;
+            return (a.fullName || a.name || '').localeCompare(b.fullName || b.name || '');
+        });
+
+        const rows = filtered.map(student => {
+            const cols = (feeCollections as any[]).filter(c => c.admissionNo === student.admissionNo && c.status !== 'CANCELLED' && new Date(c.paymentDate) >= sesStart);
+            const payments: Record<string, { receiptNo: string; amount: number }[]> = {};
+            cols.forEach((col: any) => {
+                if (!col.paidFor) return;
+                const pm = col.paidFor.split(',').map((m: string) => m.trim());
+                const bd = col.feeBreakdown || {};
+                pm.forEach((p: string) => {
+                    if (allMonths.includes(p)) {
+                        const k = `m_${p}`;
+                        if (!payments[k]) payments[k] = [];
+                        let ma = 0;
+                        // Sum only non-admission & non-exam fee heads for the monthly column
+                        Object.entries(bd).forEach(([fh, a]) => { if (!nmNames.has(fh) && !examFeeNames.has(fh)) { const rm = pm.filter((x: string) => allMonths.includes(x)); ma += (a as number) / (rm.length || 1); } });
+                        if (ma === 0) {
+                            // Fallback: only if no exam/non-monthly fees in breakdown at all
+                            const hasSpecialFees = Object.keys(bd).some(fh => nmNames.has(fh) || examFeeNames.has(fh));
+                            if (!hasSpecialFees) {
+                                const rm = pm.filter((x: string) => allMonths.includes(x));
+                                if (rm.length > 0) ma = col.paid / rm.length;
+                            }
+                        }
+                        if (ma > 0) payments[k].push({ receiptNo: col.receiptNo || '', amount: Math.round(ma) });
+                    }
+                });
+                // Map admission/non-monthly fee head payments
+                Object.entries(bd).forEach(([fh, a]) => {
+                    if (nmNames.has(fh)) {
+                        const k = `nm_${fh}`;
+                        if (!payments[k]) payments[k] = [];
+                        payments[k].push({ receiptNo: col.receiptNo || '', amount: a as number });
+                    }
+                    // Map exam fee head payments to their own column
+                    if (examFeeNames.has(fh)) {
+                        const k = examFeeColKey[fh];
+                        if (k) {
+                            if (!payments[k]) payments[k] = [];
+                            payments[k].push({ receiptNo: col.receiptNo || '', amount: a as number });
+                        }
+                    }
+                });
+            });
+            return { id: student.id, name: (student.fullName || student.name || 'N/A').toUpperCase(), admissionNo: student.admissionNo || '', rollNo: student.rollNo || '', class: student.class || '', section: student.section || '', payments };
+        });
+
+        return { rows, columns };
+    }, [students, feeCollections, feeTypes, feeAmounts, studentsLoading, collectionsLoading, typesLoading, amountsLoading, searchTerm, filterClass, filterSection, activeFY, currentSchool]);
+
     if (studentsLoading || collectionsLoading || typesLoading || amountsLoading) {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '1rem' }}>
@@ -414,35 +582,60 @@ const DueReport: React.FC = () => {
                 boxShadow: '0 10px 25px rgba(30, 41, 59, 0.2)'
             }} className="due-report-header">
                 <div style={{ marginBottom: '1.5rem' }}>
-                    <h1 style={{ fontSize: 'clamp(1.5rem, 5vw, 2.25rem)', fontWeight: 900, margin: 0 }}>Detailed Due Report</h1>
+                    <h1 style={{ fontSize: 'clamp(1.5rem, 5vw, 2.25rem)', fontWeight: 900, margin: 0 }}>Due Report</h1>
                     <p style={{ opacity: 0.8, marginTop: '0.5rem', fontWeight: 600, fontSize: 'clamp(0.875rem, 2.5vw, 1rem)' }}>
-                        Full Breakdown of Payables & Payments
+                        {viewMode === 'ledger' ? 'Ledger View — Payment Tracker' : 'Full Breakdown of Payables & Payments'}
                     </p>
                     <p style={{ opacity: 0.8, fontWeight: 600, fontSize: 'clamp(0.75rem, 2vw, 0.875rem)' }}>
                         Session {activeFY}
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-                    <button
-                        onClick={handlePrint}
-                        className="btn btn-primary no-print"
-                        style={{
-                            background: '#6366f1',
-                            border: 'none',
-                            padding: '0.875rem 1.25rem',
-                            borderRadius: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            fontWeight: 700,
-                            color: 'white',
-                            fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0
-                        }}
-                    >
-                        <Download size={18} /> PRINT REPORT
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <button
+                            onClick={handlePrint}
+                            className="btn btn-primary no-print"
+                            style={{
+                                background: '#6366f1',
+                                border: 'none',
+                                padding: '0.875rem 1.25rem',
+                                borderRadius: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                fontWeight: 700,
+                                color: 'white',
+                                fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0
+                            }}
+                        >
+                            <Download size={18} /> PRINT REPORT
+                        </button>
+                        <button
+                            onClick={() => setViewMode(viewMode === 'detailed' ? 'ledger' : 'detailed')}
+                            className="btn no-print"
+                            style={{
+                                background: viewMode === 'ledger' ? '#f59e0b' : 'rgba(255,255,255,0.15)',
+                                border: viewMode === 'ledger' ? '2px solid #f59e0b' : '2px solid rgba(255,255,255,0.3)',
+                                padding: '0.875rem 1.25rem',
+                                borderRadius: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                fontWeight: 700,
+                                color: 'white',
+                                fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                                cursor: 'pointer',
+                                transition: 'all 0.3s ease'
+                            }}
+                        >
+                            {viewMode === 'ledger' ? <LayoutGrid size={18} /> : <Table2 size={18} />}
+                            {viewMode === 'ledger' ? 'DETAILED VIEW' : 'LEDGER VIEW'}
+                        </button>
+                    </div>
                     <div style={{ flex: 1, minWidth: '200px', textAlign: 'right' }}>
                         <div style={{ fontSize: 'clamp(1.75rem, 6vw, 2.5rem)', fontWeight: 900, color: '#f87171' }}>₹{stats.totalDues.toLocaleString('en-IN')}</div>
                         <div style={{ fontSize: 'clamp(0.7rem, 2vw, 0.875rem)', opacity: 0.8, fontWeight: 700 }}>COLLECTABLE BALANCE</div>
@@ -493,49 +686,105 @@ const DueReport: React.FC = () => {
                         />
                     </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-                    <label style={{ fontSize: 'clamp(0.75rem, 2vw, 0.8125rem)', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filter by Class</label>
-                    <select
-                        style={{
-                            width: '100%',
-                            height: '48px',
-                            padding: '0 1rem',
-                            borderRadius: '12px',
-                            border: '2px solid #e2e8f0',
-                            fontSize: 'clamp(0.875rem, 2.5vw, 0.9375rem)',
-                            fontWeight: 600,
-                            color: '#1e293b',
-                            background: '#f8fafc',
-                            cursor: 'pointer',
-                            outline: 'none',
-                            appearance: 'none',
-                            backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%2364748b\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'/%3E%3C/svg%3E")',
-                            backgroundRepeat: 'no-repeat',
-                            backgroundPosition: 'right 1rem center',
-                            backgroundSize: '1.25rem'
-                        }}
-                        onFocus={(e) => e.currentTarget.style.borderColor = '#6366f1'}
-                        onBlur={(e) => e.currentTarget.style.borderColor = '#e2e8f0'}
-                        value={filterClass}
-                        onChange={e => setFilterClass(e.target.value)}
-                    >
-                        <option value="ALL">All Classes</option>
-                        {uniqueClasses.map(c => (
-                            <option key={c} value={c}>
-                                {formatClassName(c, currentSchool?.useRomanNumerals)}
-                            </option>
-                        ))}
-                    </select>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <label style={{ fontSize: 'clamp(0.75rem, 2vw, 0.8125rem)', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filter by Class</label>
+                        <select
+                            style={{ width: '100%', height: '48px', padding: '0 1rem', borderRadius: '12px', border: '2px solid #e2e8f0', fontSize: 'clamp(0.875rem, 2.5vw, 0.9375rem)', fontWeight: 600, color: '#1e293b', background: '#f8fafc', cursor: 'pointer', outline: 'none', appearance: 'none', backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%2364748b\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem center', backgroundSize: '1.25rem' }}
+                            value={filterClass}
+                            onChange={e => { setFilterClass(e.target.value); setFilterSection('ALL'); }}
+                        >
+                            <option value="ALL">All Classes</option>
+                            {uniqueClasses.map(c => (
+                                <option key={c} value={c}>{formatClassName(c, currentSchool?.useRomanNumerals)}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <label style={{ fontSize: 'clamp(0.75rem, 2vw, 0.8125rem)', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filter by Section</label>
+                        <select
+                            style={{ width: '100%', height: '48px', padding: '0 1rem', borderRadius: '12px', border: '2px solid #e2e8f0', fontSize: 'clamp(0.875rem, 2.5vw, 0.9375rem)', fontWeight: 600, color: '#1e293b', background: '#f8fafc', cursor: 'pointer', outline: 'none', appearance: 'none', backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%2364748b\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem center', backgroundSize: '1.25rem' }}
+                            value={filterSection}
+                            onChange={e => setFilterSection(e.target.value)}
+                            disabled={filterClass === 'ALL'}
+                        >
+                            <option value="ALL">All Sections</option>
+                            {uniqueSections.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
             </div>
 
+            {/* Ledger Spreadsheet View */}
+            {viewMode === 'ledger' && (
+                <div className="glass-card ledger-view-container" style={{ padding: 0, overflow: 'hidden', marginBottom: '2rem' }}>
+                    <div style={{ overflowX: 'auto', maxHeight: '75vh' }}>
+                        <table className="ledger-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', minWidth: '800px' }}>
+                            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                                <tr style={{ background: '#1e293b', color: 'white' }}>
+                                    <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 800, fontSize: '0.6875rem', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: '#1e293b', zIndex: 11, minWidth: '130px', borderRight: '2px solid #475569' }}>Roll / Student</th>
+                                    <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 800, fontSize: '0.6875rem', whiteSpace: 'nowrap', minWidth: '80px' }}>Class&Sec</th>
+                                    {ledgerData.columns.map(col => (
+                                        <th key={col.key} style={{ padding: '0.375rem 0.5rem', textAlign: 'center', fontWeight: 800, fontSize: '0.625rem', whiteSpace: 'nowrap', minWidth: '100px', background: (col as any).isExamFee ? '#134e4a' : col.isNonMonthly ? '#312e81' : '#1e293b', borderLeft: '1px solid #475569' }}>
+                                            <div>{col.label}</div>
+                                            {col.receivable > 0 && <div style={{ fontSize: '0.5625rem', opacity: 0.7, fontWeight: 600, marginTop: '2px' }}>₹{col.receivable.toLocaleString('en-IN')}</div>}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {ledgerData.rows.length === 0 ? (
+                                    <tr><td colSpan={2 + ledgerData.columns.length} style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}><AlertCircle size={32} style={{ opacity: 0.3, marginBottom: '0.75rem' }} /><p style={{ fontWeight: 600 }}>No students found.</p></td></tr>
+                                ) : ledgerData.rows.map((row: any, idx: number) => (
+                                    <tr key={row.id} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? 'white' : '#f8fafc' }}>
+                                        <td style={{ padding: '0.5rem', fontWeight: 700, color: '#1e293b', fontSize: '0.75rem', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: idx % 2 === 0 ? 'white' : '#f8fafc', zIndex: 5, borderRight: '2px solid #e2e8f0' }}>{row.rollNo ? `${row.rollNo}. ` : ''}{row.name}</td>
+                                        <td style={{ padding: '0.5rem', fontWeight: 600, color: '#4338ca', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatClassName(row.class, currentSchool?.useRomanNumerals)} ({row.section})</td>
+                                        {ledgerData.columns.map((col: any) => {
+                                            const pays = row.payments[col.key];
+                                            return (
+                                                <td key={col.key} style={{ padding: '0.375rem 0.5rem', textAlign: 'center', fontSize: '0.6875rem', borderLeft: '1px solid #f1f5f9', background: pays && pays.length > 0 ? 'rgba(16, 185, 129, 0.06)' : undefined }}>
+                                                    {pays && pays.length > 0 ? pays.map((py: any, i: number) => (
+                                                        <div key={i} style={{ whiteSpace: 'nowrap' }}>
+                                                            <span
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    // Find receipt from loaded feeCollections
+                                                                    const receipt = (feeCollections as any[]).find(c => c.receiptNo === py.receiptNo);
+                                                                    if (receipt) {
+                                                                        // Find matching student data
+                                                                        const stu = students.find(s => s.admissionNo === receipt.admissionNo);
+                                                                        setSelectedReceipt({ ...receipt, _studentData: stu });
+                                                                    }
+                                                                }}
+                                                                style={{ color: '#059669', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+                                                            >{py.receiptNo}</span>
+                                                            <span style={{ color: '#64748b', fontWeight: 600 }}> ({py.amount.toLocaleString('en-IN')})</span>
+                                                        </div>
+                                                    )) : null}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style={{ padding: '0.75rem 1rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#64748b' }}>Showing {ledgerData.rows.length} students</span>
+                        <button onClick={handlePrint} className="no-print" style={{ background: '#6366f1', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.375rem' }}><Download size={14} /> PRINT LEDGER</button>
+                    </div>
+                </div>
+            )}
+
             {/* Desktop Table View */}
-            <div className="glass-card desktop-only" style={{ padding: 0, overflow: 'hidden', display: 'none' }}>
+            <div className="glass-card desktop-only" style={{ padding: 0, overflow: 'hidden', display: viewMode === 'ledger' ? 'none' : 'none' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                         <tr style={{ background: '#334155', color: 'white' }}>
                             <th style={{ width: '50px', padding: '1rem' }}></th>
-                            <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 800 }}>STUDENT</th>
+                            <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 800 }}>ROLL / STUDENT</th>
                             <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 800 }}>CLASS INFO</th>
                             <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 800 }}>LAST PAYMENT</th>
                             <th style={{ padding: '1rem', textAlign: 'right', fontSize: '0.75rem', fontWeight: 800 }}>PAYABLE</th>
@@ -568,7 +817,7 @@ const DueReport: React.FC = () => {
                                             {expandedRow === s.id ? <ChevronUp size={20} color="#6366f1" /> : <ChevronDown size={20} color="var(--text-muted)" />}
                                         </td>
                                         <td style={{ padding: '1rem' }}>
-                                            <div style={{ fontWeight: 800, color: 'var(--text-main)', fontSize: '0.9375rem' }}>{s.name}</div>
+                                            <div style={{ fontWeight: 800, color: 'var(--text-main)', fontSize: '0.9375rem' }}>{s.rollNo ? `${s.rollNo}. ` : ''}{s.name}</div>
                                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                                                 <Calendar size={12} /> {s.admissionDate ? new Date(s.admissionDate).toLocaleDateString('en-GB') : 'N/A'}
                                             </div>
@@ -664,9 +913,21 @@ const DueReport: React.FC = () => {
                                                                 </tbody>
                                                                 <tfoot style={{ background: '#f8fafc', fontWeight: 800 }}>
                                                                     <tr>
-                                                                        <td colSpan={2} style={{ padding: '0.75rem', textAlign: 'right' }}>TOTAL PAYABLE</td>
+                                                                        <td colSpan={2} style={{ padding: '0.75rem', textAlign: 'right' }}>GROSS PAYABLE</td>
                                                                         <td style={{ padding: '0.75rem', textAlign: 'right', color: '#1e293b' }}>₹{s.totalPayable.toLocaleString('en-IN')}</td>
                                                                     </tr>
+                                                                    {s.totalDiscount > 0 && (
+                                                                        <tr style={{ color: '#10b981' }}>
+                                                                            <td colSpan={2} style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700 }}>DISCOUNT</td>
+                                                                            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700 }}>- ₹{s.totalDiscount.toLocaleString('en-IN')}</td>
+                                                                        </tr>
+                                                                    )}
+                                                                    {s.totalDiscount > 0 && (
+                                                                        <tr>
+                                                                            <td colSpan={2} style={{ padding: '0.75rem', textAlign: 'right', borderTop: '1px solid #e2e8f0' }}>NET PAYABLE</td>
+                                                                            <td style={{ padding: '0.75rem', textAlign: 'right', color: '#1e293b', borderTop: '1px solid #e2e8f0' }}>₹{(s.totalPayable - s.totalDiscount).toLocaleString('en-IN')}</td>
+                                                                        </tr>
+                                                                    )}
                                                                 </tfoot>
                                                             </table>
                                                         </div>
@@ -696,7 +957,16 @@ const DueReport: React.FC = () => {
                                                                         {s.paidDetails.map((pay: any, idx: number) => (
                                                                             <tr key={pay.id} style={{ borderBottom: idx === s.paidDetails.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
                                                                                 <td style={{ padding: '0.75rem', color: '#64748b' }}>{new Date(pay.paymentDate).toLocaleDateString('en-IN')}</td>
-                                                                                <td style={{ padding: '0.75rem', fontWeight: 700, color: '#059669' }}>{pay.receiptNo} <span style={{ fontSize: '0.625rem', opacity: 0.6 }}>({pay.paymentMode})</span></td>
+                                                                                <td style={{ padding: '0.75rem', fontWeight: 700, color: '#059669' }}>
+                                                                                    <span
+                                                                                        onClick={() => {
+                                                                                            const stu = students.find(st => st.admissionNo === pay.admissionNo);
+                                                                                            setSelectedReceipt({ ...pay, _studentData: stu });
+                                                                                        }}
+                                                                                        style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+                                                                                    >{pay.receiptNo}</span>
+                                                                                    {' '}<span style={{ fontSize: '0.625rem', opacity: 0.6 }}>({pay.paymentMode})</span>
+                                                                                </td>
                                                                                 <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 800, color: '#1e293b' }}>₹{pay.paid.toLocaleString('en-IN')}</td>
                                                                             </tr>
                                                                         ))}
@@ -723,7 +993,7 @@ const DueReport: React.FC = () => {
             </div>
 
             {/* Mobile Card View */}
-            <div className="mobile-only" style={{ width: '100%' }}>
+            {viewMode !== 'ledger' && <div className="mobile-only" style={{ width: '100%' }}>
                 {filteredResults.length === 0 ? (
                     <div style={{ padding: '4rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                         <AlertCircle size={40} style={{ opacity: 0.3, marginBottom: '1rem' }} />
@@ -749,7 +1019,7 @@ const DueReport: React.FC = () => {
                             >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                                     <div style={{ flex: 1 }}>
-                                        <div style={{ fontWeight: 800, color: '#1e293b', fontSize: 'clamp(0.9375rem, 3vw, 1.125rem)', marginBottom: '0.25rem' }}>{s.name}</div>
+                                        <div style={{ fontWeight: 800, color: '#1e293b', fontSize: 'clamp(0.9375rem, 3vw, 1.125rem)', marginBottom: '0.25rem' }}>{s.rollNo ? `${s.rollNo}. ` : ''}{s.name}</div>
                                         <div style={{ fontSize: 'clamp(0.75rem, 2vw, 0.8125rem)', color: '#4338ca', fontWeight: 700 }}>
                                             {s.admissionNo} • {s.class}-{s.section}
                                         </div>
@@ -845,9 +1115,21 @@ const DueReport: React.FC = () => {
                                                 </div>
                                             ))}
                                             <div style={{ padding: '0.75rem', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', fontWeight: 800 }}>
-                                                <span style={{ fontSize: 'clamp(0.75rem, 2vw, 0.875rem)' }}>TOTAL</span>
+                                                <span style={{ fontSize: 'clamp(0.75rem, 2vw, 0.875rem)' }}>GROSS PAYABLE</span>
                                                 <span style={{ fontSize: 'clamp(0.875rem, 2.5vw, 1rem)', color: '#1e293b' }}>₹{s.totalPayable.toLocaleString('en-IN')}</span>
                                             </div>
+                                            {s.totalDiscount > 0 && (
+                                                <div style={{ padding: '0.5rem 0.75rem', background: '#ecfdf5', display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#10b981' }}>
+                                                    <span style={{ fontSize: 'clamp(0.75rem, 2vw, 0.875rem)' }}>DISCOUNT</span>
+                                                    <span style={{ fontSize: 'clamp(0.875rem, 2.5vw, 1rem)' }}>- ₹{s.totalDiscount.toLocaleString('en-IN')}</span>
+                                                </div>
+                                            )}
+                                            {s.totalDiscount > 0 && (
+                                                <div style={{ padding: '0.75rem', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid #e2e8f0' }}>
+                                                    <span style={{ fontSize: 'clamp(0.75rem, 2vw, 0.875rem)' }}>NET PAYABLE</span>
+                                                    <span style={{ fontSize: 'clamp(0.875rem, 2.5vw, 1rem)', color: '#1e293b' }}>₹{(s.totalPayable - s.totalDiscount).toLocaleString('en-IN')}</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -902,7 +1184,7 @@ const DueReport: React.FC = () => {
                         </div>
                     ))
                 )}
-            </div>
+            </div>}
 
             <div style={{ marginTop: '2rem', background: 'rgba(59, 130, 246, 0.05)', padding: '1.5rem', borderRadius: '16px', border: '1px dashed #3b82f6' }}>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
@@ -918,7 +1200,7 @@ const DueReport: React.FC = () => {
                 </div>
             </div>
 
-            {isPrinting && (
+            {isPrinting && viewMode !== 'ledger' && (
                 <div className="print-report-view" style={{
                     maxWidth: '210mm',
                     margin: '0 auto',
@@ -935,7 +1217,7 @@ const DueReport: React.FC = () => {
                             <tr style={{ borderBottom: '2px solid #334155' }}>
                                 <th style={{ padding: '6px', textAlign: 'left' }}>S.No</th>
                                 <th style={{ padding: '6px', textAlign: 'left' }}>Admission No</th>
-                                <th style={{ padding: '6px', textAlign: 'left' }}>Student Name</th>
+                                <th style={{ padding: '6px', textAlign: 'left' }}>Roll / Student Name</th>
                                 <th style={{ padding: '6px', textAlign: 'left' }}>Class</th>
                                 <th style={{ padding: '6px', textAlign: 'left' }}>Phone</th>
                                 <th style={{ padding: '6px', textAlign: 'left' }}>Last Pay Info</th>
@@ -947,7 +1229,7 @@ const DueReport: React.FC = () => {
                                 <tr key={s.id} style={{ borderBottom: '0.5px solid #e2e8f0' }}>
                                     <td style={{ padding: '6px' }}>{idx + 1}</td>
                                     <td style={{ padding: '6px' }}>{s.admissionNo}</td>
-                                    <td style={{ padding: '6px', fontWeight: 700 }}>{s.name}</td>
+                                    <td style={{ padding: '6px', fontWeight: 700 }}>{s.rollNo ? `${s.rollNo}. ` : ''}{s.name}</td>
                                     <td style={{ padding: '6px' }}>{s.class}-{s.section}</td>
                                     <td style={{ padding: '6px' }}>{s.phone}</td>
                                     <td style={{ padding: '6px' }}>{s.lastPaymentAmount > 0 ? `₹${s.lastPaymentAmount} (#${s.lastPaymentReceipt}) on ${new Date(s.lastPaymentDate).toLocaleDateString('en-GB')}` : '-'}</td>
@@ -961,6 +1243,49 @@ const DueReport: React.FC = () => {
                                 <td style={{ padding: '6px', textAlign: 'right' }}>₹{stats.totalDues.toLocaleString('en-IN')}</td>
                             </tr>
                         </tfoot>
+                    </table>
+                </div>
+            )}
+
+            {isPrinting && viewMode === 'ledger' && (
+                <div className="print-report-view" style={{ maxWidth: '297mm', margin: '0 auto', padding: '0 10mm' }}>
+                    <div style={{ textAlign: 'center', borderBottom: '2px solid #334155', paddingBottom: '0.75rem', marginBottom: '1rem' }}>
+                        <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 900, textTransform: 'uppercase' }}>FEE PAYMENT LEDGER</h1>
+                        <p style={{ margin: '0.25rem 0', fontWeight: 700, fontSize: '1rem', color: '#1e293b' }}>{currentSchool?.fullName || currentSchool?.name || actualSchool?.schoolName || 'School Name'}</p>
+                        <p style={{ margin: 0, fontSize: '0.75rem', opacity: 0.7 }}>Report Date: {new Date().toLocaleDateString('en-GB')} | Class: {filterClass === 'ALL' ? 'All' : formatClassName(filterClass, currentSchool?.useRomanNumerals)}{filterSection !== 'ALL' ? ` (${filterSection})` : ''} | Session: {activeFY}</p>
+                    </div>
+                    <table className="ledger-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '7px', border: '1px solid #94a3b8' }}>
+                        <thead>
+                            <tr style={{ borderBottom: '2px solid #334155' }}>
+                                <th style={{ padding: '3px', textAlign: 'left', fontSize: '7px', border: '1px solid #94a3b8' }}>S.No</th>
+                                <th style={{ padding: '3px', textAlign: 'left', fontSize: '7px', border: '1px solid #94a3b8' }}>Roll / Student</th>
+                                <th style={{ padding: '3px', textAlign: 'left', fontSize: '7px', border: '1px solid #94a3b8' }}>Class</th>
+                                {ledgerData.columns.map((col: any) => (
+                                    <th key={col.key} style={{ padding: '3px', textAlign: 'center', fontSize: '6px', whiteSpace: 'nowrap', border: '1px solid #94a3b8' }}>
+                                        {col.label}{col.receivable > 0 ? ` (₹${col.receivable})` : ''}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {ledgerData.rows.map((row: any, idx: number) => (
+                                <tr key={row.id} style={{ borderBottom: '0.5px solid #e2e8f0' }}>
+                                    <td style={{ padding: '2px 3px', fontSize: '7px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
+                                    <td style={{ padding: '2px 3px', fontSize: '7px', fontWeight: 700, border: '1px solid #cbd5e1' }}>{row.rollNo ? `${row.rollNo}. ` : ''}{row.name}</td>
+                                    <td style={{ padding: '2px 3px', fontSize: '7px', border: '1px solid #cbd5e1' }}>{row.class}-{row.section}</td>
+                                    {ledgerData.columns.map((col: any) => {
+                                        const pays = row.payments[col.key];
+                                        return (
+                                            <td key={col.key} style={{ padding: '2px 3px', textAlign: 'center', fontSize: '6px', border: '1px solid #cbd5e1' }}>
+                                                {pays && pays.length > 0 ? pays.map((py: any, i: number) => (
+                                                    <div key={i}>{py.receiptNo} ({py.amount})</div>
+                                                )) : ''}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
             )}
@@ -1018,21 +1343,48 @@ const DueReport: React.FC = () => {
                 /* Print styles */
                 @media print {
                     body * { visibility: hidden !important; }
+                    ${selectedReceipt ? `
+                    /* Receipt modal print mode */
+                    .printable-receipt, .printable-receipt * { visibility: visible !important; }
+                    .printable-receipt {
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        max-width: 100% !important;
+                        padding: 0.5cm !important;
+                        box-sizing: border-box !important;
+                    }
+                    .printable-receipt > div {
+                        width: 100% !important;
+                        max-width: 100% !important;
+                    }
+                    .no-print { display: none !important; }
+                    @page { 
+                        size: A5;
+                        margin: 0;
+                    }
+                    ` : `
+                    /* Report print mode */
                     .print-report-view, .print-report-view * { visibility: visible !important; }
                     .print-report-view {
                         position: absolute;
                         left: 0;
                         top: 0;
                         width: 100%;
+                        padding: ${viewMode === 'ledger' ? '8mm 5mm' : '12mm 15mm'};
+                        box-sizing: border-box;
                     }
                     @page { 
-                        margin: 15mm 20mm;
-                        size: A4 portrait;
+                        margin: 0;
+                        size: ${viewMode === 'ledger' ? 'A4 landscape' : 'A4 portrait'};
                     }
+                    `}
                     
                     /* Ensure content doesn't overflow */
                     table {
                         page-break-inside: auto;
+                        border-collapse: collapse !important;
                     }
                     tr {
                         page-break-inside: avoid;
@@ -1044,8 +1396,69 @@ const DueReport: React.FC = () => {
                     tfoot {
                         display: table-footer-group;
                     }
+                    /* Vertical & horizontal grid lines for ledger */
+                    .ledger-table th,
+                    .ledger-table td {
+                        border: 1px solid #cbd5e1 !important;
+                    }
+                    .ledger-table thead th {
+                        border-color: #475569 !important;
+                    }
                 }
             `}</style>
+
+            {/* Receipt Modal */}
+            {selectedReceipt && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.6)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'center',
+                    overflowY: 'auto',
+                    padding: '2rem 1rem'
+                }} onClick={() => setSelectedReceipt(null)}>
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            background: 'white',
+                            borderRadius: '16px',
+                            maxWidth: '650px',
+                            width: '100%',
+                            padding: '1.5rem',
+                            position: 'relative',
+                            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                            animation: 'fadeIn 0.2s ease-out'
+                        }}
+                    >
+                        <FeeReceipt
+                            receipt={selectedReceipt}
+                            studentData={selectedReceipt._studentData || {
+                                fullName: selectedReceipt.studentName,
+                                admissionNo: selectedReceipt.admissionNo,
+                                class: selectedReceipt.class,
+                                section: selectedReceipt.section,
+                                mobileNo: selectedReceipt.mobileNo || ''
+                            }}
+                            schoolInfo={
+                                schoolData?.find((s: any) => s.id === `school_info_${currentSchool?.id}`) ||
+                                schoolData?.find((s: any) =>
+                                    s.id === 'school_info' ||
+                                    s.type === 'school_info' ||
+                                    s.type === 'institution' ||
+                                    s.type === 'Institution Information'
+                                )
+                            }
+                            onClose={() => setSelectedReceipt(null)}
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

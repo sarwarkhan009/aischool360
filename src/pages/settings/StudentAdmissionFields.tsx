@@ -43,6 +43,7 @@ const defaultFields: StudentAdmissionField[] = [
     { id: 'fatherWhatsappNo', label: "Father's WhatsApp No", enabled: true, required: false, category: 'father' },
     { id: 'fatherEmailId', label: "Father's Email ID", enabled: true, required: false, category: 'father' },
     { id: 'fatherAge', label: "Father's Age", enabled: true, required: false, category: 'father' },
+    { id: 'familyIncome', label: 'Family Annual Income', enabled: true, required: false, category: 'father' },
 
     // Step 3: Mother's Details
     { id: 'motherName', label: "Mother's Name", enabled: true, required: true, category: 'mother' },
@@ -68,7 +69,6 @@ const defaultFields: StudentAdmissionField[] = [
     { id: 'class', label: 'Class', enabled: true, required: true, category: 'admission' },
     { id: 'section', label: 'Section', enabled: true, required: true, category: 'admission' },
     { id: 'classRollNo', label: 'Class Roll No', enabled: true, required: false, category: 'admission' },
-    { id: 'familyIncome', label: 'Family Annual Income', enabled: true, required: false, category: 'admission' },
     { id: 'admissionType', label: 'Admission Type', enabled: true, required: true, category: 'admission' },
     { id: 'financeType', label: 'Finance Type', enabled: true, required: true, category: 'admission' },
     { id: 'studentCategory', label: 'Student Category', enabled: true, required: true, category: 'admission' },

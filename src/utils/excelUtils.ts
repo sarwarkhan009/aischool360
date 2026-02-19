@@ -110,8 +110,15 @@ export const validateStudentData = (data: StudentExcelRow[], requireClass: boole
     }
 
     const firstRow = data[0];
+    const keys = Object.keys(firstRow);
+    const getColKey = (name: string) => keys.find(k => k.toLowerCase().trim() === name.toLowerCase().trim()) || '';
+
+    const rollCol = getColKey('Roll No.');
+    const nameCol = getColKey('Student Name');
+    const classCol = getColKey('Class');
+
     const requiredColumns = requireClass ? ['Roll No.', 'Student Name', 'Class'] : ['Roll No.', 'Student Name'];
-    const missingColumns = requiredColumns.filter(col => !(col in firstRow));
+    const missingColumns = requiredColumns.filter(col => !getColKey(col));
 
     if (missingColumns.length > 0) {
         errors.push(`Missing required columns: ${missingColumns.join(', ')}`);
@@ -126,58 +133,66 @@ export const validateStudentData = (data: StudentExcelRow[], requireClass: boole
         const rowNum = index + 2;
         let hasError = false;
 
-        if (!row['Student Name'] || row['Student Name'].toString().trim() === '') {
+        const nameVal = row[nameCol]?.toString().trim();
+        const rollVal = row[rollCol]?.toString().trim();
+        const classVal = classCol ? row[classCol]?.toString().trim() : '';
+
+        if (!nameVal) {
             errors.push(`Row ${rowNum}: Student Name is required`);
             hasError = true;
         }
 
-        if (!row['Roll No.'] || row['Roll No.'].toString().trim() === '') {
+        if (!rollVal) {
             errors.push(`Row ${rowNum}: Roll No. is required`);
             hasError = true;
         }
 
         if (requireClass) {
-            if (!row['Class'] || row['Class'].toString().trim() === '') {
+            if (!classVal) {
                 errors.push(`Row ${rowNum}: Class is required`);
                 hasError = true;
             }
 
             // Check duplicate roll numbers within same class-section
-            if (row['Roll No.'] && row['Class']) {
-                const rollNo = row['Roll No.'].toString().trim();
-                const classKey = row['Class'].toString().trim().toUpperCase();
+            if (rollVal && classVal) {
+                const rollNo = rollVal;
+                const classKey = classVal.toUpperCase();
                 if (!rollNumbersByClass.has(classKey)) {
                     rollNumbersByClass.set(classKey, new Set());
                 }
                 const classRolls = rollNumbersByClass.get(classKey)!;
                 if (classRolls.has(rollNo)) {
-                    errors.push(`Row ${rowNum}: Duplicate Roll No. ${rollNo} in class ${row['Class']}`);
+                    errors.push(`Row ${rowNum}: Duplicate Roll No. ${rollNo} in class ${classVal}`);
                     hasError = true;
                 }
                 classRolls.add(rollNo);
             }
         } else {
-            // Old behavior: global duplicate check
-            if (row['Roll No.']) {
-                const rollNo = row['Roll No.'].toString().trim();
-                if (globalRollNumbers.has(rollNo)) {
-                    errors.push(`Row ${rowNum}: Duplicate Roll No.: ${rollNo}`);
+            // Check global duplicate within the file
+            if (rollVal) {
+                if (globalRollNumbers.has(rollVal)) {
+                    errors.push(`Row ${rowNum}: Duplicate Roll No.: ${rollVal}`);
                     hasError = true;
                 }
-                globalRollNumbers.add(rollNo);
+                globalRollNumbers.add(rollVal);
             }
         }
 
-        if (row['Father Phone'] && !isValidPhone(row['Father Phone']?.toString())) {
+        const fatherPhoneCol = getColKey('Father Phone');
+        const motherPhoneCol = getColKey('Mother Phone');
+        const mobileCol = getColKey('Mobile Number');
+        const uidCol = getColKey('UID Number');
+
+        if (fatherPhoneCol && row[fatherPhoneCol] && !isValidPhone(row[fatherPhoneCol].toString())) {
             warnings.push(`Row ${rowNum}: Invalid Father Phone number`);
         }
-        if (row['Mother Phone'] && !isValidPhone(row['Mother Phone']?.toString())) {
+        if (motherPhoneCol && row[motherPhoneCol] && !isValidPhone(row[motherPhoneCol].toString())) {
             warnings.push(`Row ${rowNum}: Invalid Mother Phone number`);
         }
-        if (row['Mobile Number'] && !isValidPhone(row['Mobile Number']?.toString())) {
+        if (mobileCol && row[mobileCol] && !isValidPhone(row[mobileCol].toString())) {
             warnings.push(`Row ${rowNum}: Invalid Mobile number`);
         }
-        if (row['UID Number'] && !isValidAadhar(row['UID Number']?.toString())) {
+        if (uidCol && row[uidCol] && !isValidAadhar(row[uidCol].toString())) {
             warnings.push(`Row ${rowNum}: Invalid UID Number (Aadhar)`);
         }
 
@@ -245,35 +260,44 @@ export const convertToStudents = (
     // Support both old (classId, section, schoolId) and new (just schoolId) signatures
     const isOldSignature = section !== undefined && schoolId !== undefined;
     const actualSchoolId = isOldSignature ? schoolId : classIdOrSchoolId;
+
+    // Helper for case-insensitive column access
+    const getVal = (row: any, name: string) => {
+        const keys = Object.keys(row);
+        const key = keys.find(k => k.toLowerCase().trim() === name.toLowerCase().trim());
+        return key ? row[key] : undefined;
+    };
+
     return data.filter(row => {
         // Skip rows where both student name and roll no are empty
-        return row['Student Name']?.toString().trim() && row['Roll No.']?.toString().trim();
+        return getVal(row, 'Student Name')?.toString().trim() && getVal(row, 'Roll No.')?.toString().trim();
     }).map(row => {
-        const rollNo = row['Roll No.']?.toString().trim() || '';
-        const name = row['Student Name']?.toString().trim() || '';
-        const fatherName = row['Father Name']?.toString().trim() || '';
-        const motherName = row['Mother Name']?.toString().trim() || '';
-        const address = row['Address']?.toString().trim() || '';
-        const mobile = row['Mobile Number']?.toString().replace(/\D/g, '') || '';
-        const fatherPhone = row['Father Phone']?.toString().replace(/\D/g, '') || '';
-        const motherPhone = row['Mother Phone']?.toString().replace(/\D/g, '') || '';
-        const aadhar = row['UID Number']?.toString().replace(/\D/g, '') || '';
-        const grNo = row['GR. No']?.toString().trim();
+        const rollNo = getVal(row, 'Roll No.')?.toString().trim() || '';
+        const name = getVal(row, 'Student Name')?.toString().trim() || '';
+        const fatherName = getVal(row, 'Father Name')?.toString().trim() || '';
+        const motherName = getVal(row, 'Mother Name')?.toString().trim() || '';
+        const address = getVal(row, 'Address')?.toString().trim() || '';
+        const mobile = getVal(row, 'Mobile Number')?.toString().replace(/\D/g, '') || '';
+        const fatherPhone = getVal(row, 'Father Phone')?.toString().replace(/\D/g, '') || '';
+        const motherPhone = getVal(row, 'Mother Phone')?.toString().replace(/\D/g, '') || '';
+        const aadhar = getVal(row, 'UID Number')?.toString().replace(/\D/g, '') || '';
+        const grNo = getVal(row, 'GR. No')?.toString().trim();
 
         // Parse Class column for class + section (e.g., '1 (A)', '9 (A)', 'LKG', 'UKG (B)')
-        const parsed = parseClassSection(row['Class']?.toString() || '');
+        const classVal = getVal(row, 'Class');
+        const parsed = parseClassSection(classVal?.toString() || '');
         const finalClass = isOldSignature ? classIdOrSchoolId : parsed.className;
         const finalSection = isOldSignature ? (section as string) : parsed.section;
 
         // Normalize Gender
-        let gender = (row['Gender']?.toString().trim() || 'Male').toLowerCase();
+        let gender = (getVal(row, 'Gender')?.toString().trim() || 'Male').toLowerCase();
         if (gender.startsWith('m')) gender = 'Male';
         else if (gender.startsWith('f')) gender = 'Female';
         else gender = 'Other';
 
         // Normalize Dates (expecting dd-mm-yy or dd-mm-yyyy format)
-        const dob = normalizeDate(row['Date of Birth']?.toString() || '');
-        const admissionDate = normalizeDate(row['Date of Admission']?.toString() || '') || new Date().toISOString().split('T')[0];
+        const dob = normalizeDate(getVal(row, 'Date of Birth')?.toString() || '');
+        const admissionDate = normalizeDate(getVal(row, 'Date of Admission')?.toString() || '') || new Date().toISOString().split('T')[0];
 
         return {
             // Student Details
@@ -288,18 +312,18 @@ export const convertToStudents = (
             isAddressSame: true,
             aadharNo: aadhar,
             aadharNumber: aadhar, // Keep for compatibility
-            studentPenNo: row['PEN']?.toString().trim(),
-            appaarNo: row['APAAR ID']?.toString().trim() || '',
+            studentPenNo: getVal(row, 'PEN')?.toString().trim(),
+            appaarNo: getVal(row, 'APAAR ID')?.toString().trim() || '',
             grNo: grNo,
             admissionNo: grNo || '', // Mapping GR. No to Admission No
 
             // Parent Details
             fatherName: fatherName,
             parentName: fatherName, // Added parentName for compatibility
-            fatherAadharNo: row['Father UID']?.toString().replace(/\D/g, '') || '',
+            fatherAadharNo: getVal(row, 'Father UID')?.toString().replace(/\D/g, '') || '',
             fatherContactNo: fatherPhone,
             motherName: motherName,
-            motherAadharNo: row['Mother UID']?.toString().replace(/\D/g, '') || '',
+            motherAadharNo: getVal(row, 'Mother UID')?.toString().replace(/\D/g, '') || '',
             motherContactNo: motherPhone,
 
             // Contact

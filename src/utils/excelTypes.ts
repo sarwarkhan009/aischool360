@@ -25,6 +25,7 @@ export interface StudentExcelRow {
     'UID Number'?: string | number;
     'PEN'?: string;
     'APAAR ID'?: string;
+    [key: string]: string | number | undefined;
 }
 
 export interface ParsedStudent {

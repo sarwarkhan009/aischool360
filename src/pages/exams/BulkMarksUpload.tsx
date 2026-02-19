@@ -360,6 +360,7 @@ const BulkMarksUpload: React.FC = () => {
                         maxMarks: maxMarks,
                         marks: subjectMarks,
                         enteredBy: user?.id || user?.username || '',
+                        enteredByName: user?.name || user?.username || '',
                         enteredByRole: user?.role || '',
                         entryDate: new Date().toISOString(),
                         status: 'SUBMITTED', // Set to SUBMITTED so it appears in results

@@ -29,6 +29,7 @@ const StudentPromotion: React.FC = () => {
     const [selectedSection, setSelectedSection] = useState('ALL');
     const [promotionMap, setPromotionMap] = useState<Record<string, boolean>>({});
     const [newRollMap, setNewRollMap] = useState<Record<string, string>>({});
+    const [newSectionMap, setNewSectionMap] = useState<Record<string, string>>({});
     const [promoting, setPromoting] = useState(false);
     const [promotionDone, setPromotionDone] = useState(false);
     const [promotedCount, setPromotedCount] = useState(0);
@@ -36,8 +37,9 @@ const StudentPromotion: React.FC = () => {
 
     const activeFY = currentSchool?.activeFinancialYear || '2025-26';
 
-    // Get active classes from settings
-    const activeClassesList = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || []).map(c => c.name);
+    // Get active classes from settings — filter by CURRENT year for the source class list
+    const activeClassesData = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], activeFY);
+    const activeClassesList = activeClassesData.map(c => c.name);
     const sortedActiveClasses = sortClasses(activeClassesList);
 
     // Determine next FY from academic_years collection
@@ -50,14 +52,24 @@ const StudentPromotion: React.FC = () => {
         : null;
     const targetFY = nextAcademicYear?.name || '';
 
-    // Get next class using CLASS_ORDER + active classes
+    // Get classes from the TARGET year (next FY) for section assignment and next-class lookup
+    const targetClassesData = useMemo(() => {
+        if (!targetFY) return [];
+        return getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], targetFY);
+    }, [allSettings, targetFY]);
+    const targetClassesList = targetClassesData.map(c => c.name);
+
+    // Get next class using CLASS_ORDER + target year's active classes (fallback to source year)
     const getNextClass = (currentClass: string): string | null => {
         const currentIdx = CLASS_ORDER.indexOf(currentClass);
         if (currentIdx === -1) return null;
 
-        // Find next class in CLASS_ORDER that exists in school's active classes
+        // Use target year classes if available, otherwise fallback to source year classes
+        const classListToCheck = targetClassesList.length > 0 ? targetClassesList : activeClassesList;
+
+        // Find next class in CLASS_ORDER that exists in the target active classes
         for (let i = currentIdx + 1; i < CLASS_ORDER.length; i++) {
-            if (activeClassesList.includes(CLASS_ORDER[i])) {
+            if (classListToCheck.includes(CLASS_ORDER[i])) {
                 return CLASS_ORDER[i];
             }
         }
@@ -83,17 +95,33 @@ const StudentPromotion: React.FC = () => {
             });
     }, [students, selectedClass, selectedSection]);
 
-    // When class changes, auto-select all
+    const nextClass = selectedClass ? getNextClass(selectedClass) : null;
+    const isLastClass = selectedClass && nextClass === null;
+
+
+    // Get sections defined for the TARGET class (class students are promoted into)
+    const targetClassSections = useMemo(() => {
+        if (!nextClass) return ['A'];
+        const targetClassData = targetClassesData.find((c: any) => c.name === nextClass);
+        const sections = targetClassData?.sections;
+        return sections && sections.length > 0 ? sections : ['A'];
+    }, [nextClass, targetClassesData]);
+
     const handleClassChange = (cls: string) => {
         setSelectedClass(cls);
         setSelectedSection('ALL');
         setPromotionDone(false);
         setNewRollMap({});
-        // Populate promotion map (all ON)
+        // Populate promotion map (all ON) and default section to 'A'
         const studentsInClass = students.filter((s: any) => s.class === cls && s.status !== 'ALUMNI');
         const map: Record<string, boolean> = {};
-        studentsInClass.forEach((s: any) => { map[s.id] = true; });
+        const secMap: Record<string, string> = {};
+        studentsInClass.forEach((s: any) => {
+            map[s.id] = true;
+            secMap[s.id] = s.section || 'A'; // default to current section or 'A'
+        });
         setPromotionMap(map);
+        setNewSectionMap(secMap);
     };
 
     // Toggle a student
@@ -118,8 +146,6 @@ const StudentPromotion: React.FC = () => {
         return Array.from(set).sort();
     }, [students, selectedClass]);
 
-    const nextClass = selectedClass ? getNextClass(selectedClass) : null;
-    const isLastClass = selectedClass && nextClass === null;
     const studentsToPromote = classStudents.filter(s => promotionMap[s.id]);
 
     // Handle Promotion
@@ -162,6 +188,12 @@ const StudentPromotion: React.FC = () => {
                 const newRoll = newRollMap[student.id]?.trim();
                 if (newRoll) {
                     updateData.rollNo = newRoll;
+                }
+
+                // Set new section
+                const newSection = newSectionMap[student.id]?.trim();
+                if (newSection) {
+                    updateData.section = newSection;
                 }
 
                 if (isLastClass) {
@@ -477,8 +509,8 @@ const StudentPromotion: React.FC = () => {
                                     </span>
                                 </div>
 
-                                {/* Row 2: New Roll Input */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', paddingLeft: '74px' }}>
+                                {/* Row 2: New Roll + Section */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', paddingLeft: '74px', flexWrap: 'wrap' }}>
                                     <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#94a3b8', whiteSpace: 'nowrap' }}>New Roll:</span>
                                     <input
                                         type="text"
@@ -505,6 +537,43 @@ const StudentPromotion: React.FC = () => {
                                         onFocus={(e) => e.currentTarget.style.borderColor = '#6366f1'}
                                         onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
                                     />
+
+                                    {/* Section Chips */}
+                                    {!isLastClass && targetClassSections.length > 0 && (
+                                        <>
+                                            <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#94a3b8', whiteSpace: 'nowrap', marginLeft: '0.25rem' }}>Sec:</span>
+                                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                                {targetClassSections.map((sec: string) => {
+                                                    const isSelected = (newSectionMap[student.id] || 'A') === sec;
+                                                    return (
+                                                        <button
+                                                            key={sec}
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setNewSectionMap(prev => ({ ...prev, [student.id]: sec }));
+                                                            }}
+                                                            style={{
+                                                                padding: '0.2rem 0.6rem',
+                                                                borderRadius: '6px',
+                                                                border: isSelected ? '2px solid #6366f1' : '1.5px solid var(--border)',
+                                                                background: isSelected ? '#6366f1' : 'white',
+                                                                color: isSelected ? 'white' : 'var(--text-main)',
+                                                                fontWeight: 700,
+                                                                fontSize: '0.6875rem',
+                                                                cursor: 'pointer',
+                                                                transition: 'all 0.15s ease',
+                                                                minWidth: '28px',
+                                                                textAlign: 'center'
+                                                            }}
+                                                        >
+                                                            {sec}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         ))}

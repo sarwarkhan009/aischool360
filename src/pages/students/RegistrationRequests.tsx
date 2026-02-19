@@ -3,7 +3,8 @@ import { useFirestore } from '../../hooks/useFirestore';
 import { UserPlus, Search, Calendar, Phone, Trash2, Loader2, MousePointer2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../lib/firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { guardedDeleteDoc } from '../../lib/firestoreWrite';
 import { formatDateTimeDetailed } from '../../utils/formatters';
 
 const RegistrationRequests: React.FC = () => {
@@ -23,9 +24,9 @@ const RegistrationRequests: React.FC = () => {
     const handleDelete = async (id: string) => {
         if (!confirm('Are you sure you want to delete this request?')) return;
         try {
-            await deleteDoc(doc(db, 'registrations', id));
-        } catch (err) {
-            alert('Failed to delete: ' + (err as Error).message);
+            await guardedDeleteDoc(doc(db, 'registrations', id));
+        } catch (err: any) {
+            if (err?.message !== 'WRITE_DENIED') alert('Failed to delete: ' + err.message);
         }
     };
 

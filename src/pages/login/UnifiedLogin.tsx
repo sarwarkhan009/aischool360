@@ -19,6 +19,7 @@ interface UserData {
     section?: string;
     fatherName?: string;
     motherName?: string;
+    displayRole?: string;
 }
 
 const UnifiedLogin: React.FC = () => {
@@ -96,10 +97,14 @@ const UnifiedLogin: React.FC = () => {
                 if (rolesDoc.exists()) {
                     customRoles = rolesDoc.data().roles || [];
                     localStorage.setItem('aischool360_custom_roles', JSON.stringify(customRoles));
+                    // Also sync to 'millat_custom_roles' which is what hasPermission() reads
+                    localStorage.setItem('millat_custom_roles', JSON.stringify(customRoles));
                 }
                 if (overridesDoc.exists()) {
                     userOverrides = overridesDoc.data().overrides || {};
                     localStorage.setItem('aischool360_user_overrides', JSON.stringify(userOverrides));
+                    // Also sync to 'millat_user_overrides' which is what hasPermission() reads
+                    localStorage.setItem('millat_user_overrides', JSON.stringify(userOverrides));
                 }
             }
 
@@ -123,6 +128,7 @@ const UnifiedLogin: React.FC = () => {
                     results.push({
                         username: currentSchool ? 'Administrator' : 'Super Administrator',
                         role: currentSchool ? 'ADMIN' : 'SUPER_ADMIN',
+                        displayRole: currentSchool ? 'Administrator' : 'Super Administrator',
                         permissions: Object.values(Permission),
                         mobile,
                         schoolId: currentSchool?.id
@@ -158,6 +164,7 @@ const UnifiedLogin: React.FC = () => {
                     results.push({
                         username: managerMatch.name,
                         role: 'MANAGER',
+                        displayRole: managerMatch.role || 'Manager',
                         permissions: managerMatch.permissions || managerRole?.permissions || [],
                         mobile: managerMatch.mobile,
                         id: managerMatch.id
@@ -193,6 +200,7 @@ const UnifiedLogin: React.FC = () => {
                         results.push({
                             username: docData.name,
                             role: 'TEACHER',
+                            displayRole: customRole?.label || 'Teacher',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
                             id: doc.id,
@@ -213,6 +221,7 @@ const UnifiedLogin: React.FC = () => {
                         results.push({
                             username: docData.name,
                             role: 'DRIVER',
+                            displayRole: customRole?.label || 'Bus Driver',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
                             id: doc.id,
@@ -241,6 +250,7 @@ const UnifiedLogin: React.FC = () => {
                         results.push({
                             username: docData.name,
                             role: roleType as any,
+                            displayRole: matchedRole?.label || empType,
                             permissions: matchedRole?.permissions || defaultRole?.permissions || [],
                             mobile,
                             id: doc.id,
@@ -291,6 +301,7 @@ const UnifiedLogin: React.FC = () => {
                         results.push({
                             username: pName,
                             role: 'PARENT',
+                            displayRole: customRole?.label || 'Parent',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
                             id: student.id,
@@ -316,7 +327,21 @@ const UnifiedLogin: React.FC = () => {
                 const user = results[0];
                 login({ ...user, allProfiles: results } as any);
                 const targetSchoolId = currentSchool?.id || user.schoolId;
-                navigate(targetSchoolId ? `/${targetSchoolId}/dashboard` : '/dashboard');
+                // Navigate to dashboard if permitted, otherwise first accessible route
+                const hasDashboard = user.permissions?.includes(Permission.VIEW_DASHBOARD);
+                let landingPage = 'dashboard';
+                if (!hasDashboard) {
+                    const fallbacks = [
+                        { path: 'fees', perm: Permission.COLLECT_FEES },
+                        { path: 'students', perm: Permission.VIEW_STUDENTS },
+                        { path: 'attendance', perm: Permission.MANAGE_ATTENDANCE },
+                        { path: 'calendar', perm: null },
+                        { path: 'profile', perm: null },
+                    ];
+                    const first = fallbacks.find(f => !f.perm || user.permissions?.includes(f.perm));
+                    landingPage = first?.path || 'profile';
+                }
+                navigate(targetSchoolId ? `/${targetSchoolId}/${landingPage}` : `/${landingPage}`);
             } else {
                 setFoundUsers(results);
                 setShowRoleSelection(true);
@@ -335,7 +360,21 @@ const UnifiedLogin: React.FC = () => {
             allProfiles: foundUsers as any
         } as any);
         const targetSchoolId = currentSchool?.id || userData.schoolId;
-        navigate(targetSchoolId ? `/${targetSchoolId}/dashboard` : '/dashboard');
+        // Navigate to dashboard if permitted, otherwise first accessible route
+        const hasDashboard = userData.permissions?.includes(Permission.VIEW_DASHBOARD);
+        let landingPage = 'dashboard';
+        if (!hasDashboard) {
+            const fallbacks = [
+                { path: 'fees', perm: Permission.COLLECT_FEES },
+                { path: 'students', perm: Permission.VIEW_STUDENTS },
+                { path: 'attendance', perm: Permission.MANAGE_ATTENDANCE },
+                { path: 'calendar', perm: null },
+                { path: 'profile', perm: null },
+            ];
+            const first = fallbacks.find(f => !f.perm || userData.permissions?.includes(f.perm));
+            landingPage = first?.path || 'profile';
+        }
+        navigate(targetSchoolId ? `/${targetSchoolId}/${landingPage}` : `/${landingPage}`);
     };
 
     const handleUpdatePin = async (e: React.FormEvent) => {

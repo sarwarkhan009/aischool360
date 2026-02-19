@@ -264,15 +264,17 @@ Thank you!`;
             mobile.includes(searchTerm);
 
         return matchesSearch;
-    }).map(emp => {
-        // Overlay role status
-        const roleConfig = customRoles.find((r: any) =>
-            (r.label && emp.employeeType && r.label.toLowerCase() === emp.employeeType.toLowerCase()) ||
-            (r.id && emp.employeeType && r.id.toLowerCase() === emp.employeeType.toLowerCase())
-        );
-        const isRoleDisabled = roleConfig?.status === 'INACTIVE';
-        return { ...emp, isRoleDisabled };
-    });
+    })
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        .map(emp => {
+            // Overlay role status
+            const roleConfig = customRoles.find((r: any) =>
+                (r.label && emp.employeeType && r.label.toLowerCase() === emp.employeeType.toLowerCase()) ||
+                (r.id && emp.employeeType && r.id.toLowerCase() === emp.employeeType.toLowerCase())
+            );
+            const isRoleDisabled = roleConfig?.status === 'INACTIVE';
+            return { ...emp, isRoleDisabled };
+        });
 
     return (
         <div className="animate-fade-in no-scrollbar">

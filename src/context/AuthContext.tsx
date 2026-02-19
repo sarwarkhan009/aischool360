@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useCallback } from 'react';
 
 import { Permission } from '../types/rbac';
 import type { Role } from '../types/rbac';
@@ -18,6 +18,7 @@ interface User {
   section?: string;
   fatherName?: string;
   motherName?: string;
+  displayRole?: string;
   // For account switching (e.g., parents with multiple children)
   allProfiles?: User[];
 }
@@ -28,6 +29,8 @@ interface AuthContextType {
   logout: () => void;
   isAuthenticated: boolean;
   hasPermission: (permission: Permission) => boolean;
+  canWriteData: () => boolean; // Check if current role has write/edit/delete access
+  refreshPermissions: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,6 +42,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
+  // Counter to force re-render when permissions data in localStorage changes
+  const [, setPermissionsVersion] = useState(0);
+
   const login = (userData: User) => {
     setUser(userData);
     localStorage.setItem('aischool360_user', JSON.stringify(userData));
@@ -49,7 +55,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('aischool360_user');
   };
 
-  const hasPermission = (permission: Permission) => {
+  // Call this after syncing role configs / overrides to localStorage
+  // to force all consumers to re-render with updated permissions
+  const refreshPermissions = useCallback(() => {
+    setPermissionsVersion(v => v + 1);
+  }, []);
+
+  const canWriteData = useCallback((): boolean => {
+    if (!user) return false;
+    // ADMIN & SUPER_ADMIN always have write access
+    if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+
+    // Check custom role config for canWrite flag
+    const customRoles = JSON.parse(localStorage.getItem('millat_custom_roles') || '[]');
+    const roleConfig = customRoles.find((r: any) => r.role === user.role || r.id === user.role);
+    // If role config exists, use its canWrite; otherwise default false
+    return roleConfig?.canWrite === true;
+  }, [user]);
+
+  const hasPermission = useCallback((permission: Permission) => {
     if (!user) return false;
 
     // Load latest roles and overrides for real-time reactivity
@@ -86,11 +110,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
 
     return activePermissions.includes(permission);
-  };
+  }, [user]);
 
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user, hasPermission }}>
+    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user, hasPermission, canWriteData, refreshPermissions }}>
       {children}
     </AuthContext.Provider>
   );

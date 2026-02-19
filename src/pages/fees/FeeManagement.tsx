@@ -11,7 +11,8 @@ import {
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, Timestamp, query, where, getDocs, doc, updateDoc, orderBy, runTransaction } from 'firebase/firestore';
+import { collection, Timestamp, query, where, getDocs, doc, orderBy, runTransaction } from 'firebase/firestore';
+import { guardedAddDoc, guardedUpdateDoc } from '../../lib/firestoreWrite';
 import { useSchool } from '../../context/SchoolContext';
 import FeeReceipt from '../../components/fees/FeeReceipt';
 import { getActiveClasses } from '../../constants/app';
@@ -262,6 +263,8 @@ const FeeManagement: React.FC = () => {
     }, [students, feeCollections, feeTypes, feeAmounts]);
 
     const processedStudents = useMemo(() => {
+        if (!searchTerm && selectedClass === 'ALL') return [];
+
         let result = students.filter(stu => {
             const matchesSearch = !searchTerm || (
                 (stu.admissionNo && stu.admissionNo.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -542,11 +545,11 @@ const FeeManagement: React.FC = () => {
                 status: 'PAID'
             };
 
-            await addDoc(collection(db, 'fee_collections'), collectionData);
+            await guardedAddDoc(collection(db, 'fee_collections'), collectionData);
 
             // 2. Update Student's Current Dues in their record (skip for Form Sale temporary students)
             if (selectedStudent.id && !selectedStudent.isFormSale) {
-                await updateDoc(doc(db, 'students', selectedStudent.id), {
+                await guardedUpdateDoc(doc(db, 'students', selectedStudent.id), {
                     basicDues: currentDues
                 });
             }
@@ -650,7 +653,7 @@ const FeeManagement: React.FC = () => {
                 type: 'SALE'
             };
 
-            await addDoc(collection(db, 'fee_collections'), saleData);
+            await guardedAddDoc(collection(db, 'fee_collections'), saleData);
             setCart([]);
             setSaleDiscount(0);
             setCurrentReceipt(saleData);
@@ -710,13 +713,13 @@ const FeeManagement: React.FC = () => {
                 <div className="glass-card animate-slide-up" style={{ padding: '0', overflow: 'hidden' }}>
                     <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border)', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <h3 style={{ fontWeight: 800, fontSize: '1rem', color: '#1e293b' }}>
-                            {searchTerm || selectedClass !== 'ALL' ? 'Search Results' : 'Recent Students'}
+                            {searchTerm || selectedClass !== 'ALL' ? 'Search Results' : 'Students List'}
                             <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', background: '#e2e8f0', padding: '0.2rem 0.5rem', borderRadius: '1rem' }}>
                                 {filteredStudents.length} Students
                             </span>
                         </h3>
                         <p style={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 500 }}>
-                            Showing {searchTerm || selectedClass !== 'ALL' ? 'results' : 'any 10 students'}
+                            {searchTerm || selectedClass !== 'ALL' ? 'Showing matches' : 'Select criteria to view students'}
                         </p>
                     </div>
                     <div style={{ overflowX: 'auto' }}>
@@ -793,7 +796,11 @@ const FeeManagement: React.FC = () => {
                                     );
                                 }) : (
                                     <tr>
-                                        <td colSpan={10} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No students found matching your search.</td>
+                                        <td colSpan={10} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                            {(!searchTerm && selectedClass === 'ALL')
+                                                ? 'Please select a class or search to view students.'
+                                                : 'No students found matching your search.'}
+                                        </td>
                                     </tr>
                                 )}
                             </tbody>
@@ -1023,7 +1030,7 @@ const FeeManagement: React.FC = () => {
                                             (monthFees: any) => monthFees[feeType.feeHeadName] !== undefined
                                         );
 
-                                        return (
+                                        return (amount > 0) ? (
                                             <button
                                                 key={feeType.id}
                                                 onClick={() => {
@@ -1078,7 +1085,7 @@ const FeeManagement: React.FC = () => {
                                                     <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Not Configured</span>
                                                 )}
                                             </button>
-                                        );
+                                        ) : null;
                                     })
                                 )}
                             </div>
@@ -1264,7 +1271,7 @@ const FeeManagement: React.FC = () => {
             if (!row.feeBreakdown) return 0;
 
             // Sum everything else that isn't already categorized
-            const categories = ['tuition', 'tution', 'admission', 'annual', 'transport'];
+            const categories = ['tuition', 'tution', 'monthly', 'admission', 'annual', 'transport'];
             return Object.entries(row.feeBreakdown).reduce((sum, [name, amount]) => {
                 const isCategorized = categories.some(cat => name.toLowerCase().includes(cat));
                 return isCategorized ? sum : sum + (amount as number);
@@ -1293,9 +1300,10 @@ const FeeManagement: React.FC = () => {
                                     <th style={{ padding: '1rem' }}>Admission Fee</th>
                                     <th style={{ padding: '1rem' }}>Annual Fee</th>
                                     <th style={{ padding: '1rem' }}>Transport Fee</th>
-                                    <th style={{ padding: '1rem' }}>Tuition Fee</th>
+                                    <th style={{ padding: '1rem' }}>Tuition/Monthly Fee</th>
                                     <th style={{ padding: '1rem' }}>Other Fee</th>
                                     <th style={{ padding: '1rem' }}>Prev. Dues</th>
+                                    <th style={{ padding: '1rem' }}>Discount</th>
                                     <th style={{ padding: '1rem' }}>Total</th>
                                     <th style={{ padding: '1rem' }}>Paid</th>
                                     <th style={{ padding: '1rem' }}>Dues</th>
@@ -1305,12 +1313,12 @@ const FeeManagement: React.FC = () => {
                             </thead>
                             <tbody>
                                 {loadingLedger ? (
-                                    <tr><td colSpan={14} style={{ padding: '2rem', textAlign: 'center' }}>Loading history...</td></tr>
+                                    <tr><td colSpan={15} style={{ padding: '2rem', textAlign: 'center' }}>Loading history...</td></tr>
                                 ) : ledgerHistory.length > 0 ? ledgerHistory.map((row, idx) => {
                                     const admFee = getFeeValue(row, 'admissionFee', ['admission']);
                                     const annFee = getFeeValue(row, 'annualFee', ['annual']);
                                     const transFee = getFeeValue(row, 'transportFee', ['transport']);
-                                    const tuitFee = getFeeValue(row, 'tuitionFee', ['tuition', 'tution']);
+                                    const tuitFee = getFeeValue(row, 'tuitionFee', ['tuition', 'tution', 'monthly']);
                                     const otherFee = getOtherFees(row);
 
                                     return (
@@ -1339,6 +1347,7 @@ const FeeManagement: React.FC = () => {
                                             <td style={{ padding: '1rem' }}>{tuitFee.toFixed(2)}</td>
                                             <td style={{ padding: '1rem' }}>{otherFee.toFixed(2)}</td>
                                             <td style={{ padding: '1rem', color: '#f59e0b', fontWeight: 600 }}>{(row.previousDues || 0).toFixed(2)}</td>
+                                            <td style={{ padding: '1rem', color: '#ef4444', fontWeight: 600 }}>{(row.discount || 0).toFixed(2)}</td>
                                             <td style={{ padding: '1rem', fontWeight: 700 }}>{(row.total || 0).toFixed(2)}</td>
                                             <td style={{ padding: '1rem', fontWeight: 700 }}>{(row.paid || 0).toFixed(2)}</td>
                                             <td style={{ padding: '1rem', fontWeight: 700 }}>{(row.dues || 0).toFixed(2)}</td>
@@ -1349,7 +1358,7 @@ const FeeManagement: React.FC = () => {
                                         </tr>
                                     );
                                 }) : (
-                                    <tr><td colSpan={14} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No payment records found.</td></tr>
+                                    <tr><td colSpan={15} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No payment records found.</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -1381,7 +1390,7 @@ const FeeManagement: React.FC = () => {
                                 const displayPrice = (item.pricingType === 'classwise' && item.classPrices && selectedStudent?.class)
                                     ? (item.classPrices[selectedStudent.class] || 0)
                                     : (item.price || 0);
-                                return (
+                                return (displayPrice > 0) ? (
                                     <div
                                         key={item.name}
                                         className="hover-lift"
@@ -1397,7 +1406,7 @@ const FeeManagement: React.FC = () => {
                                             <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginTop: '0.25rem', fontWeight: 600 }}>Class-wise</div>
                                         )}
                                     </div>
-                                );
+                                ) : null;
                             })}
                         </div>
                     </div>

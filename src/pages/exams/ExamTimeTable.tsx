@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Plus, ChevronLeft, ChevronRight, Calendar, Clock, Users, Award, MapPin, X, Trash2, Save, Printer } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { guardedSetDoc, guardedDeleteDoc } from '../../lib/firestoreWrite';
 import { sortClasses } from '../../constants/app';
 import { useSchool } from '../../context/SchoolContext';
 
@@ -310,11 +311,10 @@ const ExamTimeTable: React.FC = () => {
     const handleDeleteSlot = async (slotId: string) => {
         if (!confirm('Delete this exam slot?')) return;
         try {
-            await deleteDoc(doc(db, 'exam_slots', slotId));
+            await guardedDeleteDoc(doc(db, 'exam_slots', slotId));
             alert('Exam slot deleted successfully!');
-        } catch (error) {
-            console.error('Error deleting slot:', error);
-            alert('Failed to delete slot');
+        } catch (error: any) {
+            if (error?.message !== 'WRITE_DENIED') alert('Failed to delete slot');
         }
     };
 
@@ -343,7 +343,7 @@ const ExamTimeTable: React.FC = () => {
             };
 
             const slotId = editingSlot.id || `slot_${Date.now()}`;
-            await setDoc(doc(db, 'exam_slots', slotId), {
+            await guardedSetDoc(doc(db, 'exam_slots', slotId), {
                 ...slotData,
                 id: slotId,
                 schoolId: currentSchool?.id
@@ -352,9 +352,9 @@ const ExamTimeTable: React.FC = () => {
             alert('Exam slot saved successfully!');
             setShowSlotModal(false);
             setEditingSlot(null);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving slot:', error);
-            alert('Failed to save slot');
+            if (error?.message !== 'WRITE_DENIED') alert('Failed to save slot');
         }
     };
 
@@ -412,29 +412,60 @@ const ExamTimeTable: React.FC = () => {
                         <button
                             className="btn btn-primary"
                             onClick={async () => {
-                                if (!confirm(`Generate ${selectedExam.subjects.length} timetable slots from exam data?`)) return;
+                                if (!confirm(`Generate timetable slots from exam data?`)) return;
                                 try {
                                     const targetClasses = selectedExam.targetClasses || selectedExam.classes || [];
-                                    for (const subject of selectedExam.subjects) {
-                                        for (const classId of targetClasses) {
-                                            const slotData = {
-                                                id: `slot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                                                schoolId: currentSchool?.id,
-                                                examId: selectedExam.id,
-                                                examName: selectedExam.name,
-                                                class: classId,
-                                                subject: subject.subjectName,
-                                                date: subject.examDate,
-                                                startTime: subject.examTime,
-                                                duration: subject.duration || 180,
-                                                maxMarks: subject.maxMarks || 100,
-                                                venue: subject.roomNumber || '',
-                                                createdAt: new Date().toISOString()
-                                            };
-                                            await setDoc(doc(db, 'exam_slots', slotData.id), slotData);
+                                    let syncCount = 0;
+
+                                    if (selectedExam.classRoutines && selectedExam.classRoutines.length > 0) {
+                                        // Use class-specific routines
+                                        for (const cr of selectedExam.classRoutines) {
+                                            if (!cr.routine) continue;
+                                            for (const entry of cr.routine) {
+                                                if (!entry.examDate) continue;
+                                                const slotData = {
+                                                    id: `slot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                                                    schoolId: currentSchool?.id,
+                                                    examId: selectedExam.id,
+                                                    examName: selectedExam.displayName || selectedExam.name,
+                                                    class: cr.classId,
+                                                    subject: entry.subjectName,
+                                                    date: entry.examDate,
+                                                    startTime: entry.examTime,
+                                                    duration: entry.duration || 180,
+                                                    maxMarks: entry.maxMarks || 100,
+                                                    venue: entry.venue || '',
+                                                    createdAt: new Date().toISOString()
+                                                };
+                                                await guardedSetDoc(doc(db, 'exam_slots', slotData.id), slotData);
+                                                syncCount++;
+                                            }
+                                        }
+                                    } else if (selectedExam.subjects) {
+                                        // Fallback to global subjects for all target classes
+                                        for (const subject of selectedExam.subjects) {
+                                            if (!subject.examDate) continue;
+                                            for (const classId of targetClasses) {
+                                                const slotData = {
+                                                    id: `slot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                                                    schoolId: currentSchool?.id,
+                                                    examId: selectedExam.id,
+                                                    examName: selectedExam.displayName || selectedExam.name,
+                                                    class: classId,
+                                                    subject: subject.subjectName,
+                                                    date: subject.examDate,
+                                                    startTime: subject.examTime,
+                                                    duration: subject.duration || 180,
+                                                    maxMarks: subject.maxMarks || 100,
+                                                    venue: subject.roomNumber || '',
+                                                    createdAt: new Date().toISOString()
+                                                };
+                                                await guardedSetDoc(doc(db, 'exam_slots', slotData.id), slotData);
+                                                syncCount++;
+                                            }
                                         }
                                     }
-                                    alert('Timetable slots generated successfully!');
+                                    alert(`Successfully sync ${syncCount} timetable slots!`);
                                 } catch (error) {
                                     console.error('Error generating slots:', error);
                                     alert('Failed to generate some slots');

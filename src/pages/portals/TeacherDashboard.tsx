@@ -26,6 +26,8 @@ import AddTeachingLog from '../../components/teaching/AddTeachingLog';
 import MyTeachingLogs from '../../components/teaching/MyTeachingLogs';
 import { CountUpAnimation } from '../../components/CountUpAnimation';
 import AcademicCalendar from '../Calendar';
+import EnhancedExamScheduling from '../exams/EnhancedExamScheduling';
+import AdvancedMarksEntry from '../exams/AdvancedMarksEntry';
 
 /**
  * Teacher Dashboard Portal
@@ -35,12 +37,12 @@ export default function TeacherDashboard() {
     const { user } = useAuth();
     const { currentSchool } = useSchool();
     const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'ATTENDANCE' | 'ROUTINE' | 'ADD_TEACHING_LOG' | 'MY_TEACHING_LOGS' | 'MESSAGES' | 'PROFILE'>('DASHBOARD');
+    const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'ATTENDANCE' | 'ROUTINE' | 'ADD_TEACHING_LOG' | 'MY_TEACHING_LOGS' | 'EXAM_SCHEDULING' | 'MARKS_ENTRY' | 'MESSAGES' | 'PROFILE'>('DASHBOARD');
 
     // Sync tab with URL params
     useEffect(() => {
         const tab = searchParams.get('tab');
-        if (tab && ['DASHBOARD', 'ATTENDANCE', 'ROUTINE', 'ADD_TEACHING_LOG', 'MY_TEACHING_LOGS', 'MESSAGES', 'PROFILE'].includes(tab)) {
+        if (tab && ['DASHBOARD', 'ATTENDANCE', 'ROUTINE', 'ADD_TEACHING_LOG', 'MY_TEACHING_LOGS', 'EXAM_SCHEDULING', 'MARKS_ENTRY', 'MESSAGES', 'PROFILE'].includes(tab)) {
             setActiveTab(tab as any);
         }
     }, [searchParams]);
@@ -314,6 +316,22 @@ export default function TeacherDashboard() {
                 >
                     <FileText size={18} /> My Logs
                 </button>
+
+                <button
+                    onClick={() => setActiveTab('EXAM_SCHEDULING')}
+                    className={`nav-tab-btn ${activeTab === 'EXAM_SCHEDULING' ? 'active' : ''}`}
+                    style={{ flexShrink: 0, padding: '0.75rem 1rem', borderRadius: '0.75rem', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, transition: 'all 0.3s' }}
+                >
+                    <Calendar size={18} /> Exam Schedule
+                </button>
+
+                <button
+                    onClick={() => setActiveTab('MARKS_ENTRY')}
+                    className={`nav-tab-btn ${activeTab === 'MARKS_ENTRY' ? 'active' : ''}`}
+                    style={{ flexShrink: 0, padding: '0.75rem 1rem', borderRadius: '0.75rem', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, transition: 'all 0.3s' }}
+                >
+                    <CheckCircle size={18} /> Marks Entry
+                </button>
                 <button
                     onClick={() => setActiveTab('MESSAGES')}
                     className={`nav-tab-btn ${activeTab === 'MESSAGES' ? 'active' : ''}`}
@@ -474,6 +492,14 @@ export default function TeacherDashboard() {
             ) : activeTab === 'MY_TEACHING_LOGS' ? (
                 <div className="animate-slide-up">
                     <MyTeachingLogs />
+                </div>
+            ) : activeTab === 'EXAM_SCHEDULING' ? (
+                <div className="animate-slide-up">
+                    <EnhancedExamScheduling />
+                </div>
+            ) : activeTab === 'MARKS_ENTRY' ? (
+                <div className="animate-slide-up">
+                    <AdvancedMarksEntry />
                 </div>
             ) : (
                 <div className="animate-slide-up">

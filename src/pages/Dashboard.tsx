@@ -10,7 +10,11 @@ import {
     Bell,
     Image,
     GraduationCap,
-    FileText
+    FileText,
+    Eye,
+    EyeOff,
+    Lock,
+    X
 } from 'lucide-react';
 import TeacherDashboard from './portals/TeacherDashboard';
 import ParentDashboard from './portals/ParentDashboard';
@@ -83,8 +87,74 @@ const AdminDashboard: React.FC = () => {
     const [transportCount, setTransportCount] = useState(0);
     const [girlsCount, setGirlsCount] = useState(0);
     const [boysCount, setBoysCount] = useState(0);
+    const [studentStats, setStudentStats] = useState({ present: 0, absent: 0, late: 0, total: 0 });
+    const [teacherStats, setTeacherStats] = useState({ present: 0, absent: 0, late: 0, total: 0 });
     const [totalHomework, setTotalHomework] = useState(0);
     const [switchingYear, setSwitchingYear] = useState(false);
+    const [showCollection, setShowCollection] = useState(false);
+    const [showPinModal, setShowPinModal] = useState(false);
+    const [pinInput, setPinInput] = useState('');
+    const [pinError, setPinError] = useState('');
+    const [verifyingPin, setVerifyingPin] = useState(false);
+
+    // Auto-hide collection after 30 seconds
+    useEffect(() => {
+        if (showCollection) {
+            const timer = setTimeout(() => setShowCollection(false), 30000);
+            return () => clearTimeout(timer);
+        }
+    }, [showCollection]);
+
+    const handleCollectionClick = () => {
+        if (showCollection) {
+            setShowCollection(false);
+        } else {
+            setPinInput('');
+            setPinError('');
+            setShowPinModal(true);
+        }
+    };
+
+    const handlePinVerify = async () => {
+        if (pinInput.length < 4) {
+            setPinError('Enter 4-digit PIN');
+            return;
+        }
+        setVerifyingPin(true);
+        setPinError('');
+        try {
+            const safeId = (filterSchoolId || '').replace(/\//g, '');
+            const adminDocRef = doc(db, 'settings', `admin_credentials_${safeId}`);
+            const { getDoc: getDocFn } = await import('firebase/firestore');
+            const adminDoc = await getDocFn(adminDocRef);
+            if (adminDoc.exists()) {
+                const data = adminDoc.data();
+                if (String(data.pin) === String(pinInput)) {
+                    setShowCollection(true);
+                    setShowPinModal(false);
+                    setPinInput('');
+                } else {
+                    setPinError('Incorrect PIN!');
+                    setPinInput('');
+                }
+            } else {
+                // Fallback: demo credentials
+                if (pinInput === '0000') {
+                    setShowCollection(true);
+                    setShowPinModal(false);
+                    setPinInput('');
+                } else {
+                    setPinError('Incorrect PIN!');
+                    setPinInput('');
+                }
+            }
+        } catch (err) {
+            console.error('PIN verify error:', err);
+            setPinError('Verification failed');
+        } finally {
+            setVerifyingPin(false);
+        }
+    };
 
     // Academic years for this school
     const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === filterSchoolId && !y.isArchived).sort((a: any, b: any) => a.name.localeCompare(b.name));
@@ -117,7 +187,7 @@ const AdminDashboard: React.FC = () => {
     // Quick Access Items with icons
     const allQuickAccessItems = [
         { id: 1, title: 'New Admission', icon: UserPlus, color: 'var(--gradient-purple)', route: `/${filterSchoolId}/students/admission`, moduleId: 'students' },
-        { id: 2, title: 'Pay Fee', icon: CreditCard, color: 'var(--gradient-cyan)', route: `/${filterSchoolId}/fees`, moduleId: 'fees' },
+        { id: 2, title: 'Collect Fee', icon: CreditCard, color: 'var(--gradient-cyan)', route: `/${filterSchoolId}/fees`, moduleId: 'fees' },
         { id: 3, title: 'Student Ledger', icon: Users, color: 'var(--gradient-orange)', route: `/${filterSchoolId}/students`, moduleId: 'students' },
         { id: 4, title: 'Collection Report', icon: TrendingUp, color: 'var(--gradient-pink)', route: `/${filterSchoolId}/fees/report`, moduleId: 'fees' },
         { id: 5, title: 'Homework Report', icon: FileText, color: 'var(--gradient-blue)', route: `/${filterSchoolId}/homework/report`, moduleId: 'homework' },
@@ -167,13 +237,13 @@ const AdminDashboard: React.FC = () => {
         const feesQuery = query(
             collection(db, 'fee_collections'),
             where('schoolId', '==', filterSchoolId || 'NONE'),
-            where('financialYear', '==', activeFY),
             where('date', '>=', Timestamp.fromDate(startOfDay)),
             where('date', '<=', Timestamp.fromDate(endOfDay))
         );
         const unsubscribeFees = onSnapshot(feesQuery, (snapshot) => {
             const total = snapshot.docs.reduce((sum, doc) => {
-                const val = doc.data().paid;
+                const data = doc.data();
+                const val = data.paid || data.amount || data.total;
                 return sum + (Number(val) || 0);
             }, 0);
             console.log(`💰 Today's Collection: ₹${total} (${snapshot.docs.length} records)`);
@@ -187,13 +257,13 @@ const AdminDashboard: React.FC = () => {
         const monthlyFeesQuery = query(
             collection(db, 'fee_collections'),
             where('schoolId', '==', filterSchoolId || 'NONE'),
-            where('financialYear', '==', activeFY),
             where('date', '>=', Timestamp.fromDate(startOfMonth)),
             where('date', '<=', Timestamp.fromDate(endOfDay))
         );
         const unsubscribeMonthlyFees = onSnapshot(monthlyFeesQuery, (snapshot) => {
             const total = snapshot.docs.reduce((sum, doc) => {
-                const val = doc.data().paid;
+                const data = doc.data();
+                const val = data.paid || data.amount || data.total;
                 return sum + (Number(val) || 0);
             }, 0);
             console.log(`💰 Monthly Collection: ₹${total} (${snapshot.docs.length} records)`);
@@ -266,19 +336,25 @@ const AdminDashboard: React.FC = () => {
             where('date', '==', todayDateString)
         );
         const unsubscribeAttendance = onSnapshot(attendanceQuery, (snapshot) => {
-            let totalPresent = 0;
-            let totalRecords = 0;
+            let present = 0;
+            let absent = 0;
+            let late = 0;
+            let total = 0;
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
-                if (data.status === 'PRESENT') totalPresent++;
-                totalRecords++;
+                if (data.status === 'PRESENT') present++;
+                else if (data.status === 'ABSENT') absent++;
+                else if (data.status === 'LATE') late++;
+                total++;
             });
-            const rate = totalRecords > 0 ? (totalPresent / totalRecords) * 100 : 0;
-            console.log(`👨‍🎓 Student Attendance: ${rate.toFixed(1)}% (${totalPresent}/${totalRecords})`);
+            const rate = total > 0 ? (present / total) * 100 : 0;
+            console.log(`👨‍🎓 Student Attendance: ${rate.toFixed(1)}% (${present}/${total})`);
             setAttendanceRate(rate);
+            setStudentStats({ present, absent, late, total });
         }, (err) => {
             console.error('❌ Student attendance error:', err);
             setAttendanceRate(0);
+            setStudentStats({ present: 0, absent: 0, late: 0, total: 0 });
         });
 
         // Real-time listener for today's teacher attendance (date is stored as string YYYY-MM-DD)
@@ -288,19 +364,25 @@ const AdminDashboard: React.FC = () => {
             where('date', '==', todayDateString)
         );
         const unsubscribeTeacherAttendance = onSnapshot(teacherAttendanceQuery, (snapshot) => {
-            let totalPresent = 0;
-            let totalRecords = 0;
+            let present = 0;
+            let absent = 0;
+            let late = 0;
+            let total = 0;
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
-                if (data.status === 'PRESENT') totalPresent++;
-                totalRecords++;
+                if (data.status === 'PRESENT') present++;
+                else if (data.status === 'ABSENT') absent++;
+                else if (data.status === 'LATE') late++;
+                total++;
             });
-            const rate = totalRecords > 0 ? (totalPresent / totalRecords) * 100 : 0;
-            console.log(`👨‍🏫 Teacher Attendance: ${rate.toFixed(1)}% (${totalPresent}/${totalRecords})`);
+            const rate = total > 0 ? (present / total) * 100 : 0;
+            console.log(`👨‍🏫 Teacher Attendance: ${rate.toFixed(1)}% (${present}/${total})`);
             setTeacherAttendanceRate(rate);
+            setTeacherStats({ present, absent, late, total });
         }, (err) => {
             console.error('❌ Teacher attendance error:', err);
             setTeacherAttendanceRate(0);
+            setTeacherStats({ present: 0, absent: 0, late: 0, total: 0 });
         });
 
         // Real-time listener for total homework assigned this month
@@ -344,7 +426,7 @@ const AdminDashboard: React.FC = () => {
                 padding: '0.5rem 0'
             }}>
                 <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)' }}>
-                    {getGreeting()}, {(user as any)?.name || 'Admin'}! 👋
+                    {getGreeting()}, {user?.username || 'Admin'}! 👋
                 </h2>
             </div>
 
@@ -387,17 +469,26 @@ const AdminDashboard: React.FC = () => {
             {/* Statistics Cards - Reordered as requested */}
             <div className="responsive-grid-auto" style={{ marginBottom: '2.5rem' }}>
                 {/* 1. Today's Collection */}
-                <div className="glass-card hover-lift animate-slide-up" style={{
-                    padding: '1.5rem',
-                    animationDelay: '0.1s',
-                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(251, 191, 36, 0.03))',
-                    border: '1px solid rgba(245, 158, 11, 0.15)'
-                }}>
+                <div
+                    className="glass-card hover-lift animate-slide-up"
+                    onClick={handleCollectionClick}
+                    style={{
+                        padding: '1.5rem',
+                        animationDelay: '0.1s',
+                        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(251, 191, 36, 0.03))',
+                        border: '1px solid rgba(245, 158, 11, 0.15)',
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Today's Collection</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                Today's Collection
+                                {showCollection ? <EyeOff size={14} style={{ opacity: 0.5 }} /> : <Lock size={14} style={{ opacity: 0.5 }} />}
+                            </p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#f59e0b' }}>
-                                <CountUp value={todayCollection} prefix="₹" />
+                                {showCollection ? <CountUp value={todayCollection} prefix="₹" /> : <span style={{ letterSpacing: '0.15rem' }}>₹ •••••</span>}
                             </h3>
                         </div>
                         <div className="icon-float" style={{
@@ -416,17 +507,26 @@ const AdminDashboard: React.FC = () => {
                 </div>
 
                 {/* Monthly Collection */}
-                <div className="glass-card hover-lift animate-slide-up" style={{
-                    padding: '1.5rem',
-                    animationDelay: '0.15s',
-                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(79, 70, 229, 0.03))',
-                    border: '1px solid rgba(99, 102, 241, 0.15)'
-                }}>
+                <div
+                    className="glass-card hover-lift animate-slide-up"
+                    onClick={handleCollectionClick}
+                    style={{
+                        padding: '1.5rem',
+                        animationDelay: '0.15s',
+                        background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(79, 70, 229, 0.03))',
+                        border: '1px solid rgba(99, 102, 241, 0.15)',
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Monthly Collection</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                Monthly Collection
+                                {showCollection ? <EyeOff size={14} style={{ opacity: 0.5 }} /> : <Lock size={14} style={{ opacity: 0.5 }} />}
+                            </p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#6366f1' }}>
-                                <CountUp value={monthlyCollection} prefix="₹" />
+                                {showCollection ? <CountUp value={monthlyCollection} prefix="₹" /> : <span style={{ letterSpacing: '0.15rem' }}>₹ •••••</span>}
                             </h3>
                         </div>
                         <div className="icon-float" style={{
@@ -445,18 +545,26 @@ const AdminDashboard: React.FC = () => {
                 </div>
 
                 {/* 2. Today Attendance */}
-                <div className="glass-card hover-lift animate-slide-up" style={{
-                    padding: '1.5rem',
-                    animationDelay: '0.2s',
-                    background: 'linear-gradient(135deg, rgba(244, 63, 94, 0.08), rgba(225, 29, 72, 0.03))',
-                    border: '1px solid rgba(244, 63, 94, 0.15)'
-                }}>
+                <div
+                    className="glass-card hover-lift animate-slide-up"
+                    onClick={() => navigate(`/${filterSchoolId}/attendance`)}
+                    style={{
+                        padding: '1.5rem',
+                        animationDelay: '0.2s',
+                        background: 'linear-gradient(135deg, rgba(244, 63, 94, 0.08), rgba(225, 29, 72, 0.03))',
+                        border: '1px solid rgba(244, 63, 94, 0.15)',
+                        cursor: 'pointer'
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Today Attendance</p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#f43f5e' }}>
                                 <CountUp value={attendanceRate} suffix="%" decimals={1} />
                             </h3>
+                            <div style={{ fontSize: '0.75rem', color: '#f43f5e', fontWeight: 700, marginTop: '0.25rem' }}>
+                                P: {studentStats.present} | A: {studentStats.absent}
+                            </div>
                         </div>
                         <div className="icon-float" style={{
                             width: '52px',
@@ -474,18 +582,26 @@ const AdminDashboard: React.FC = () => {
                 </div>
 
                 {/* Teacher Attendance */}
-                <div className="glass-card hover-lift animate-slide-up" style={{
-                    padding: '1.5rem',
-                    animationDelay: '0.25s',
-                    background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(124, 58, 237, 0.03))',
-                    border: '1px solid rgba(139, 92, 246, 0.15)'
-                }}>
+                <div
+                    className="glass-card hover-lift animate-slide-up"
+                    onClick={() => navigate(`/${filterSchoolId}/attendance/staff`)}
+                    style={{
+                        padding: '1.5rem',
+                        animationDelay: '0.25s',
+                        background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(124, 58, 237, 0.03))',
+                        border: '1px solid rgba(139, 92, 246, 0.15)',
+                        cursor: 'pointer'
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Teacher Attendance</p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#8b5cf6' }}>
                                 <CountUp value={teacherAttendanceRate} suffix="%" decimals={1} />
                             </h3>
+                            <div style={{ fontSize: '0.75rem', color: '#8b5cf6', fontWeight: 700, marginTop: '0.25rem' }}>
+                                P: {teacherStats.present} | A: {teacherStats.absent}
+                            </div>
                         </div>
                         <div className="icon-float" style={{
                             width: '52px',
@@ -765,6 +881,153 @@ const AdminDashboard: React.FC = () => {
 
                 {/* The Girls and Boys cards have been moved to the student overview section above */}
             </div>
+
+            {/* PIN Verification Modal */}
+            {showPinModal && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.5)',
+                        backdropFilter: 'blur(8px)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 9999,
+                        padding: '1rem'
+                    }}
+                    onClick={() => setShowPinModal(false)}
+                >
+                    <div
+                        className="animate-scale-in"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            background: 'white',
+                            borderRadius: '1.5rem',
+                            padding: '2rem',
+                            width: '100%',
+                            maxWidth: '340px',
+                            boxShadow: '0 25px 50px rgba(0,0,0,0.15)',
+                            position: 'relative'
+                        }}
+                    >
+                        <button
+                            onClick={() => setShowPinModal(false)}
+                            style={{
+                                position: 'absolute',
+                                top: '1rem',
+                                right: '1rem',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#94a3b8',
+                                padding: '0.25rem'
+                            }}
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                            <div style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '1rem',
+                                background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                margin: '0 auto 1rem',
+                                boxShadow: '0 8px 20px rgba(99, 102, 241, 0.3)'
+                            }}>
+                                <Lock size={24} color="white" />
+                            </div>
+                            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.25rem' }}>
+                                Enter Admin PIN
+                            </h3>
+                            <p style={{ fontSize: '0.8125rem', color: '#64748b', fontWeight: 500 }}>
+                                Verify your identity to view collection
+                            </p>
+                        </div>
+
+                        <form onSubmit={(e) => { e.preventDefault(); handlePinVerify(); }}>
+                            <div style={{ position: 'relative', marginBottom: '1rem' }}>
+                                <Lock size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                                <input
+                                    type="password"
+                                    inputMode="numeric"
+                                    maxLength={4}
+                                    autoFocus
+                                    placeholder="••••"
+                                    value={pinInput}
+                                    onChange={(e) => {
+                                        setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4));
+                                        setPinError('');
+                                    }}
+                                    style={{
+                                        width: '100%',
+                                        padding: '1rem 1rem 1rem 3rem',
+                                        fontSize: '1.5rem',
+                                        fontWeight: 900,
+                                        letterSpacing: '0.5rem',
+                                        textAlign: 'center',
+                                        border: `2px solid ${pinError ? '#ef4444' : '#e2e8f0'}`,
+                                        borderRadius: '1rem',
+                                        outline: 'none',
+                                        transition: 'border-color 0.2s',
+                                        background: '#f8fafc'
+                                    }}
+                                    onFocus={(e) => { if (!pinError) e.currentTarget.style.borderColor = '#6366f1'; }}
+                                    onBlur={(e) => { if (!pinError) e.currentTarget.style.borderColor = '#e2e8f0'; }}
+                                />
+                            </div>
+
+                            {pinError && (
+                                <p style={{
+                                    color: '#ef4444',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 700,
+                                    textAlign: 'center',
+                                    marginBottom: '0.75rem',
+                                    animation: 'shake 0.3s ease-in-out'
+                                }}>
+                                    {pinError}
+                                </p>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={verifyingPin || pinInput.length < 4}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.875rem',
+                                    borderRadius: '0.875rem',
+                                    border: 'none',
+                                    background: pinInput.length >= 4 ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : '#e2e8f0',
+                                    color: pinInput.length >= 4 ? 'white' : '#94a3b8',
+                                    fontWeight: 800,
+                                    fontSize: '1rem',
+                                    cursor: pinInput.length >= 4 ? 'pointer' : 'not-allowed',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.5rem',
+                                    boxShadow: pinInput.length >= 4 ? '0 8px 20px rgba(99, 102, 241, 0.3)' : 'none',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                {verifyingPin ? (
+                                    <div style={{ width: '20px', height: '20px', border: '3px solid rgba(255,255,255,0.3)', borderTop: '3px solid white', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                                ) : (
+                                    <>
+                                        <Eye size={18} />
+                                        Verify & Show
+                                    </>
+                                )}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, MessageCircle, ArrowLeft, Check } from 'lucide-react';
+import { Printer, MessageCircle, ArrowLeft, Check, Receipt, FileText } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
 import { amountToWords } from '../../utils/formatters';
 import { useSchool } from '../../context/SchoolContext';
@@ -97,6 +97,140 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
         window.print();
     };
 
+    const handleThermalPrint = () => {
+        const dline = '--------------------------------';
+        const pad = (label: string, val: string, w = 32) => {
+            const gap = w - label.length - val.length;
+            return label + (gap > 0 ? ' '.repeat(gap) : ' ') + val;
+        };
+
+        const dateStr = receipt.date?.seconds
+            ? new Date(receipt.date.seconds * 1000).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })
+            : new Date().toLocaleString('en-IN');
+
+        let lines: string[] = [];
+
+        // Header
+        const centerLine = (text: string, w = 32) => {
+            const gap = Math.max(0, Math.floor((w - text.length) / 2));
+            return ' '.repeat(gap) + text;
+        };
+        lines.push(centerLine(schoolName.toUpperCase()));
+        if (schoolAddress) {
+            // Wrap address to ~32 chars
+            const words = schoolAddress.split(' ');
+            let addrLine = '';
+            words.forEach((word: string) => {
+                if ((addrLine + ' ' + word).trim().length > 32) {
+                    lines.push(centerLine(addrLine.trim()));
+                    addrLine = word;
+                } else {
+                    addrLine += ' ' + word;
+                }
+            });
+            if (addrLine.trim()) lines.push(centerLine(addrLine.trim()));
+        }
+        if (schoolPhone) lines.push(centerLine('Ph: ' + schoolPhone));
+        lines.push(dline);
+        lines.push(centerLine('FEE RECEIPT'));
+        lines.push(dline);
+
+        // Receipt info
+        lines.push(pad('Rcpt No:', receipt.receiptNo || ''));
+        lines.push(pad('Date:', dateStr));
+        lines.push(dline);
+
+        // Student info
+        const rollNo = receipt.rollNo || studentData?.classRollNo || studentData?.rollNo || 'N/A';
+        lines.push('Name: ' + (receipt.studentName || '').toUpperCase());
+        lines.push('ID: ' + (receipt.admissionNo || 'N/A'));
+        lines.push('Class: ' + (receipt.class || '') + (receipt.section ? '-' + receipt.section : '') + '  Roll: ' + rollNo);
+        lines.push('Mode: ' + (receipt.paymentMode || 'CASH'));
+        if (receipt.paidFor) {
+            lines.push('For: ' + receipt.paidFor);
+        }
+        lines.push(dline);
+
+        // Fee items
+        lines.push(pad('ITEM', 'AMT'));
+        lines.push(dline);
+        lines.push(pad('Previous Dues', previousDues.toFixed(2)));
+
+        if (receipt.items && receipt.items.length > 0) {
+            receipt.items.forEach((item: any) => {
+                const amt = (item.price * item.qty).toFixed(2);
+                const name = item.name.length > 20 ? item.name.substring(0, 19) + '.' : item.name;
+                lines.push(pad(name, amt));
+            });
+        } else if (receipt.feeBreakdown) {
+            Object.entries(receipt.feeBreakdown).forEach(([feeName, amount]: [string, any]) => {
+                const displayName = feeName.toLowerCase().includes('monthly') ? 'Tuition Fee' : feeName;
+                const name = displayName.length > 20 ? displayName.substring(0, 19) + '.' : displayName;
+                lines.push(pad(name, Number(amount).toFixed(2)));
+            });
+        }
+
+        lines.push(dline);
+
+        // Totals
+        lines.push(pad('Grand Total', grandTotal.toFixed(2)));
+        if (discount > 0) {
+            lines.push(pad('Discount (-)', '-' + discount.toFixed(2)));
+        }
+        lines.push(pad('Net Payable', netPayable.toFixed(2)));
+        lines.push(dline);
+        lines.push(pad('PAID', totalPaid.toFixed(2)));
+        lines.push(pad('DUES', currentDues.toFixed(2)));
+        lines.push(dline);
+
+        // Amount in words
+        const words = amountToWords(totalPaid);
+        if (words) {
+            lines.push('Amt: ' + words);
+            lines.push(dline);
+        }
+
+        lines.push('');
+        lines.push(centerLine('Thank You!'));
+        lines.push(centerLine(schoolName));
+        lines.push('');
+
+        // Build HTML for thermal print window
+        const thermalHTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Thermal Receipt</title>
+<style>
+  @page { margin: 0; size: 80mm auto; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Courier New', 'Lucida Console', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    width: 72mm;
+    max-width: 72mm;
+    padding: 4mm;
+    color: #000;
+    background: #fff;
+  }
+  pre {
+    font-family: inherit;
+    font-size: inherit;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+</style>
+</head><body>
+<pre>${lines.join('\n')}</pre>
+<script>window.onload=function(){window.print();window.onafterprint=function(){window.close();}}<\/script>
+</body></html>`;
+
+        const thermalWin = window.open('', '_blank', 'width=320,height=600');
+        if (thermalWin) {
+            thermalWin.document.write(thermalHTML);
+            thermalWin.document.close();
+        }
+    };
+
     const handleWhatsAppReceipt = async () => {
         try {
             const html2canvas = (await import('html2canvas')).default;
@@ -130,6 +264,71 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
         } catch (error) {
             console.error('WhatsApp receipt error:', error);
             alert('Failed to generate receipt image.');
+        }
+    };
+
+    const handleWhatsAppPDF = async () => {
+        try {
+            const html2canvas = (await import('html2canvas')).default;
+            const jsPDF = (await import('jspdf')).jsPDF;
+            const receiptElement = document.querySelector('.printable-receipt') as HTMLElement;
+            if (!receiptElement) return;
+
+            const canvas = await html2canvas(receiptElement, {
+                scale: 2,
+                backgroundColor: '#ffffff',
+                logging: false,
+                useCORS: true,
+                allowTaint: true
+            });
+
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a5'
+            });
+
+            const imgProps = pdf.getImageProperties(imgData);
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+
+            const fileName = `Receipt_${receipt.receiptNo || 'Fee'}.pdf`;
+            const pdfBlob = pdf.output('blob');
+            const studentMobile = (studentData?.mobileNo || receipt.mobile || '').replace(/[^0-9]/g, '');
+            const message = encodeURIComponent(`Fee receipt for ${receipt.studentName || 'Student'}. PDF attached.`);
+
+            const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+            // Mobile sharing
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Fee Receipt',
+                        text: `Fee receipt for ${receipt.studentName}`,
+                    });
+                } catch (shareError) {
+                    console.error('Share failed:', shareError);
+                    // Fallback to download if share canceled or failed
+                    pdf.save(fileName);
+                }
+            } else {
+                // Desktop fallback: Download and open WhatsApp
+                pdf.save(fileName);
+                if (studentMobile) {
+                    const whatsappUrl = `https://wa.me/${studentMobile}?text=${message}`;
+                    window.open(whatsappUrl, '_blank');
+                    alert('PDF downloaded! Please attach it to the WhatsApp chat.');
+                } else {
+                    alert('PDF downloaded! (Student mobile number not found)');
+                }
+            }
+        } catch (error) {
+            console.error('WhatsApp PDF error:', error);
+            alert('Failed to generate PDF receipt. Make sure jspdf is installed.');
         }
     };
 
@@ -171,12 +370,18 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                     <button onClick={onClose} className="btn-icon"><ArrowLeft size={20} /></button>
                     <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Fee Receipt</h1>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button onClick={handleWhatsAppReceipt} className="btn" style={{ background: '#25D366', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <MessageCircle size={18} /> WhatsApp
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button onClick={handleWhatsAppReceipt} className="btn" style={{ background: '#25D366', color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+                        <MessageCircle size={16} /> WhatsApp
+                    </button>
+                    <button onClick={handleWhatsAppPDF} className="btn" style={{ background: '#075E54', color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+                        <FileText size={16} /> WhatsApp PDF
                     </button>
                     <button onClick={handlePrint} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Printer size={18} /> Print
+                    </button>
+                    <button onClick={handleThermalPrint} className="btn" style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}>
+                        <Receipt size={18} /> Thermal
                     </button>
                     <button onClick={handleDone} className="btn" style={{ background: '#10b981', color: 'white', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Check size={18} /> Done
@@ -274,7 +479,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                             <tr>
                                 <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Class</strong></td>
                                 <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
-                                    {receipt.class}{receipt.section ? `-${receipt.section}` : ''} <span style={{ float: 'right' }}><strong>Mode:</strong> {receipt.paymentMode || 'CASH'}</span>
+                                    {receipt.class}{receipt.section ? `-${receipt.section}` : ''} <span style={{ float: 'right' }}><strong>Roll No:</strong> {receipt.rollNo || studentData?.classRollNo || studentData?.rollNo || 'N/A'}</span>
                                 </td>
                             </tr>
                         </tbody>

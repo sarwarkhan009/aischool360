@@ -572,36 +572,65 @@ export function AdmissionNoSync() {
 export function ClassMaster() {
     const { currentSchool } = useSchool();
     const { data: allSettings, loading } = useFirestore<any>('settings');
+    const { data: academicYears } = useFirestore<any>('academic_years');
     const [isSaving, setIsSaving] = useState<string | null>(null);
+
+    const activeFY = currentSchool?.activeFinancialYear || '';
+    const schoolYears = (academicYears || [])
+        .filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived)
+        .map((y: any) => y.name)
+        .sort();
+    const [selectedSession, setSelectedSession] = useState(activeFY);
+
+    // Sync selectedSession when activeFY loads
+    useEffect(() => {
+        if (activeFY && !selectedSession) {
+            setSelectedSession(activeFY);
+        }
+    }, [activeFY]);
 
     const PRESET_CLASSES = CLASS_ORDER;
     const PRESET_SECTIONS = ['A', 'B', 'C', 'D'];
 
-    // Get all class settings
-    const classSettings = allSettings?.filter((d: any) => d.type === 'class') || [];
+    // Get class settings for the selected session
+    const allClassSettings = allSettings?.filter((d: any) => d.type === 'class') || [];
+    const classSettings = allClassSettings.filter((c: any) => c.financialYear === selectedSession);
+
+    // Check if there are any untagged (legacy) class settings
+    const untaggedClasses = allClassSettings.filter((c: any) => !c.financialYear);
+
+    // Helper to generate doc ID for a class in a specific session
+    const getDocId = (className: string, fy: string) => {
+        const classKey = className.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const fyKey = fy.replace(/[^a-z0-9]/g, '_');
+        return `class_${classKey}_${currentSchool?.id}_${fyKey}`;
+    };
+
+    // Legacy doc ID (without financial year)
+    const getLegacyDocId = (className: string) => {
+        return `class_${className.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool?.id}`;
+    };
 
     const toggleClass = async (className: string) => {
-        if (!currentSchool?.id) return;
-        const docId = `class_${className.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id}`;
+        if (!currentSchool?.id || !selectedSession) return;
+        const docId = getDocId(className, selectedSession);
         const existingClass = classSettings.find((c: any) => c.name === className);
 
         setIsSaving(`toggle-${className}`);
         try {
             if (existingClass) {
-                // Toggle active status
                 await updateDoc(doc(db, 'settings', docId), {
                     active: !existingClass.active,
                     updatedAt: new Date().toISOString()
                 });
             } else {
-                // First click on a new class - user wants to ENABLE it
-                // Create class document with active=true
                 await setDoc(doc(db, 'settings', docId), {
                     name: className,
-                    sections: [], // No sections by default
-                    active: true, // Enable the class
+                    sections: [],
+                    active: true,
                     type: 'class',
                     schoolId: currentSchool.id,
+                    financialYear: selectedSession,
                     createdAt: new Date().toISOString()
                 });
             }
@@ -613,11 +642,10 @@ export function ClassMaster() {
     };
 
     const toggleSection = async (className: string, section: string) => {
-        if (!currentSchool?.id) return;
-        const docId = `class_${className.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id}`;
+        if (!currentSchool?.id || !selectedSession) return;
+        const docId = getDocId(className, selectedSession);
         const existingClass = classSettings.find((c: any) => c.name === className);
 
-        // Can't add sections to inactive class
         if (!existingClass?.active) {
             alert('Please activate the class first before adding sections.');
             return;
@@ -643,19 +671,147 @@ export function ClassMaster() {
         }
     };
 
+    // Migrate untagged classes to a specific session
+    const handleMigrateUntagged = async (targetSession: string) => {
+        if (!currentSchool?.id || untaggedClasses.length === 0) return;
+
+        const confirmMsg = `This will tag ${untaggedClasses.length} existing class settings to session "${targetSession}". Continue?`;
+        if (!window.confirm(confirmMsg)) return;
+
+        setIsSaving('migrating');
+        try {
+            const batch = writeBatch(db);
+            for (const cls of untaggedClasses) {
+                const newDocId = getDocId(cls.name, targetSession);
+                batch.set(doc(db, 'settings', newDocId), {
+                    name: cls.name,
+                    sections: cls.sections || [],
+                    active: cls.active !== false,
+                    type: 'class',
+                    schoolId: currentSchool.id,
+                    financialYear: targetSession,
+                    createdAt: new Date().toISOString()
+                });
+                // Delete old untagged doc
+                const legacyId = getLegacyDocId(cls.name);
+                batch.delete(doc(db, 'settings', legacyId));
+            }
+            await batch.commit();
+            alert(`✅ Successfully migrated ${untaggedClasses.length} classes to session ${targetSession}`);
+        } catch (err) {
+            alert('Migration failed: ' + (err as Error).message);
+        } finally {
+            setIsSaving(null);
+        }
+    };
+
+    // Copy class-section config from one session to another
+    const handleCopyFromPreviousYear = async () => {
+        if (!currentSchool?.id) return;
+
+        const otherYears = schoolYears.filter((y: string) => y !== selectedSession);
+        if (otherYears.length === 0) {
+            alert('No other academic years found to copy from.');
+            return;
+        }
+
+        const sourceYear = window.prompt(
+            `Enter the session to copy FROM (available: ${otherYears.join(', ')}):`,
+            otherYears[otherYears.length - 1]
+        );
+        if (!sourceYear || !otherYears.includes(sourceYear)) {
+            if (sourceYear) alert('Invalid session. Please enter one of: ' + otherYears.join(', '));
+            return;
+        }
+
+        const sourceClasses = allClassSettings.filter((c: any) => c.financialYear === sourceYear);
+        if (sourceClasses.length === 0) {
+            alert(`No class settings found for session ${sourceYear}.`);
+            return;
+        }
+
+        if (classSettings.length > 0) {
+            if (!window.confirm(`Session ${selectedSession} already has ${classSettings.length} class configs. Copying will OVERWRITE existing settings. Continue?`)) return;
+        }
+
+        setIsSaving('copying');
+        try {
+            const batch = writeBatch(db);
+
+            for (const cls of classSettings) {
+                const docId = getDocId(cls.name, selectedSession);
+                batch.delete(doc(db, 'settings', docId));
+            }
+
+            for (const cls of sourceClasses) {
+                const newDocId = getDocId(cls.name, selectedSession);
+                batch.set(doc(db, 'settings', newDocId), {
+                    name: cls.name,
+                    sections: cls.sections || [],
+                    active: cls.active !== false,
+                    type: 'class',
+                    schoolId: currentSchool.id,
+                    financialYear: selectedSession,
+                    createdAt: new Date().toISOString()
+                });
+            }
+
+            await batch.commit();
+            alert(`✅ Successfully copied ${sourceClasses.length} class configs from ${sourceYear} to ${selectedSession}`);
+        } catch (err) {
+            alert('Copy failed: ' + (err as Error).message);
+        } finally {
+            setIsSaving(null);
+        }
+    };
+
     return (
         <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
                 <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Plus size={20} />
                 </div>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: '200px' }}>
                     <h3 style={{ fontWeight: 700, marginBottom: '0.25rem' }}>Class & Section Master</h3>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                        Enable classes your school offers and add sections as needed
+                        Enable classes your school offers and add sections as needed — per session
                     </p>
                 </div>
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select
+                        className="input-field"
+                        style={{ padding: '0.5rem', width: 'auto', background: 'white', fontWeight: 700, border: '2px solid var(--primary)' }}
+                        value={selectedSession}
+                        onChange={(e) => setSelectedSession(e.target.value)}
+                    >
+                        {schoolYears.map((s: string) => (
+                            <option key={s} value={s}>{s}</option>
+                        ))}
+                    </select>
+
+                    <button
+                        onClick={handleCopyFromPreviousYear}
+                        disabled={loading || !!isSaving}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            background: '#f59e0b',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '0.5rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            opacity: isSaving === 'copying' ? 0.5 : 1
+                        }}
+                    >
+                        <Copy size={14} />
+                        {isSaving === 'copying' ? 'Copying...' : 'Copy from Previous Year'}
+                    </button>
+
                     <button
                         onClick={async () => {
                             if (!currentSchool?.id) return;
@@ -688,24 +844,27 @@ export function ClassMaster() {
                     >
                         {isSaving === 'toggle-roman' ? <Loader2 size={14} className="animate-spin" /> : (currentSchool?.useRomanNumerals ? 'Disable Roman Numerals' : 'Enable Roman Numerals (STD I, II...)')}
                     </button>
+
                     <button
                         onClick={async () => {
-                            if (!confirm('Enable ALL classes? This will activate every class from Pre-Nursery to Class 12.')) return;
+                            if (!confirm(`Enable ALL classes for session ${selectedSession}? This will activate every class from Pre-Nursery to Class 12.`)) return;
                             setIsSaving('enable-all');
                             try {
                                 if (!currentSchool?.id) return;
-                                // Update all existing class documents to active=true
+                                const batch = writeBatch(db);
                                 for (const className of PRESET_CLASSES) {
-                                    const docId = `class_${className.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool.id}`;
-                                    await setDoc(doc(db, 'settings', docId), {
+                                    const docId = getDocId(className, selectedSession);
+                                    batch.set(doc(db, 'settings', docId), {
                                         name: className,
                                         sections: [],
                                         active: true,
                                         type: 'class',
                                         schoolId: currentSchool.id,
+                                        financialYear: selectedSession,
                                         updatedAt: new Date().toISOString()
                                     }, { merge: true });
                                 }
+                                await batch.commit();
                                 alert('✅ All classes enabled successfully!');
                             } catch (err) {
                                 alert('Failed to enable classes: ' + (err as Error).message);
@@ -732,11 +891,56 @@ export function ClassMaster() {
                 </div>
             </div>
 
+            {/* Migration banner for untagged classes */}
+            {untaggedClasses.length > 0 && (
+                <div style={{
+                    background: '#fef3c7',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '12px',
+                    padding: '1rem 1.5rem',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    flexWrap: 'wrap'
+                }}>
+                    <div>
+                        <p style={{ fontWeight: 700, color: '#92400e', margin: 0, fontSize: '0.9rem' }}>
+                            ⚠️ {untaggedClasses.length} class settings found without session tag
+                        </p>
+                        <p style={{ fontSize: '0.75rem', color: '#a16207', margin: '0.25rem 0 0' }}>
+                            These are from before session-aware management. Tag them to a session to continue.
+                        </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {schoolYears.map((yr: string) => (
+                            <button
+                                key={yr}
+                                onClick={() => handleMigrateUntagged(yr)}
+                                disabled={!!isSaving}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    background: '#f59e0b',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    opacity: isSaving === 'migrating' ? 0.5 : 1
+                                }}
+                            >
+                                {isSaving === 'migrating' ? 'Migrating...' : `Tag as ${yr}`}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {PRESET_CLASSES.map(clsName => {
                     const classData = classSettings.find((c: any) => c.name === clsName);
-                    // A class is active ONLY if the document exists AND its active field is not false.
-                    // For a brand new school (no documents), it will correctly show as Disabled (false).
                     const isClassActive = !!classData && classData.active !== false;
                     const isToggling = isSaving === `toggle-${clsName}`;
 
@@ -753,7 +957,6 @@ export function ClassMaster() {
                             transition: 'all 0.2s ease',
                             opacity: isClassActive ? 1 : 0.6
                         }}>
-                            {/* Class Name & Toggle */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', minWidth: '200px' }}>
                                 <button
                                     onClick={() => toggleClass(clsName)}
@@ -792,7 +995,6 @@ export function ClassMaster() {
                                 </span>
                             </div>
 
-                            {/* Sections */}
                             {isClassActive ? (
                                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1 }}>
                                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginRight: '0.25rem' }}>
@@ -845,6 +1047,7 @@ export function ClassMaster() {
     );
 }
 
+
 export function InstitutionInfo() {
     const { currentSchool, updateSchoolData } = useSchool();
     const [info, setInfo] = useState({
@@ -861,7 +1064,11 @@ export function InstitutionInfo() {
         admissionNumberPrefix: '',
         admissionNumberStartNumber: '',
         academicYearStartMonth: 'April',
-        receiptHeaderUrl: ''
+        receiptHeaderUrl: '',
+        showExamVenue: true,
+        udiseCode: '',
+        schoolCode: '',
+        runAndManagedBy: ''
     });
     const [isSaving, setIsSaving] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -942,7 +1149,11 @@ export function InstitutionInfo() {
                 admissionNumberPrefix: currentSchool.admissionNumberPrefix || '',
                 admissionNumberStartNumber: currentSchool.admissionNumberStartNumber || '',
                 academicYearStartMonth: currentSchool.academicYearStartMonth || 'April',
-                receiptHeaderUrl: currentSchool.receiptHeaderUrl || ''
+                receiptHeaderUrl: currentSchool.receiptHeaderUrl || '',
+                showExamVenue: currentSchool.showExamVenue !== false,
+                udiseCode: (currentSchool as any).udiseCode || '',
+                schoolCode: (currentSchool as any).schoolCode || '',
+                runAndManagedBy: (currentSchool as any).runAndManagedBy || ''
             });
             setLogoPreview(currentSchool.logoUrl || currentSchool.logo || '');
             setHeaderPreview(currentSchool.receiptHeaderUrl || '');
@@ -1094,6 +1305,10 @@ export function InstitutionInfo() {
                 admissionNumberPrefix: info.admissionNumberPrefix,
                 admissionNumberStartNumber: info.admissionNumberStartNumber,
                 academicYearStartMonth: info.academicYearStartMonth,
+                showExamVenue: info.showExamVenue,
+                udiseCode: info.udiseCode,
+                schoolCode: info.schoolCode,
+                runAndManagedBy: info.runAndManagedBy,
                 updatedAt: new Date().toISOString()
             });
 
@@ -1118,6 +1333,9 @@ export function InstitutionInfo() {
                 receiptHeaderFields: receiptFields,
                 admissionNumberPrefix: info.admissionNumberPrefix,
                 admissionNumberStartNumber: info.admissionNumberStartNumber,
+                udiseCode: info.udiseCode,
+                schoolCode: info.schoolCode,
+                runAndManagedBy: info.runAndManagedBy,
                 type: 'school_info',
                 schoolId: currentSchool.id,
                 updatedAt: new Date().toISOString()
@@ -1151,6 +1369,10 @@ export function InstitutionInfo() {
                     admissionNumberPrefix: info.admissionNumberPrefix,
                     admissionNumberStartNumber: info.admissionNumberStartNumber,
                     academicYearStartMonth: info.academicYearStartMonth,
+                    showExamVenue: info.showExamVenue,
+                    udiseCode: info.udiseCode,
+                    schoolCode: info.schoolCode,
+                    runAndManagedBy: info.runAndManagedBy
                 } as any);
             }
 
@@ -1230,6 +1452,63 @@ export function InstitutionInfo() {
                         <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             This determines the months shown in fee collection (e.g., if March is selected, months will show March to February)
                         </small>
+                    </div>
+
+                    {/* UDISE Code, School Code, Run and Managed By */}
+                    <div className="grid-2" style={{ gap: '1rem' }}>
+                        <div className="input-group">
+                            <label>UDISE Code</label>
+                            <input
+                                type="text"
+                                className="input-field"
+                                value={info.udiseCode}
+                                onChange={e => setInfo({ ...info, udiseCode: e.target.value })}
+                                placeholder="e.g., 09140100301"
+                            />
+                        </div>
+                        <div className="input-group">
+                            <label>School Code</label>
+                            <input
+                                type="text"
+                                className="input-field"
+                                value={info.schoolCode}
+                                onChange={e => setInfo({ ...info, schoolCode: e.target.value })}
+                                placeholder="e.g., 12345"
+                            />
+                        </div>
+                    </div>
+                    <div className="input-group">
+                        <label>Run and Managed By</label>
+                        <input
+                            type="text"
+                            className="input-field"
+                            value={info.runAndManagedBy}
+                            onChange={e => setInfo({ ...info, runAndManagedBy: e.target.value })}
+                            onBlur={e => setInfo({ ...info, runAndManagedBy: toProperCase(e.target.value) })}
+                            placeholder="e.g., Private Unaided (Recognised)"
+                        />
+                    </div>
+
+                    {/* NEW: Exam Configuration Settings */}
+                    <div style={{ padding: '1.25rem', background: '#f8fafc', borderRadius: '0.75rem', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <BookOpen size={18} /> Exam Settings
+                        </h4>
+
+                        <div className="input-group">
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', cursor: 'pointer' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={info.showExamVenue}
+                                    onChange={e => setInfo({ ...info, showExamVenue: e.target.checked })}
+                                    style={{ width: '1.125rem', height: '1.125rem', accentColor: 'var(--primary)' }}
+                                />
+                                <span style={{ fontWeight: 600 }}>Enable 'Venue' (Room Number) in Schedule</span>
+                            </label>
+                            <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '1.75rem' }}>
+                                If disabled, the room/venue option will be hidden from the exam schedule entry form.
+                            </small>
+                        </div>
                     </div>
                     <div className="grid-2" style={{ gap: '1rem' }}>
                         <div className="input-group">
@@ -1917,7 +2196,7 @@ export function InventoryMaster() {
 
     // Classes from school configuration
     const activeClasses = (allSettings && allSettings.length > 0)
-        ? getActiveClasses(allSettings.filter((d: any) => d.type === 'class' && d.schoolId === currentSchool?.id))
+        ? getActiveClasses(allSettings.filter((d: any) => d.type === 'class' && d.schoolId === currentSchool?.id), activeFY)
         : [];
     const sortedClassNames = activeClasses.map((c: any) => c.name);
 

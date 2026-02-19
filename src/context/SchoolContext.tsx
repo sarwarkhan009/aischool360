@@ -44,6 +44,12 @@ interface SchoolData {
         showEmail?: boolean;
         showWebsite?: boolean;
     };
+    showExamVenue?: boolean;
+    examTimeMode?: 'GLOBAL' | 'INDIVIDUAL';
+    globalExamTime?: string;
+    udiseCode?: string;
+    schoolCode?: string;
+    runAndManagedBy?: string;
 }
 
 interface SchoolContextType {

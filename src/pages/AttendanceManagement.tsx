@@ -46,7 +46,7 @@ import {
 const COLORS = ['#10b981', '#f43f5e', '#f59e0b']; // Green, Red, Orange
 import { useSchool } from '../context/SchoolContext';
 import { useFirestore } from '../hooks/useFirestore';
-import { getActiveClasses } from '../constants/app';
+import { getActiveClasses, CLASS_ORDER } from '../constants/app';
 import { useAuth } from '../context/AuthContext';
 
 // Helper functions for date manipulation
@@ -189,7 +189,11 @@ const AttendanceManagement: React.FC = () => {
                         // ignore
                     }
 
-                    setAssignedClasses(Array.from(classesSet));
+                    // Sort assigned classes by the canonical CLASS_ORDER
+                    const sortedClasses = Array.from(classesSet).sort(
+                        (a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b)
+                    );
+                    setAssignedClasses(sortedClasses);
                 } catch (e) {
                     console.error("Error fetching assigned classes:", e);
                 } finally {
@@ -202,7 +206,10 @@ const AttendanceManagement: React.FC = () => {
 
     const classesList = useMemo(() => {
         if (user?.role === 'TEACHER') {
-            return assignedClasses;
+            // Sort by canonical CLASS_ORDER (already sorted on set, but guard here too)
+            return [...assignedClasses].sort(
+                (a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b)
+            );
         }
         return activeClasses.map(c => c.name);
     }, [activeClasses, assignedClasses, user?.role]);
@@ -323,7 +330,7 @@ const AttendanceManagement: React.FC = () => {
         if (currentSchool?.id && activeTab === 'mark') {
             fetchExistingAttendance(students);
         }
-    }, [currentDate, activeTab, students, currentSchool?.id]);
+    }, [currentDate, activeTab, students, currentSchool?.id, filterClass, filterSection]);
 
     // 3. Fetch summary for 'Summary' tab
     useEffect(() => {
@@ -338,6 +345,11 @@ const AttendanceManagement: React.FC = () => {
             fetchStudentRecords();
         }
     }, [selectedStudent, timeRange, activeTab, currentSchool?.id]);
+
+    // 5. Reset attendance state immediately when class/section changes to avoid stale data
+    useEffect(() => {
+        setAttendance({});
+    }, [filterClass, filterSection, currentDate]);
 
     const handleExportReport = () => {
         const csvContent = "data:text/csv;charset=utf-8,"
@@ -414,7 +426,8 @@ const AttendanceManagement: React.FC = () => {
 
             const merged: Record<string, string> = {};
             studentList.forEach(s => {
-                merged[s.uid] = existing[s.uid] || existing[s.id] || 'PRESENT';
+                // Only set from DB — empty string means "not yet marked" (unchecked)
+                merged[s.uid] = existing[s.uid] || existing[s.id] || '';
             });
             setAttendance(merged);
         } catch (error) {
@@ -433,12 +446,25 @@ const AttendanceManagement: React.FC = () => {
     };
 
     const saveAttendance = async () => {
+        // Check if any students are still unmarked
+        const unmarked = filteredStudents.filter(s => !attendance[s.uid]);
+        if (unmarked.length > 0) {
+            const confirm = window.confirm(
+                `${unmarked.length} student(s) have not been marked yet.\nThey will be saved as PRESENT by default.\n\nDo you want to continue?`
+            );
+            if (!confirm) return;
+        }
+
         setLoading(true);
         try {
             const batch = writeBatch(db);
             const dayName = new Date(currentDate).toLocaleDateString('en-US', { weekday: 'long' });
 
             filteredStudents.forEach(s => {
+                const status = attendance[s.uid];
+                // Skip entirely if no status is set AND user hasn't acknowledged
+                // (but at this point we already confirmed, so default to PRESENT)
+                const finalStatus = status || 'PRESENT';
                 const docId = `att_${s.uid}_${currentDate}`;
                 const attRef = doc(db, 'attendance', docId);
                 batch.set(attRef, {
@@ -449,7 +475,7 @@ const AttendanceManagement: React.FC = () => {
                     section: s.section || '',
                     date: currentDate,
                     day: dayName,
-                    status: attendance[s.uid] || 'PRESENT',
+                    status: finalStatus,
                     markedBy: 'Admin',
                     markedAt: new Date().toISOString(),
                     schoolId: currentSchool?.id,
@@ -484,7 +510,7 @@ const AttendanceManagement: React.FC = () => {
                 .map(doc => doc.data())
                 .filter(r => r.date >= start && r.date <= end);
 
-            records = records.filter(r => filterClass === 'All' || r.class === filterClass);
+            records = records.filter(r => !filterClass || filterClass === 'All' || r.class === filterClass);
             setMonthlyRecords(records);
         } catch (error) {
             console.error("Summary fetch error:", error);
@@ -651,7 +677,7 @@ const AttendanceManagement: React.FC = () => {
                                     >
                                         <option value="">{assignedLoading ? 'Loading Classes...' : 'Choose Class'}</option>
                                         {user?.role !== 'TEACHER' && <option value="All">All Classes (Admin Only)</option>}
-                                        {classesList.map(c => <option key={c} value={c}>Class {c}</option>)}
+                                        {classesList.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
                                 <div className="input-group" style={{ marginBottom: 0 }}>
@@ -707,6 +733,105 @@ const AttendanceManagement: React.FC = () => {
                                 </button>
                             </div>
                         </div>
+
+                        {/* Live Attendance Count Summary */}
+                        {filterClass && filterClass !== 'All' && filteredStudents.length > 0 && (
+                            <div style={{
+                                gridColumn: '1 / -1',
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                                gap: '0.75rem',
+                            }}>
+                                {/* Present */}
+                                <div style={{
+                                    background: 'rgba(16, 185, 129, 0.08)',
+                                    border: '2px solid rgba(16, 185, 129, 0.35)',
+                                    borderRadius: 'var(--radius-lg)',
+                                    padding: '0.875rem 1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                }}>
+                                    <div style={{
+                                        width: '2.5rem', height: '2.5rem', borderRadius: '50%',
+                                        background: '#10b981', display: 'flex', alignItems: 'center',
+                                        justifyContent: 'center', flexShrink: 0
+                                    }}>
+                                        <CheckCircle2 size={16} color="white" />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Present</div>
+                                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981', lineHeight: 1 }}>{stats.present}</div>
+                                    </div>
+                                </div>
+                                {/* Absent */}
+                                <div style={{
+                                    background: 'rgba(244, 63, 94, 0.08)',
+                                    border: '2px solid rgba(244, 63, 94, 0.35)',
+                                    borderRadius: 'var(--radius-lg)',
+                                    padding: '0.875rem 1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                }}>
+                                    <div style={{
+                                        width: '2.5rem', height: '2.5rem', borderRadius: '50%',
+                                        background: '#f43f5e', display: 'flex', alignItems: 'center',
+                                        justifyContent: 'center', flexShrink: 0
+                                    }}>
+                                        <XCircle size={16} color="white" />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#f43f5e', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Absent</div>
+                                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f43f5e', lineHeight: 1 }}>{stats.absent}</div>
+                                    </div>
+                                </div>
+                                {/* Late */}
+                                <div style={{
+                                    background: 'rgba(245, 158, 11, 0.08)',
+                                    border: '2px solid rgba(245, 158, 11, 0.35)',
+                                    borderRadius: 'var(--radius-lg)',
+                                    padding: '0.875rem 1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                }}>
+                                    <div style={{
+                                        width: '2.5rem', height: '2.5rem', borderRadius: '50%',
+                                        background: '#f59e0b', display: 'flex', alignItems: 'center',
+                                        justifyContent: 'center', flexShrink: 0
+                                    }}>
+                                        <Clock size={16} color="white" />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Late</div>
+                                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f59e0b', lineHeight: 1 }}>{stats.late}</div>
+                                    </div>
+                                </div>
+                                {/* Total */}
+                                <div style={{
+                                    background: 'rgba(99, 102, 241, 0.08)',
+                                    border: '2px solid rgba(99, 102, 241, 0.35)',
+                                    borderRadius: 'var(--radius-lg)',
+                                    padding: '0.875rem 1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                }}>
+                                    <div style={{
+                                        width: '2.5rem', height: '2.5rem', borderRadius: '50%',
+                                        background: 'var(--primary)', display: 'flex', alignItems: 'center',
+                                        justifyContent: 'center', flexShrink: 0
+                                    }}>
+                                        <Users size={16} color="white" />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</div>
+                                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)', lineHeight: 1 }}>{stats.total}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="glass-card" style={{ gridColumn: '1 / -1', padding: 0, overflow: 'hidden' }}>
                             {/* Desktop Table */}
@@ -1196,7 +1321,7 @@ const AttendanceManagement: React.FC = () => {
                                     }}>
                                         <option value="">{assignedLoading ? 'Loading Classes...' : 'Choose Class'}</option>
                                         {user?.role !== 'TEACHER' && <option value="All">All Classes</option>}
-                                        {classesList.map(c => <option key={c} value={c}>Class {c}</option>)}
+                                        {classesList.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
                                 <div className="input-group" style={{ marginBottom: 0 }}>

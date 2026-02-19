@@ -28,6 +28,7 @@ import StudentAdmission from './pages/students/StudentAdmission';
 import FormSale from './pages/students/FormSale';
 import BulkStudentUpload from './pages/students/BulkStudentUpload';
 import StudentPromotion from './pages/students/StudentPromotion';
+import StudentPhotoUpload from './pages/students/StudentPhotoUpload';
 import BulkMarksUpload from './pages/exams/BulkMarksUpload';
 import FeeStructure from './pages/fees/FeeStructure';
 import FeeReport from './pages/fees/FeeReport';
@@ -246,7 +247,8 @@ const AuthWrapper = () => {
             <Route path="students/report" element={<ProtectedRoute requiredPermission={Permission.VIEW_STUDENT_REPORTS}><StudentReport /></ProtectedRoute>} />
             <Route path="students/re-reg" element={<ProtectedRoute requiredPermission={Permission.VIEW_RE_REGISTRATION_REPORTS}><ReRegReport /></ProtectedRoute>} />
             <Route path="students/dues" element={<ProtectedRoute requiredPermission={Permission.VIEW_DUES_LIST}><DuesList /></ProtectedRoute>} />
-            <Route path="students/promotion" element={<ProtectedRoute requiredPermission={Permission.ADMIT_STUDENT}><StudentPromotion /></ProtectedRoute>} />
+            <Route path="students/promotion" element={<ProtectedRoute requiredPermission={Permission.PROMOTE_STUDENTS}><StudentPromotion /></ProtectedRoute>} />
+            <Route path="students/photos" element={<ProtectedRoute requiredPermission={Permission.UPLOAD_STUDENT_PHOTO}><StudentPhotoUpload /></ProtectedRoute>} />
 
             {/* Teacher Routes */}
             <Route path="teachers" element={<ProtectedRoute requiredPermission={Permission.VIEW_EMPLOYEES}><EmployeeManagement /></ProtectedRoute>} />

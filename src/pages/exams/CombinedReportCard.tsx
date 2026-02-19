@@ -235,6 +235,17 @@ const CombinedReportCard: React.FC = () => {
         return cls?.name || classId;
     };
 
+    // Get subjects for an exam (handles classRoutines)
+    const getExamSubjects = (exam: any) => {
+        if (!exam) return [];
+        const classRoutine = exam.classRoutines?.find((cr: any) =>
+            cr.classId === selectedClass || cr.className === getClassName(selectedClass)
+        );
+        return (classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
+            ? classRoutine.routine
+            : (exam.subjects || []);
+    };
+
     // Filter students
     const filteredStudents = useMemo(() => {
         if (!students || !currentSchool || !selectedClass) return [];
@@ -322,7 +333,7 @@ const CombinedReportCard: React.FC = () => {
         let totalMax = 0;
 
         // Iterate over exam definition to ensure all subjects are included even if marks are missing
-        (exam.subjects || []).forEach((sub: any) => {
+        getExamSubjects(exam).forEach((sub: any) => {
             const subId = sub.subjectId;
             const subName = (sub.subjectName || sub.name).toUpperCase().trim();
             const cleanSubName = subName.replace(/[\s./-]/g, '');
@@ -453,13 +464,11 @@ const CombinedReportCard: React.FC = () => {
             : selectedExams.map(se => schoolExams.find((e: any) => e.id === se.id));
 
         examsToCheck.forEach(exam => {
-            if (exam?.subjects) {
-                exam.subjects.forEach((s: any) => {
-                    if (!subjectMap.has(s.subjectName)) {
-                        subjectMap.set(s.subjectName, s);
-                    }
-                });
-            }
+            getExamSubjects(exam).forEach((s: any) => {
+                if (!subjectMap.has(s.subjectName)) {
+                    subjectMap.set(s.subjectName, s);
+                }
+            });
         });
 
         // Check if we have custom ordering for the current exam

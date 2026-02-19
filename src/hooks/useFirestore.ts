@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '../lib/firebase';
 import { useSchool } from '../context/SchoolContext';
 import {
@@ -15,6 +15,24 @@ import {
 
 // Generic type for Firestore document data
 type DocumentData = Record<string, any>;
+
+// ─── Utility: get canWrite from localStorage (same source as AuthContext) ─────
+// We read from localStorage directly to avoid circular hook deps.
+const getCanWriteFromStorage = (): boolean => {
+    try {
+        const user = JSON.parse(localStorage.getItem('aischool360_user') || 'null');
+        if (!user) return false;
+        // ADMIN / SUPER_ADMIN always have write
+        if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+        const customRoles = JSON.parse(localStorage.getItem('millat_custom_roles') || '[]');
+        const roleConfig = customRoles.find((r: any) => r.role === user.role || r.id === user.role);
+        return roleConfig?.canWrite === true;
+    } catch {
+        return false;
+    }
+};
+
+const WRITE_DENIED_MSG = '🔒 Access Denied: Your role has View-Only permissions. Contact the Administrator to enable write access.';
 
 export function useFirestore<T = DocumentData>(collectionName: string, constraints: QueryConstraint[] = [], options: { skipSchoolFilter?: boolean } = {}) {
     const [data, setData] = useState<T[]>([]);
@@ -58,23 +76,40 @@ export function useFirestore<T = DocumentData>(collectionName: string, constrain
         return () => unsubscribe();
     }, [collectionName, currentSchool?.id, options.skipSchoolFilter, constraints.length]);
 
-    const add = async (item: any) => {
+    // ─── Settings / role collections are exempt from write guard ─────────────
+    // These are used internally by the app (role save, module control, etc.)
+    const EXEMPT_COLLECTIONS = ['settings'];
+    const isExempt = EXEMPT_COLLECTIONS.includes(collectionName);
+
+    const add = useCallback(async (item: any) => {
+        if (!isExempt && !getCanWriteFromStorage()) {
+            alert(WRITE_DENIED_MSG);
+            throw new Error('Write access denied');
+        }
         const dataToAdd = { ...item };
         if (currentSchool && !options.skipSchoolFilter && !['schools', 'settings'].includes(collectionName)) {
             dataToAdd.schoolId = currentSchool.id;
         }
         return await addDoc(collection(db, collectionName), dataToAdd);
-    };
+    }, [collectionName, currentSchool, options.skipSchoolFilter, isExempt]);
 
-    const update = async (id: string, item: any) => {
+    const update = useCallback(async (id: string, item: any) => {
+        if (!isExempt && !getCanWriteFromStorage()) {
+            alert(WRITE_DENIED_MSG);
+            throw new Error('Write access denied');
+        }
         const docRef = doc(db, collectionName, id);
         return await updateDoc(docRef, item);
-    };
+    }, [collectionName, isExempt]);
 
-    const remove = async (id: string) => {
+    const remove = useCallback(async (id: string) => {
+        if (!isExempt && !getCanWriteFromStorage()) {
+            alert(WRITE_DENIED_MSG);
+            throw new Error('Write access denied');
+        }
         const docRef = doc(db, collectionName, id);
         return await deleteDoc(docRef);
-    };
+    }, [collectionName, isExempt]);
 
     return { data, loading, error, add, update, remove };
 }

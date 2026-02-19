@@ -161,6 +161,19 @@ const AcademicDataManager: React.FC<AcademicDataManagerProps> = ({ onDataChange 
         }
     };
 
+    const handleToggleAllClasses = (subjectName: string) => {
+        setSubjects(subjects.map(s => {
+            if (s.name === subjectName) {
+                const isAllSelected = s.enabledFor.length === classes.length;
+                return {
+                    ...s,
+                    enabledFor: isAllSelected ? [] : classes.map(c => c.name)
+                };
+            }
+            return s;
+        }));
+    };
+
     const handleRenameSubject = (oldName: string) => {
         const newName = prompt('Enter new name for subject:', oldName);
         if (newName && newName.trim() && newName.trim() !== oldName) {
@@ -266,9 +279,9 @@ const AcademicDataManager: React.FC<AcademicDataManagerProps> = ({ onDataChange 
         return subjects.filter(s => s.enabledFor.includes(className));
     };
 
-    const filteredSubjects = subjects.filter(s =>
-        s.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredSubjects = subjects
+        .filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
 
     return (
         <div style={{ paddingBottom: '2rem' }}>
@@ -369,7 +382,7 @@ const AcademicDataManager: React.FC<AcademicDataManagerProps> = ({ onDataChange 
                                                 }
                                                 setSubjects([...subjects, {
                                                     name: name.trim(),
-                                                    enabledFor: [],
+                                                    enabledFor: classes.map(c => c.name),
                                                     chaptersPerClass: {}
                                                 }]);
                                             }
@@ -387,6 +400,7 @@ const AcademicDataManager: React.FC<AcademicDataManagerProps> = ({ onDataChange 
                                         <thead style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
                                             <tr>
                                                 <th style={{ padding: '1rem', fontSize: '0.875rem', fontWeight: 800, position: 'sticky', left: 0, background: 'var(--bg-secondary)', zIndex: 10, minWidth: '200px' }}>Subject Name</th>
+                                                <th style={{ padding: '1rem', fontSize: '0.75rem', fontWeight: 800, textAlign: 'center', minWidth: '80px', color: 'var(--primary)' }}>Toggle All</th>
                                                 {classes.map(cls => (
                                                     <th key={cls.name} style={{ padding: '1rem', fontSize: '0.75rem', fontWeight: 800, textAlign: 'center', minWidth: '80px', whiteSpace: 'nowrap' }}>
                                                         {cls.name}
@@ -407,6 +421,28 @@ const AcademicDataManager: React.FC<AcademicDataManagerProps> = ({ onDataChange 
                                                     <tr key={subject.name} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.2s' }} className="hover-row">
                                                         <td style={{ padding: '1rem', fontWeight: 700, fontSize: '0.9rem', position: 'sticky', left: 0, background: 'white', zIndex: 5, borderRight: '1px solid var(--border)' }}>
                                                             {subject.name}
+                                                        </td>
+                                                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                                                            <div
+                                                                onClick={() => handleToggleAllClasses(subject.name)}
+                                                                style={{
+                                                                    width: '28px',
+                                                                    height: '28px',
+                                                                    borderRadius: '8px',
+                                                                    margin: '0 auto',
+                                                                    cursor: 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    transition: 'all 0.2s',
+                                                                    background: subject.enabledFor.length === classes.length ? 'var(--primary)' : subject.enabledFor.length > 0 ? 'rgba(99, 102, 241, 0.4)' : '#f1f5f9',
+                                                                    color: 'white',
+                                                                    boxShadow: subject.enabledFor.length > 0 ? '0 2px 4px rgba(99, 102, 241, 0.2)' : 'none'
+                                                                }}
+                                                                title={subject.enabledFor.length === classes.length ? 'Deselect All Classes' : 'Select All Classes'}
+                                                            >
+                                                                {subject.enabledFor.length === classes.length ? <Check size={18} /> : subject.enabledFor.length > 0 ? <Plus size={16} /> : <X size={16} style={{ color: '#94a3b8' }} />}
+                                                            </div>
                                                         </td>
                                                         {classes.map(cls => (
                                                             <td key={cls.name} style={{ padding: '0.5rem', textAlign: 'center' }}>

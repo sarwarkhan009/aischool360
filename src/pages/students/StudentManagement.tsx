@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSchool } from '../../context/SchoolContext';
+import { useAuth } from '../../context/AuthContext';
+import { Permission } from '../../types/rbac';
 import { useFirestore } from '../../hooks/useFirestore';
 import { formatDate, formatDateTime } from '../../utils/dateUtils';
 import { formatClassSectionShort, toProperCase } from '../../utils/formatters';
@@ -14,6 +16,7 @@ const StudentManagement: React.FC = () => {
     const navigate = useNavigate();
     const { currentSchool } = useSchool();
     const { schoolId } = useParams();
+    const { hasPermission } = useAuth();
     const [printingStudent, setPrintingStudent] = useState<any | null>(null);
     const [isPrintingReport, setIsPrintingReport] = useState(false);
     const { data: students, loading, update: updateStudent, remove: removeStudent } = useFirestore<any>('students');
@@ -88,31 +91,6 @@ const StudentManagement: React.FC = () => {
         }
     };
 
-    const handleAssignRoll = async () => {
-        if (!selectedClass) {
-            alert('Please select a class first');
-            return;
-        }
-
-        const classStudents = students.filter(s =>
-            s.class === selectedClass &&
-            (selectedSession === '' || s.session === selectedSession) &&
-            (selectedSection === '' || s.section === selectedSection)
-        );
-
-        if (classStudents.length === 0) {
-            alert('No students found in the selected class/session');
-            return;
-        }
-
-        const sorted = [...classStudents].sort((a, b) => (a.name || a.fullName).localeCompare(b.name || b.fullName));
-
-        for (let i = 0; i < sorted.length; i++) {
-            await updateStudent(sorted[i].id, { rollNo: (i + 1).toString() });
-        }
-
-        alert(`Roll numbers assigned to ${sorted.length} students in Class ${selectedClass}`);
-    };
 
     const handleCleanData = async () => {
         const filteredCount = allFilteredStudents.length;
@@ -207,6 +185,7 @@ const StudentManagement: React.FC = () => {
                 chunk.forEach(student => {
                     if (student.class) {
                         const classFees = feeAmounts.filter((fa: any) =>
+                            (fa.financialYear === activeFY || (!fa.financialYear && !activeFY)) &&
                             fa.className === student.class &&
                             fa.feeTypeName &&
                             fa.feeTypeName.toLowerCase().includes('monthly')
@@ -270,7 +249,7 @@ const StudentManagement: React.FC = () => {
 
     const allFilteredStudents = students.filter(s => {
         // Robust filtering: match if filter is empty OR property includes selection (to handle "Class VI" vs "VI")
-        const matchesSession = !selectedSession || (s.session && s.session === selectedSession);
+        const matchesSession = selectedSession === 'ALL' || !selectedSession || (s.session && s.session === selectedSession) || (!s.session && !selectedSession);
         const matchesClass = !selectedClass || (s.class && (s.class === selectedClass || s.class.endsWith(' ' + selectedClass)));
         const matchesSection = !selectedSection || (s.section && s.section.toUpperCase() === selectedSection.toUpperCase()) || !s.section;
         const matchesStatus = selectedStatus === 'ALL' || (s.status && s.status.toUpperCase() === selectedStatus.toUpperCase());
@@ -660,23 +639,26 @@ const StudentManagement: React.FC = () => {
                                 <FileText size={16} />
                             </button>
                         </div>
-                        <button className="btn btn-primary hover-lift hover-glow" onClick={() => navigate(`/${schoolId}/students/admission`)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem' }}>
-                            <UserPlus size={20} /> New Admission
-                        </button>
+                        {hasPermission(Permission.ADMIT_STUDENT) && (
+                            <button className="btn btn-primary hover-lift hover-glow" onClick={() => navigate(`/${schoolId}/students/admission`)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem' }}>
+                                <UserPlus size={20} /> New Admission
+                            </button>
+                        )}
                     </div>
                 </div>
 
                 <div className="glass-card animate-slide-up" style={{ padding: '0' }}>
                     <div className="filters-bar" style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', background: '#f8f9fa' }}>
                         <div className="filter-group" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', flex: 1 }}>
-                            <button className="btn-success-small hover-lift" onClick={handleAssignRoll} style={{ background: '#22c55e', padding: '0.625rem 1.25rem', height: '40px' }}>ASSIGN NEW ROLL</button>
-                            <button
-                                className="btn hover-lift"
-                                onClick={handleGeneratePins}
-                                style={{ background: '#3b82f6', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                            >
-                                <Settings size={14} /> GENERATE PIN
-                            </button>
+                            {hasPermission(Permission.ADMIT_STUDENT) && (
+                                <button
+                                    className="btn hover-lift"
+                                    onClick={handleGeneratePins}
+                                    style={{ background: '#3b82f6', color: 'white', padding: '0.625rem 1.25rem', height: '40px', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                >
+                                    <Settings size={14} /> GENERATE PIN
+                                </button>
+                            )}
                             <button
                                 className="btn hover-lift"
                                 onClick={handleFixFees}
@@ -695,7 +677,7 @@ const StudentManagement: React.FC = () => {
                                     <Settings size={14} /> {isProcessing ? 'FIXING...' : 'FIX SESSION'}
                                 </button>
                             )}
-                            {showCleanButton && (
+                            {showCleanButton && hasPermission(Permission.ADMIT_STUDENT) && (
                                 <button
                                     className="btn hover-lift"
                                     onClick={handleCleanData}
@@ -710,6 +692,7 @@ const StudentManagement: React.FC = () => {
                                 value={selectedSession}
                                 onChange={(e) => setSelectedSession(e.target.value)}
                             >
+                                <option value="ALL">All Sessions</option>
                                 {schoolYears.map(s => (
                                     <option key={s} value={s}>{s}</option>
                                 ))}
@@ -891,13 +874,15 @@ const StudentManagement: React.FC = () => {
                                             </td>
                                             <td style={{ padding: '1.25rem 1rem' }}>
                                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                    <button
-                                                        className="btn-icon"
-                                                        onClick={() => navigate(`/${schoolId}/students/admission`, { state: { editMode: true, student: stu } })}
-                                                        title="Edit"
-                                                    >
-                                                        <Edit2 size={16} />
-                                                    </button>
+                                                    {hasPermission(Permission.ADMIT_STUDENT) && (
+                                                        <button
+                                                            className="btn-icon"
+                                                            onClick={() => navigate(`/${schoolId}/students/admission`, { state: { editMode: true, student: stu } })}
+                                                            title="Edit"
+                                                        >
+                                                            <Edit2 size={16} />
+                                                        </button>
+                                                    )}
                                                     <button className="btn-icon" onClick={() => handlePrint(stu)} title="Print ID Card"><FileText size={16} /></button>
                                                 </div>
                                             </td>

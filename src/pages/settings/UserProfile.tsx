@@ -1,4 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
+
+interface AcademicRecord {
+    examPassed: string;
+    school: string;
+    board: string;
+    passingYear: string;
+    percentage: string;
+    cgpaGrade: string;
+    docUrl1: string;
+    docUrl2: string;
+}
 import { useAuth } from '../../context/AuthContext';
 import {
     User,
@@ -37,14 +48,19 @@ import {
     Globe,
     Building2,
     Clock,
-    Edit2
+    Edit2,
+    Plus,
+    Trash2,
+    Upload,
+    Award
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { compressImage } from '../../utils/imageUtils';
 import { toProperCase } from '../../utils/formatters';
+import ErrorBoundary from '../../components/ErrorBoundary';
 
-type ProfileSection = 'GENERAL' | 'SECURITY' | 'KYC' | 'PROFESSIONAL' | 'FAMILY' | 'FINANCIAL' | 'ADDRESS' | 'SOCIAL';
+type ProfileSection = 'GENERAL' | 'SECURITY' | 'KYC' | 'PROFESSIONAL' | 'ACADEMIC' | 'FAMILY' | 'FINANCIAL' | 'ADDRESS' | 'SOCIAL';
 
 export default function UserProfile() {
     const { user, login } = useAuth();
@@ -106,6 +122,9 @@ export default function UserProfile() {
         specialization: '',
         emergencyContact: '',
         pin: '',
+        // Academic History
+        academicHistory: [] as AcademicRecord[],
+        activityCertificates: [] as string[],
     });
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -241,6 +260,10 @@ export default function UserProfile() {
                                 twitterUrl: data.twitterUrl || '',
                                 linkedinUrl: data.linkedinUrl || '',
                                 instagramUrl: data.instagramUrl || '',
+
+                                // Academic History
+                                academicHistory: data.academicHistory || [],
+                                activityCertificates: data.activityCertificates || [],
                             }));
                         }
                     }
@@ -495,9 +518,14 @@ export default function UserProfile() {
                                 <Shield size={18} /> Governance & KYC
                             </button>
                             {user?.role === 'TEACHER' && (
-                                <button className={`nav-link ${activeTab === 'PROFESSIONAL' ? 'active' : ''}`} onClick={() => setActiveTab('PROFESSIONAL')}>
-                                    <Briefcase size={18} /> Professional
-                                </button>
+                                <>
+                                    <button className={`nav-link ${activeTab === 'PROFESSIONAL' ? 'active' : ''}`} onClick={() => setActiveTab('PROFESSIONAL')}>
+                                        <Briefcase size={18} /> Professional
+                                    </button>
+                                    <button className={`nav-link ${activeTab === 'ACADEMIC' ? 'active' : ''}`} onClick={() => setActiveTab('ACADEMIC')}>
+                                        <Award size={18} /> Academic History
+                                    </button>
+                                </>
                             )}
                             {user?.role === 'TEACHER' && (
                                 <button className={`nav-link ${activeTab === 'FINANCIAL' ? 'active' : ''}`} onClick={() => setActiveTab('FINANCIAL')}>
@@ -839,6 +867,292 @@ export default function UserProfile() {
                         </div>
                     )}
 
+                    {activeTab === 'ACADEMIC' && user?.role === 'TEACHER' && (
+                        <ErrorBoundary>
+                            <div className="explorer-section animate-slide-up">
+                                <div className="glass-card section-card">
+                                    <div className="section-head">
+                                        <div className="section-icon" style={{ background: '#8b5cf6' }}><Award size={20} /></div>
+                                        <div>
+                                            <h4>Academic Qualifications</h4>
+                                            <p>Your educational history and certifications.</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Qualifications Table */}
+                                    <div style={{ overflowX: 'auto' }}>
+                                        {profileData.academicHistory.length === 0 && !isEditing ? (
+                                            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#94a3b8' }}>
+                                                <GraduationCap size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                                                <p style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>No qualifications added yet</p>
+                                                <p style={{ fontSize: '0.8rem' }}>Click "Edit Profile" then add your academic records.</p>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                {profileData.academicHistory.map((record, idx) => (
+                                                    <div key={idx} style={{
+                                                        background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '1.25rem',
+                                                        padding: '1.5rem', marginBottom: '1rem', position: 'relative'
+                                                    }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                                            <h5 style={{ fontWeight: 800, fontSize: '0.85rem', color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                                                                Qualification #{idx + 1}
+                                                            </h5>
+                                                            {isEditing && (
+                                                                <button onClick={() => {
+                                                                    const updated = profileData.academicHistory.filter((_, i) => i !== idx);
+                                                                    setProfileData({ ...profileData, academicHistory: updated });
+                                                                }} style={{
+                                                                    background: 'rgba(239,68,68,0.1)', border: 'none', color: '#ef4444',
+                                                                    padding: '0.4rem 0.75rem', borderRadius: '0.75rem', cursor: 'pointer',
+                                                                    fontSize: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem'
+                                                                }}>
+                                                                    <Trash2 size={14} /> Remove
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+                                                            <div className="p-input-group">
+                                                                <label>Exam Passed</label>
+                                                                <input type="text" className="academic-input" value={record.examPassed} disabled={!isEditing}
+                                                                    onChange={e => {
+                                                                        const updated = [...profileData.academicHistory];
+                                                                        updated[idx] = { ...updated[idx], examPassed: e.target.value };
+                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                    }} placeholder="e.g. 10th, B.Ed" />
+                                                            </div>
+                                                            <div className="p-input-group">
+                                                                <label>School / College</label>
+                                                                <input type="text" className="academic-input" value={record.school} disabled={!isEditing}
+                                                                    onChange={e => {
+                                                                        const updated = [...profileData.academicHistory];
+                                                                        updated[idx] = { ...updated[idx], school: e.target.value };
+                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                    }} placeholder="Institution Name" />
+                                                            </div>
+                                                            <div className="p-input-group">
+                                                                <label>Board / University</label>
+                                                                <input type="text" className="academic-input" value={record.board} disabled={!isEditing}
+                                                                    onChange={e => {
+                                                                        const updated = [...profileData.academicHistory];
+                                                                        updated[idx] = { ...updated[idx], board: e.target.value };
+                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                    }} placeholder="e.g. CBSE, BSEB" />
+                                                            </div>
+                                                            <div className="p-input-group">
+                                                                <label>Passing Year</label>
+                                                                <input type="text" className="academic-input" value={record.passingYear} disabled={!isEditing}
+                                                                    onChange={e => {
+                                                                        const updated = [...profileData.academicHistory];
+                                                                        updated[idx] = { ...updated[idx], passingYear: e.target.value };
+                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                    }} placeholder="e.g. 2018" maxLength={4} />
+                                                            </div>
+                                                            <div className="p-input-group">
+                                                                <label>% Marks</label>
+                                                                <input type="text" className="academic-input" value={record.percentage} disabled={!isEditing}
+                                                                    onChange={e => {
+                                                                        const updated = [...profileData.academicHistory];
+                                                                        updated[idx] = { ...updated[idx], percentage: e.target.value };
+                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                    }} placeholder="e.g. 85.5" />
+                                                            </div>
+                                                            <div className="p-input-group">
+                                                                <label>CGPA / Grade</label>
+                                                                <input type="text" className="academic-input" value={record.cgpaGrade} disabled={!isEditing}
+                                                                    onChange={e => {
+                                                                        const updated = [...profileData.academicHistory];
+                                                                        updated[idx] = { ...updated[idx], cgpaGrade: e.target.value };
+                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                    }} placeholder="e.g. 8.5 / A+" />
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Document Uploads */}
+                                                        <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                                            {[0, 1].map(docIdx => {
+                                                                const fieldKey = docIdx === 0 ? 'docUrl1' : 'docUrl2';
+                                                                const docValue = (record as any)[fieldKey];
+                                                                return (
+                                                                    <div key={docIdx} style={{
+                                                                        flex: '1 1 200px', maxWidth: '280px', background: 'white', border: '1px solid #e2e8f0',
+                                                                        borderRadius: '1rem', padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem'
+                                                                    }}>
+                                                                        {docValue ? (
+                                                                            <>
+                                                                                <img src={docValue} alt={`Doc ${docIdx + 1}`} style={{
+                                                                                    width: '48px', height: '48px', objectFit: 'cover', borderRadius: '0.5rem', cursor: 'pointer',
+                                                                                    border: '1px solid #e2e8f0'
+                                                                                }} onClick={() => setPreviewDoc({ url: docValue, label: `Qualification #${idx + 1} — Document ${docIdx + 1}` })} />
+                                                                                <div style={{ flex: 1 }}>
+                                                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#10b981' }}>Document {docIdx + 1} ✓</span>
+                                                                                    <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: '0.15rem 0 0' }}>Click to preview</p>
+                                                                                </div>
+                                                                                {isEditing && (
+                                                                                    <button onClick={() => {
+                                                                                        const updated = [...profileData.academicHistory];
+                                                                                        updated[idx] = { ...updated[idx], [fieldKey]: '' };
+                                                                                        setProfileData({ ...profileData, academicHistory: updated });
+                                                                                    }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.25rem' }}>
+                                                                                        <X size={16} />
+                                                                                    </button>
+                                                                                )}
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <div style={{ width: '48px', height: '48px', background: '#f1f5f9', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                                                    <FileText size={20} />
+                                                                                </div>
+                                                                                <div style={{ flex: 1 }}>
+                                                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>Document {docIdx + 1}</span>
+                                                                                    <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: '0.15rem 0 0' }}>{isEditing ? 'Click upload' : 'Not uploaded'}</p>
+                                                                                </div>
+                                                                                {isEditing && (
+                                                                                    <label style={{ cursor: 'pointer', background: 'rgba(99,102,241,0.1)', color: '#6366f1', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                                                                        <Upload size={12} /> Upload
+                                                                                        <input type="file" hidden accept="image/*" onChange={async (e) => {
+                                                                                            const file = e.target.files?.[0];
+                                                                                            if (!file) return;
+                                                                                            try {
+                                                                                                const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                                                                                const updated = [...profileData.academicHistory];
+                                                                                                updated[idx] = { ...updated[idx], [fieldKey]: compressed };
+                                                                                                setProfileData({ ...profileData, academicHistory: updated });
+                                                                                            } catch (err) { alert('Failed to process image'); }
+                                                                                        }} />
+                                                                                    </label>
+                                                                                )}
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </>
+                                        )}
+
+                                        {isEditing && (
+                                            <button onClick={() => {
+                                                setProfileData({
+                                                    ...profileData,
+                                                    academicHistory: [...profileData.academicHistory, {
+                                                        examPassed: '', school: '', board: '', passingYear: '', percentage: '', cgpaGrade: '', docUrl1: '', docUrl2: ''
+                                                    }]
+                                                });
+                                            }} style={{
+                                                background: 'rgba(99,102,241,0.1)', border: '2px dashed #6366f1', color: '#6366f1',
+                                                padding: '1rem', borderRadius: '1rem', cursor: 'pointer', width: '100%',
+                                                fontSize: '0.875rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                                                marginTop: '0.5rem'
+                                            }}>
+                                                <Plus size={18} /> Add Qualification
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Activity Certificates */}
+                                <div className="glass-card section-card" style={{ marginTop: '1.5rem' }}>
+                                    <div className="section-head">
+                                        <div className="section-icon" style={{ background: '#f59e0b' }}><Award size={20} /></div>
+                                        <div>
+                                            <h4>Other Activity Certificates</h4>
+                                            <p>Upload certificates for workshops, training, sports, and extracurriculars.</p>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
+                                        {profileData.activityCertificates.map((certUrl, idx) => (
+                                            <div key={idx} style={{
+                                                background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '1rem',
+                                                padding: '1rem', textAlign: 'center', position: 'relative'
+                                            }}>
+                                                {certUrl ? (
+                                                    <>
+                                                        <img src={certUrl} alt={`Certificate ${idx + 1}`} style={{
+                                                            width: '100%', height: '120px', objectFit: 'cover', borderRadius: '0.75rem',
+                                                            cursor: 'pointer', border: '1px solid #e2e8f0', marginBottom: '0.5rem'
+                                                        }} onClick={() => setPreviewDoc({ url: certUrl, label: `Activity Certificate #${idx + 1}` })} />
+                                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#10b981' }}>Certificate #{idx + 1} ✓</span>
+                                                        {isEditing && (
+                                                            <button onClick={() => {
+                                                                const updated = profileData.activityCertificates.filter((_, i) => i !== idx);
+                                                                setProfileData({ ...profileData, activityCertificates: updated });
+                                                            }} style={{
+                                                                position: 'absolute', top: '0.5rem', right: '0.5rem', background: 'rgba(239,68,68,0.9)',
+                                                                border: 'none', color: 'white', width: '24px', height: '24px', borderRadius: '50%',
+                                                                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                            }}>
+                                                                <X size={14} />
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div style={{
+                                                            width: '100%', height: '120px', background: '#f1f5f9', borderRadius: '0.75rem',
+                                                            display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
+                                                            color: '#94a3b8', marginBottom: '0.5rem'
+                                                        }}>
+                                                            <FileText size={28} />
+                                                            <span style={{ fontSize: '0.65rem', marginTop: '0.35rem' }}>Empty Slot</span>
+                                                        </div>
+                                                        {isEditing && (
+                                                            <label style={{
+                                                                cursor: 'pointer', background: 'rgba(99,102,241,0.1)', color: '#6366f1',
+                                                                padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.7rem',
+                                                                fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.3rem'
+                                                            }}>
+                                                                <Upload size={12} /> Upload
+                                                                <input type="file" hidden accept="image/*" onChange={async (e) => {
+                                                                    const file = e.target.files?.[0];
+                                                                    if (!file) return;
+                                                                    try {
+                                                                        const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                                                        const updated = [...profileData.activityCertificates];
+                                                                        updated[idx] = compressed;
+                                                                        setProfileData({ ...profileData, activityCertificates: updated });
+                                                                    } catch (err) { alert('Failed to process image'); }
+                                                                }} />
+                                                            </label>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        ))}
+
+                                        {isEditing && (
+                                            <div onClick={() => {
+                                                setProfileData({
+                                                    ...profileData,
+                                                    activityCertificates: [...profileData.activityCertificates, '']
+                                                });
+                                            }} style={{
+                                                background: 'rgba(245,158,11,0.05)', border: '2px dashed #f59e0b', borderRadius: '1rem',
+                                                padding: '1rem', textAlign: 'center', cursor: 'pointer', minHeight: '160px',
+                                                display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center',
+                                                color: '#f59e0b', gap: '0.5rem', transition: 'all 0.2s'
+                                            }}>
+                                                <Plus size={24} />
+                                                <span style={{ fontSize: '0.75rem', fontWeight: 800 }}>Add Certificate</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {profileData.activityCertificates.length === 0 && !isEditing && (
+                                        <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8' }}>
+                                            <Award size={40} style={{ margin: '0 auto 0.75rem', opacity: 0.3 }} />
+                                            <p style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.25rem' }}>No certificates uploaded</p>
+                                            <p style={{ fontSize: '0.8rem' }}>Edit profile to upload your activity certificates.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </ErrorBoundary>
+                    )}
+
                     {activeTab === 'FINANCIAL' && user?.role === 'TEACHER' && (
                         <div className="explorer-section animate-slide-up">
                             <div className="glass-card section-card">
@@ -1140,6 +1454,9 @@ export default function UserProfile() {
                 .i-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: #94a3b8; }
                 .input-with-icon input { width: 100%; padding: 0.85rem 1.25rem 0.85rem 2.85rem; border: 1px solid #e2e8f0; border-radius: 1rem; outline: none; transition: all 0.2s; font-size: 0.9375rem; font-weight: 600; }
                 .premium-select { width: 100%; padding: 0.85rem 1.25rem; border: 1px solid #e2e8f0; border-radius: 1rem; outline: none; font-size: 0.9375rem; font-weight: 600; background: white; }
+                .academic-input { width: 100%; padding: 0.75rem 1rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; outline: none; transition: all 0.2s; font-size: 0.875rem; font-weight: 600; background: white; }
+                .academic-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+                .academic-input:disabled { background: #f8fafc; color: #475569; }
                 
                 .btn-premium { background: var(--primary, #6366f1); color: white; border: none; padding: 0.875rem 1.5rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; cursor: pointer; display: flex; align-items: center; justifyContent: center; gap: 0.75rem; transition: all 0.2s; box-shadow: 0 4px 15px rgba(99,102,241,0.25); }
                 .btn-premium-outline { background: white; border: 1px solid #e2e8f0; color: #1e293b; padding: 0.875rem 1.5rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; cursor: pointer; transition: all 0.2s; }

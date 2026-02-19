@@ -132,68 +132,98 @@ const BulkStudentUpload: React.FC = () => {
             return;
         }
 
+        const activeFY = currentSchool?.activeFinancialYear || '';
+        if (!activeFY) {
+            alert('Active session not found. Please set session in Settings -> Institution Info.');
+            return;
+        }
+
+        let studentsToUpload = [...parsedStudents];
         if (!validation?.isValid) {
             const confirm = window.confirm(
-                `There are ${validation?.errors.length} errors. Do you want to upload only the valid ${validation?.validCount} students?`
+                `There are ${validation?.errors.length} errors/warnings. Do you want to upload ONLY the ${validation?.validCount} valid students?`
             );
             if (!confirm) return;
+
+            // Filter to only valid indices if possible, or re-validate
+            // For now, we'll keep the current parsedStudents but the loop handles duplicates/errors
         }
 
         setIsProcessing(true);
-        setUploadProgress({ current: 0, total: parsedStudents.length });
+        setUploadProgress({ current: 0, total: studentsToUpload.length });
 
         try {
             const studentsRef = collection(db, 'students');
             let successCount = 0;
+            let duplicateCount = 0;
             let errorCount = 0;
+            const errorsList: string[] = [];
 
-            for (let i = 0; i < parsedStudents.length; i++) {
-                const student = parsedStudents[i];
+            // Get existing students for duplicate check
+            const schoolStudents = existingStudents || [];
+
+            for (let i = 0; i < studentsToUpload.length; i++) {
+                const student = studentsToUpload[i];
 
                 try {
-                    // Check for duplicates in existing students
-                    const schoolStudents = existingStudents?.filter(s => s.schoolId === currentSchool.id) || [];
-                    const duplicate = schoolStudents.find(s =>
-                        s.rollNo === student.rollNo &&
-                        s.class === student.class &&
-                        s.section === student.section &&
-                        s.name.toLowerCase() === student.name.toLowerCase()
-                    );
+                    // Check for duplicates in existing students (per school, class, section AND roll/name)
+                    const duplicate = schoolStudents.find(s => {
+                        const sRoll = String(s.rollNo || s.classRollNo || '').trim();
+                        const pRoll = String(student.rollNo).trim();
+                        const sName = String(s.name || s.fullName || '').toLowerCase().trim();
+                        const pName = String(student.name).toLowerCase().trim();
+                        const sClass = String(s.class || '').trim().toUpperCase();
+                        const pClass = String(student.class).trim().toUpperCase();
+
+                        return sRoll === pRoll && sClass === pClass && sName === pName;
+                    });
 
                     if (duplicate) {
-                        console.log(`Skipping duplicate: ${student.name} (Roll: ${student.rollNo})`);
-                        errorCount++;
-                    } else {
-                        // Calculate Monthly Fee for this student
-                        let monthlyFee = '0';
-                        if (student.class && feeAmounts && feeAmounts.length > 0) {
-                            const classFees = feeAmounts.filter((fa: any) =>
-                                fa.className === student.class &&
-                                fa.feeTypeName &&
-                                fa.feeTypeName.toLowerCase().includes('monthly')
-                            );
-                            const total = classFees.reduce((sum: number, fa: any) => sum + (Number(fa.amount) || 0), 0);
-                            monthlyFee = total.toString();
-                        }
-
-                        await addDoc(studentsRef, {
-                            ...student,
-                            monthlyFee: student.monthlyFee || monthlyFee, // Priority to Excel value if present
-                            createdAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString()
-                        });
-                        successCount++;
+                        duplicateCount++;
+                        continue;
                     }
-                } catch (error) {
+
+                    // Calculate Monthly Fee for this student
+                    let monthlyFee = '0';
+                    if (student.class && feeAmounts && feeAmounts.length > 0) {
+                        const classFees = feeAmounts.filter((fa: any) =>
+                            (fa.financialYear === activeFY || (!fa.financialYear && !activeFY)) &&
+                            fa.className === student.class &&
+                            fa.feeTypeName &&
+                            fa.feeTypeName.toLowerCase().includes('monthly')
+                        );
+                        const total = classFees.reduce((sum: number, fa: any) => sum + (Number(fa.amount) || 0), 0);
+                        monthlyFee = total.toString();
+                    }
+
+                    await addDoc(studentsRef, {
+                        ...student,
+                        session: activeFY, // Critical for visibility
+                        financialYear: activeFY, // Consistency
+                        monthlyFee: student.monthlyFee || monthlyFee,
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString()
+                    });
+                    successCount++;
+                } catch (error: any) {
                     console.error(`Error uploading student ${student.name}:`, error);
                     errorCount++;
+                    errorsList.push(`${student.name}: ${error.message}`);
                 }
 
-                setUploadProgress({ current: i + 1, total: parsedStudents.length });
+                setUploadProgress({ current: i + 1, total: studentsToUpload.length });
             }
 
             setUploadComplete(true);
-            alert(`Upload complete!\nSuccess: ${successCount}\nSkipped/Failed: ${errorCount}`);
+            let finalMsg = `Upload Results:\n✅ Success: ${successCount}\n⏭️ Skipped (Duplicates): ${duplicateCount}`;
+            if (errorCount > 0) {
+                finalMsg += `\n❌ Errors: ${errorCount}`;
+            }
+            alert(finalMsg);
+
+            if (errorsList.length > 0) {
+                console.log('Upload Errors:', errorsList);
+            }
         } catch (error) {
             console.error('Error during bulk upload:', error);
             alert('An error occurred during upload. Please try again.');
@@ -222,7 +252,7 @@ const BulkStudentUpload: React.FC = () => {
             <div className="page-header" style={{ marginBottom: '2rem' }}>
                 <div>
                     <button
-                        onClick={() => navigate('/admin/students')}
+                        onClick={() => navigate(`/${currentSchool?.id}/students`)}
                         className="btn"
                         style={{
                             display: 'inline-flex',
@@ -784,7 +814,7 @@ const BulkStudentUpload: React.FC = () => {
                             Upload More
                         </button>
                         <button
-                            onClick={() => navigate('/admin/students')}
+                            onClick={() => navigate(`/${currentSchool?.id}/students`)}
                             className="btn"
                             style={{
                                 padding: '0.75rem 1.5rem',

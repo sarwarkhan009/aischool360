@@ -67,6 +67,7 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
 
     const MONTH_MAP = getMonthIndexMap();
     const academicStartMonthIdx = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];
+    const activeFY = currentSchool?.activeFinancialYear || '2025-26';
 
     const feeMetrics = React.useMemo(() => {
         if (!studentData || feeTypes.length === 0 || feeAmounts.length === 0) {
@@ -74,9 +75,16 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
             return { payable: dues, paid: 0, balance: dues, payableDetails: [] };
         }
 
+        // Filter fee amounts by active financial year to match Admin's logic
+        const currentFeeAmounts = feeAmounts.filter(fa =>
+            ((fa as any).financialYear || '2025-26') === activeFY
+        );
+
         const today = new Date();
         const currentYear = today.getFullYear();
         const currentMonth = today.getMonth(); // 0-11
+
+        // Match DueReport.tsx session start logic
         const sessionStartYear = currentMonth >= academicStartMonthIdx ? currentYear : currentYear - 1;
         const sessionStartDate = new Date(sessionStartYear, academicStartMonthIdx, 1);
 
@@ -109,15 +117,21 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
 
             // Check if fee type's classes array includes the student's class
             let matchesClass = type.classes?.includes(studentData.class || '');
-            // Fallback: check fee_amounts if fee type classes list is stale
+
+            // Fallback: check currentFeeAmounts
             if (!matchesClass && studentData.class) {
-                const hasAmountForClass = feeAmounts.some(fa => fa.feeTypeId === type.id && fa.className === studentData.class);
+                const hasAmountForClass = currentFeeAmounts.some(fa => fa.feeTypeId === type.id && fa.className === studentData.class);
                 if (hasAmountForClass) matchesClass = true;
             }
 
             if (matchesClass && matchesStudentType) {
-                const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === studentData.class);
+                const amountConfig = currentFeeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === studentData.class);
                 if (!amountConfig || !amountConfig.amount) return;
+
+                // Handle custom monthly fee (Discount)
+                const isMonthlyFee = type.feeHeadName?.toLowerCase().includes('monthly');
+                const studentMonthlyFee = studentData.monthlyFee ? parseFloat(studentData.monthlyFee) : null;
+                const useStudentFee = isMonthlyFee && studentMonthlyFee && studentMonthlyFee > 0;
 
                 type.months?.forEach((monthName: string) => {
                     let isDue = false;
@@ -125,8 +139,8 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                     if (monthName === 'Admission_month') {
                         if (admType === 'OLD') {
                             isDue = true;
-                        } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
-                            isDue = true;
+                        } else if (admType === 'NEW' && admDateRaw) {
+                            isDue = today >= admDateRaw;
                         }
                     } else {
                         const targetMonthIdx = MONTH_MAP[monthName];
@@ -145,28 +159,66 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                     }
 
                     if (isDue) {
-                        totalPayable += Number(amountConfig.amount);
+                        const finalAmount = useStudentFee ? studentMonthlyFee! : Number(amountConfig.amount);
+                        totalPayable += finalAmount;
                         payableDetails.push({
                             head: type.feeHeadName,
                             month: monthName.replace('_month', ' (Joining Month)'),
-                            amount: amountConfig.amount
+                            amount: finalAmount
                         });
                     }
                 });
             }
         });
 
-        const totalPaid = history
-            .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate)
-            .reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
+        // Sort payableDetails: Admission Fees first, then by academic month order
+        payableDetails.sort((a, b) => {
+            const headA = a.head.toLowerCase();
+            const headB = b.head.toLowerCase();
+
+            // 1. Admission Fee priority (especially for NEW students, though logic applies to any head with 'admission')
+            const aIsAdmission = headA.includes('admission');
+            const bIsAdmission = headB.includes('admission');
+            if (aIsAdmission && !bIsAdmission) return -1;
+            if (!aIsAdmission && bIsAdmission) return 1;
+
+            // 2. Sort by Month Order
+            const getMonthSortValue = (monthStr: string) => {
+                // If it's a joining month fee that isn't explicitly an 'admission' head, 
+                // we treat it as the very first month
+                if (monthStr.toLowerCase().includes('joining month') || monthStr.toLowerCase().includes('admission')) {
+                    return -1;
+                }
+
+                const cleanMonth = monthStr.split(' ')[0]; // Extract "April" from "April (Joining Month)" etc
+                const idx = MONTH_MAP[cleanMonth];
+                if (idx === undefined) return 100;
+
+                // Calculate position relative to academic start month
+                return (idx - academicStartMonthIdx + 12) % 12;
+            };
+
+            const valA = getMonthSortValue(a.month);
+            const valB = getMonthSortValue(b.month);
+
+            if (valA !== valB) return valA - valB;
+            return headA.localeCompare(headB);
+        });
+
+        const sessionPayments = history
+            .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate);
+
+        const totalPaid = sessionPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
+        const totalDiscount = sessionPayments.reduce((sum, c) => sum + (Number(c.discount) || 0), 0);
 
         return {
             payable: totalPayable,
             paid: totalPaid,
-            balance: totalPayable - totalPaid,
+            totalDiscount,
+            balance: totalPayable - totalPaid - totalDiscount,
             payableDetails
         };
-    }, [studentData, feeTypes, feeAmounts, history]);
+    }, [studentData, feeTypes, feeAmounts, history, activeFY, academicStartMonthIdx]);
 
 
     return (
@@ -215,6 +267,19 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                                 <p style={{ fontWeight: 900, fontSize: '1.1rem', color: '#34d399' }}>₹{feeMetrics.paid?.toLocaleString('en-IN')}</p>
                             </div>
                         </div>
+                        {(feeMetrics.totalDiscount || 0) > 0 && (
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingTop: '1rem',
+                                marginTop: '1rem',
+                                borderTop: '1px solid rgba(255,255,255,0.1)'
+                            }}>
+                                <p style={{ fontSize: '0.65rem', fontWeight: 800, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Discount Given</p>
+                                <p style={{ fontWeight: 900, fontSize: '1.1rem', color: '#a78bfa' }}>₹{feeMetrics.totalDiscount.toLocaleString('en-IN')}</p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Payable Details Section */}
@@ -239,9 +304,21 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                                     </div>
                                 ))}
                                 <div className="detail-footer">
-                                    <span>Total Payable</span>
+                                    <span>Gross Payable</span>
                                     <span>₹{feeMetrics.payable.toLocaleString('en-IN')}</span>
                                 </div>
+                                {(feeMetrics.totalDiscount || 0) > 0 && (
+                                    <div className="detail-footer" style={{ color: '#10b981', borderTop: 'none', marginTop: 0, paddingTop: '0.5rem' }}>
+                                        <span>Discount</span>
+                                        <span>- ₹{feeMetrics.totalDiscount.toLocaleString('en-IN')}</span>
+                                    </div>
+                                )}
+                                {(feeMetrics.totalDiscount || 0) > 0 && (
+                                    <div className="detail-footer" style={{ borderTop: '2px solid #e2e8f0', marginTop: '0.25rem' }}>
+                                        <span>Net Payable</span>
+                                        <span>₹{(feeMetrics.payable - feeMetrics.totalDiscount).toLocaleString('en-IN')}</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -389,7 +466,7 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                     .history-item > div:last-child { width: 100%; flex-direction: row; justify-content: space-between; border-top: 1px solid #f1f5f9; paddingTop: 1rem; }
                 }
             `}</style>
-        </div>
+        </div >
     );
 };
 

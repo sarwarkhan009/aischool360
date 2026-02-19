@@ -18,11 +18,30 @@ import {
     MapPin,
     ExternalLink,
     Phone,
-    Mail
+    Mail,
+    Trash2,
+    Plus,
+    Save,
+    Edit2,
+    Trash,
+    Upload,
+    Award
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { useSchool } from '../../context/SchoolContext';
+import { compressImage } from '../../utils/imageUtils';
+
+interface AcademicRecord {
+    examPassed: string;
+    school: string;
+    board: string;
+    passingYear: string;
+    percentage: string;
+    cgpaGrade: string;
+    docUrl1: string;
+    docUrl2: string;
+}
 
 interface ProfileData {
     id: string;
@@ -38,6 +57,15 @@ interface ProfileData {
     qualification?: string;
     experience?: string;
     updatedAt?: any;
+    // Academic History
+    academicHistory?: AcademicRecord[];
+    activityCertificates?: string[];
+    // Financial (part of 'sabhi chiz')
+    accountTitle?: string;
+    accountNo?: string;
+    bankName?: string;
+    ifscCode?: string;
+    branchName?: string;
     // For Parent profile mapping
     fatherName?: string;
     motherName?: string;
@@ -53,6 +81,9 @@ export default function ProfileVerificationCenter() {
     const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
     const [isVerifying, setIsVerifying] = useState(false);
     const [previewDoc, setPreviewDoc] = useState<{ url: string, label: string } | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editData, setEditData] = useState<any>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (!currentSchool?.id) return;
@@ -77,11 +108,7 @@ export default function ProfileVerificationCenter() {
                     };
                 }) as any[];
 
-                const combined = teacherData.sort((a, b) => {
-                    const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-                    const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-                    return dateB - dateA;
-                });
+                const combined = teacherData.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
                 setProfiles(combined);
             } catch (error) {
@@ -100,6 +127,64 @@ export default function ProfileVerificationCenter() {
             p.email?.toLowerCase().includes(searchTerm.toLowerCase());
         return matchesSearch;
     });
+
+    const handleSelectProfile = (profile: ProfileData) => {
+        setSelectedProfile(profile);
+        setEditData({ ...profile });
+        setIsEditing(false);
+    };
+
+    const handleSaveEdit = async () => {
+        if (!selectedProfile) return;
+        setIsSaving(true);
+        try {
+            const col = selectedProfile.role === 'TEACHER' ? 'teachers' : 'students';
+            const { id, role, ...updatePayload } = editData;
+
+            // Cleanup any undefined fields
+            Object.keys(updatePayload).forEach(key => {
+                if (updatePayload[key] === undefined) delete updatePayload[key];
+            });
+
+            await updateDoc(doc(db, col, id), {
+                ...updatePayload,
+                updatedAt: new Date().toISOString()
+            });
+
+            // Update local state
+            setProfiles(prev => prev.map(p => p.id === id ? { ...p, ...updatePayload } : p));
+            setSelectedProfile({ ...selectedProfile, ...updatePayload });
+            setIsEditing(false);
+            alert('Profile updated successfully!');
+        } catch (error) {
+            console.error('Error saving profile:', error);
+            alert('Failed to save changes');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleDeleteProfile = async () => {
+        if (!selectedProfile || !window.confirm(`Are you sure you want to PERMANENTLY DELETE the profile of ${selectedProfile.name}? This action cannot be undone.`)) return;
+
+        setIsSaving(true);
+        try {
+            const col = selectedProfile.role === 'TEACHER' ? 'teachers' : 'students';
+            // Actually delete it from Firestore
+            const { deleteDoc } = await import('firebase/firestore');
+            await deleteDoc(doc(db, col, selectedProfile.id));
+
+            // Remove from local list
+            setProfiles(prev => prev.filter(p => p.id !== selectedProfile.id));
+            setSelectedProfile(null);
+            alert('Profile deleted successfully.');
+        } catch (error) {
+            console.error('Error deleting profile:', error);
+            alert('Failed to delete profile');
+        } finally {
+            setIsSaving(false);
+        }
+    };
 
     const handleVerify = async (profileId: string, role: string) => {
         setIsVerifying(true);
@@ -212,7 +297,7 @@ export default function ProfileVerificationCenter() {
                                     <p className="u-sub">{p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : 'N/A'}</p>
                                 </td>
                                 <td>
-                                    <button className="btn-icon-action" onClick={() => setSelectedProfile(p)}>
+                                    <button className="btn-icon-action" onClick={() => handleSelectProfile(p)}>
                                         <Eye size={18} />
                                     </button>
                                 </td>
@@ -227,8 +312,22 @@ export default function ProfileVerificationCenter() {
                 <div className="drawer-overlay" onClick={() => setSelectedProfile(null)}>
                     <div className="drawer-content animate-slide-left" onClick={e => e.stopPropagation()}>
                         <div className="drawer-header">
-                            <h2 style={{ fontWeight: 900 }}>Submission Details</h2>
-                            <button className="close-btn" onClick={() => setSelectedProfile(null)}><X size={24} /></button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <h2 style={{ fontWeight: 900, margin: 0 }}>Submission Details</h2>
+                                {isEditing && <span style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', padding: '0.25rem 0.5rem', borderRadius: '0.5rem', fontSize: '0.7rem', fontWeight: 800 }}>EDITING MODE</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                {!isEditing ? (
+                                    <button className="btn-edit-toggle" onClick={() => setIsEditing(true)}>
+                                        <Edit2 size={16} /> Edit Profile
+                                    </button>
+                                ) : (
+                                    <button className="btn-edit-toggle active" onClick={() => setIsEditing(false)}>
+                                        <X size={16} /> Cancel Editing
+                                    </button>
+                                )}
+                                <button className="close-btn" onClick={() => setSelectedProfile(null)}><X size={24} /></button>
+                            </div>
                         </div>
 
                         <div className="drawer-body no-scrollbar">
@@ -245,50 +344,256 @@ export default function ProfileVerificationCenter() {
                             <div className="detail-grid">
                                 <div className="detail-item">
                                     <label><Phone size={14} /> Mobile</label>
-                                    <p>{selectedProfile.mobile}</p>
+                                    {isEditing ? (
+                                        <input type="text" className="v-input" value={editData.mobile} onChange={e => setEditData({ ...editData, mobile: e.target.value })} />
+                                    ) : (
+                                        <p>{selectedProfile.mobile}</p>
+                                    )}
                                 </div>
                                 <div className="detail-item">
                                     <label><Mail size={14} /> Email</label>
-                                    <p>{selectedProfile.email}</p>
+                                    {isEditing ? (
+                                        <input type="email" className="v-input" value={editData.email} onChange={e => setEditData({ ...editData, email: e.target.value })} />
+                                    ) : (
+                                        <p>{selectedProfile.email}</p>
+                                    )}
                                 </div>
                                 <div className="detail-item full">
                                     <label><MapPin size={14} /> Address</label>
-                                    <p>{(selectedProfile as any).address || (selectedProfile as any).permanentAddress || 'Not provided'}</p>
+                                    {isEditing ? (
+                                        <input type="text" className="v-input" value={editData.address || ''} onChange={e => setEditData({ ...editData, address: e.target.value })} />
+                                    ) : (
+                                        <p>{(selectedProfile as any).address || (selectedProfile as any).permanentAddress || 'Not provided'}</p>
+                                    )}
                                 </div>
 
                                 {selectedProfile.role === 'TEACHER' && (
                                     <>
                                         <div className="detail-item">
-                                            <label><GraduationCap size={14} /> Qualification</label>
-                                            <p>{selectedProfile.qualification || 'N/A'}</p>
+                                            <label><GraduationCap size={14} /> Main Qualification</label>
+                                            {isEditing ? (
+                                                <input type="text" className="v-input" value={editData.qualification || ''} onChange={e => setEditData({ ...editData, qualification: e.target.value })} />
+                                            ) : (
+                                                <p>{selectedProfile.qualification || 'N/A'}</p>
+                                            )}
                                         </div>
                                         <div className="detail-item">
                                             <label><Briefcase size={14} /> Experience</label>
-                                            <p>{selectedProfile.experience ? `${selectedProfile.experience} Years` : 'N/A'}</p>
+                                            {isEditing ? (
+                                                <input type="text" className="v-input" value={editData.experience || ''} onChange={e => setEditData({ ...editData, experience: e.target.value })} />
+                                            ) : (
+                                                <p>{selectedProfile.experience ? `${selectedProfile.experience} Years` : 'N/A'}</p>
+                                            )}
                                         </div>
                                     </>
                                 )}
                             </div>
 
                             <div className="documents-viewer">
-                                <h4 className="section-title">Uploaded Governance Documents</h4>
+                                <h4 className="section-title">Governance Documents</h4>
                                 <div className="doc-cards">
-                                    <DocPreviewCard label="Aadhar Card" url={selectedProfile.aadharUrl} idNo={selectedProfile.aadharNo} onView={() => setPreviewDoc({ url: selectedProfile.aadharUrl!, label: 'Aadhar Card' })} />
-                                    <DocPreviewCard label="PAN Card" url={selectedProfile.panUrl} idNo={selectedProfile.panNo} onView={() => setPreviewDoc({ url: selectedProfile.panUrl!, label: 'PAN Card' })} />
-                                    <DocPreviewCard label="Address Proof" url={selectedProfile.addressProofUrl} onView={() => setPreviewDoc({ url: selectedProfile.addressProofUrl!, label: 'Address Proof' })} />
+                                    <DocPreviewCard
+                                        label="Aadhar Card"
+                                        url={isEditing ? editData.aadharUrl : selectedProfile.aadharUrl}
+                                        idNo={isEditing ? editData.aadharNo : selectedProfile.aadharNo}
+                                        onView={() => setPreviewDoc({ url: (isEditing ? editData.aadharUrl : selectedProfile.aadharUrl)!, label: 'Aadhar Card' })}
+                                        isEditing={isEditing}
+                                        onEdit={(val: string) => setEditData({ ...editData, aadharNo: val })}
+                                        onDelete={() => setEditData({ ...editData, aadharUrl: '' })}
+                                        onUpload={async (file: File) => {
+                                            const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                            setEditData({ ...editData, aadharUrl: compressed });
+                                        }}
+                                    />
+                                    <DocPreviewCard
+                                        label="PAN Card"
+                                        url={isEditing ? editData.panUrl : selectedProfile.panUrl}
+                                        idNo={isEditing ? editData.panNo : selectedProfile.panNo}
+                                        onView={() => setPreviewDoc({ url: (isEditing ? editData.panUrl : selectedProfile.panUrl)!, label: 'PAN Card' })}
+                                        isEditing={isEditing}
+                                        onEdit={(val: string) => setEditData({ ...editData, panNo: val })}
+                                        onDelete={() => setEditData({ ...editData, panUrl: '' })}
+                                        onUpload={async (file: File) => {
+                                            const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                            setEditData({ ...editData, panUrl: compressed });
+                                        }}
+                                    />
+                                    <DocPreviewCard
+                                        label="Address Proof"
+                                        url={isEditing ? editData.addressProofUrl : selectedProfile.addressProofUrl}
+                                        onView={() => setPreviewDoc({ url: (isEditing ? editData.addressProofUrl : selectedProfile.addressProofUrl)!, label: 'Address Proof' })}
+                                        isEditing={isEditing}
+                                        onDelete={() => setEditData({ ...editData, addressProofUrl: '' })}
+                                        onUpload={async (file: File) => {
+                                            const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                            setEditData({ ...editData, addressProofUrl: compressed });
+                                        }}
+                                    />
                                 </div>
                             </div>
+
+                            {selectedProfile.role === 'TEACHER' && (
+                                <>
+                                    <div className="documents-viewer" style={{ marginTop: '2rem' }}>
+                                        <h4 className="section-title">Academic History</h4>
+                                        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: '1rem' }}>
+                                            {(isEditing ? editData.academicHistory || [] : selectedProfile.academicHistory || []).map((record: AcademicRecord, idx: number) => (
+                                                <div key={idx} style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '1rem', border: '1px solid #e2e8f0' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--primary)' }}>#QUALIFICATION {idx + 1}</span>
+                                                        {isEditing && (
+                                                            <button onClick={() => {
+                                                                const updated = editData.academicHistory.filter((_: any, i: number) => i !== idx);
+                                                                setEditData({ ...editData, academicHistory: updated });
+                                                            }} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={16} /></button>
+                                                        )}
+                                                    </div>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                                        {isEditing ? (
+                                                            <>
+                                                                <div className="v-input-group"><label>Exam</label><input type="text" value={record.examPassed} onChange={e => {
+                                                                    const updated = [...editData.academicHistory];
+                                                                    updated[idx] = { ...updated[idx], examPassed: e.target.value };
+                                                                    setEditData({ ...editData, academicHistory: updated });
+                                                                }} /></div>
+                                                                <div className="v-input-group"><label>School</label><input type="text" value={record.school} onChange={e => {
+                                                                    const updated = [...editData.academicHistory];
+                                                                    updated[idx] = { ...updated[idx], school: e.target.value };
+                                                                    setEditData({ ...editData, academicHistory: updated });
+                                                                }} /></div>
+                                                                <div className="v-input-group"><label>Board</label><input type="text" value={record.board} onChange={e => {
+                                                                    const updated = [...editData.academicHistory];
+                                                                    updated[idx] = { ...updated[idx], board: e.target.value };
+                                                                    setEditData({ ...editData, academicHistory: updated });
+                                                                }} /></div>
+                                                                <div className="v-input-group"><label>Year</label><input type="text" value={record.passingYear} onChange={e => {
+                                                                    const updated = [...editData.academicHistory];
+                                                                    updated[idx] = { ...updated[idx], passingYear: e.target.value };
+                                                                    setEditData({ ...editData, academicHistory: updated });
+                                                                }} /></div>
+                                                                <div className="v-input-group"><label>% Marks</label><input type="text" value={record.percentage} onChange={e => {
+                                                                    const updated = [...editData.academicHistory];
+                                                                    updated[idx] = { ...updated[idx], percentage: e.target.value };
+                                                                    setEditData({ ...editData, academicHistory: updated });
+                                                                }} /></div>
+                                                                <div className="v-input-group"><label>CGPA</label><input type="text" value={record.cgpaGrade} onChange={e => {
+                                                                    const updated = [...editData.academicHistory];
+                                                                    updated[idx] = { ...updated[idx], cgpaGrade: e.target.value };
+                                                                    setEditData({ ...editData, academicHistory: updated });
+                                                                }} /></div>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <div className="v-label-v"><label>Exam</label><p>{record.examPassed}</p></div>
+                                                                <div className="v-label-v"><label>School</label><p>{record.school}</p></div>
+                                                                <div className="v-label-v"><label>Board</label><p>{record.board}</p></div>
+                                                                <div className="v-label-v"><label>Year</label><p>{record.passingYear}</p></div>
+                                                                <div className="v-label-v"><label>% Marks</label><p>{record.percentage}</p></div>
+                                                                <div className="v-label-v"><label>CGPA</label><p>{record.cgpaGrade}</p></div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                                                        {[1, 2].map(dIdx => {
+                                                            const key = `docUrl${dIdx}` as 'docUrl1' | 'docUrl2';
+                                                            const url = record[key];
+                                                            return (
+                                                                <div key={dIdx} style={{ flex: 1, position: 'relative' }}>
+                                                                    {url ? (
+                                                                        <div onClick={() => setPreviewDoc({ url, label: `Qual Doc ${dIdx}` })} style={{ height: '60px', borderRadius: '0.5rem', overflow: 'hidden', cursor: 'pointer', border: '1px solid #e2e8f0' }}>
+                                                                            <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div style={{ height: '60px', borderRadius: '0.5rem', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '0.6rem' }}>Doc {dIdx} Empty</div>
+                                                                    )}
+                                                                    {isEditing && (
+                                                                        <label style={{ cursor: 'pointer', position: 'absolute', bottom: -10, right: -5, background: 'var(--primary)', color: 'white', padding: '2px', borderRadius: '4px' }}>
+                                                                            <Upload size={10} />
+                                                                            <input type="file" hidden accept="image/*" onChange={async e => {
+                                                                                const file = e.target.files?.[0];
+                                                                                if (!file) return;
+                                                                                const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                                                                const updated = [...editData.academicHistory];
+                                                                                updated[idx] = { ...updated[idx], [key]: compressed };
+                                                                                setEditData({ ...editData, academicHistory: updated });
+                                                                            }} />
+                                                                        </label>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {isEditing && (
+                                                <button
+                                                    onClick={() => setEditData({ ...editData, academicHistory: [...(editData.academicHistory || []), { examPassed: '', school: '', board: '', passingYear: '', percentage: '', cgpaGrade: '', docUrl1: '', docUrl2: '' }] })}
+                                                    style={{ padding: '0.75rem', borderRadius: '0.75rem', border: '2px dashed var(--primary)', color: 'var(--primary)', background: 'none', cursor: 'pointer', fontWeight: 800, fontSize: '0.8rem' }}
+                                                >
+                                                    <Plus size={16} /> Add Qualification
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="documents-viewer" style={{ marginTop: '2rem' }}>
+                                        <h4 className="section-title">Other Activity Certificates</h4>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '0.75rem' }}>
+                                            {(isEditing ? editData.activityCertificates || [] : selectedProfile.activityCertificates || []).map((url: string, idx: number) => (
+                                                <div key={idx} style={{ position: 'relative' }}>
+                                                    <div onClick={() => url && setPreviewDoc({ url, label: `Certificate ${idx + 1}` })} style={{ height: '100px', borderRadius: '1rem', overflow: 'hidden', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        {url ? <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Award size={30} style={{ opacity: 0.2 }} />}
+                                                    </div>
+                                                    {isEditing && (
+                                                        <button
+                                                            onClick={() => {
+                                                                const updated = editData.activityCertificates.filter((_: any, i: number) => i !== idx);
+                                                                setEditData({ ...editData, activityCertificates: updated });
+                                                            }}
+                                                            style={{ position: 'absolute', top: -5, right: -5, background: '#ef4444', color: 'white', border: 'none', width: '20px', height: '20px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                        >
+                                                            <Trash size={12} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            {isEditing && (
+                                                <label style={{ height: '100px', borderRadius: '1rem', border: '2px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#f59e0b' }}>
+                                                    <Plus size={24} />
+                                                    <input type="file" hidden accept="image/*" onChange={async e => {
+                                                        const file = e.target.files?.[0];
+                                                        if (!file) return;
+                                                        const compressed = await compressImage(file, 1000, 1000, 0.5);
+                                                        setEditData({ ...editData, activityCertificates: [...(editData.activityCertificates || []), compressed] });
+                                                    }} />
+                                                </label>
+                                            )}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         <div className="drawer-footer">
                             <button className="btn-secondary" onClick={() => setSelectedProfile(null)}>Close</button>
-                            <button
-                                className="btn-primary"
-                                disabled={isVerifying || (selectedProfile as any).kycVerified}
-                                onClick={() => handleVerify(selectedProfile.id, selectedProfile.role)}
-                            >
-                                {(selectedProfile as any).kycVerified ? <><Check size={18} /> Already Verified</> : <><CheckCircle size={18} /> Mark as Verified</>}
-                            </button>
+                            {isEditing ? (
+                                <>
+                                    <button className="btn-delete-profile" disabled={isSaving} onClick={handleDeleteProfile}>
+                                        <Trash2 size={18} /> Delete Profile
+                                    </button>
+                                    <button className="btn-primary" disabled={isSaving} onClick={handleSaveEdit}>
+                                        {isSaving ? <Loader2 className="animate-spin" size={18} /> : <><Save size={18} /> Save Changes</>}
+                                    </button>
+                                </>
+                            ) : (
+                                <button
+                                    className="btn-primary"
+                                    disabled={isVerifying || (selectedProfile as any).kycVerified}
+                                    onClick={() => handleVerify(selectedProfile.id, selectedProfile.role)}
+                                >
+                                    {(selectedProfile as any).kycVerified ? <><Check size={18} /> Already Verified</> : <><CheckCircle size={18} /> Mark as Verified</>}
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -370,6 +675,23 @@ export default function ProfileVerificationCenter() {
                 .btn-primary { background: var(--primary); color: white; border: none; display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1.5rem; border-radius: 1rem; font-weight: 800; cursor: pointer; transition: 0.2s; flex: 1; justify-content: center; }
                 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
                 .btn-secondary { background: #f1f5f9; color: #475569; border: none; padding: 0.85rem 1.5rem; border-radius: 1rem; font-weight: 800; cursor: pointer; }
+
+                .v-input { width: 100%; padding: 0.6rem 0.85rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; background: #f8fafc; font-size: 0.9rem; font-weight: 700; color: #1e293b; outline: none; }
+                .v-input:focus { border-color: var(--primary); background: white; }
+                
+                .v-input-group { display: flex; flexDirection: column; gap: 0.25rem; }
+                .v-input-group label { font-size: 0.65rem; font-weight: 900; color: #64748b; text-transform: uppercase; }
+                .v-input-group input { width: 100%; padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 700; outline: none; }
+                
+                .v-label-v label { font-size: 0.65rem; font-weight: 900; color: #94a3b8; text-transform: uppercase; margin-bottom: 0.1rem; }
+                .v-label-v p { font-size: 0.75rem; font-weight: 700; color: #1e293b; margin: 0; }
+
+                .btn-edit-toggle { display: flex; align-items: center; gap: 0.5rem; background: #eff6ff; color: var(--primary); border: 1px solid #bfdbfe; padding: 0.5rem 1rem; border-radius: 0.75rem; font-weight: 800; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+                .btn-edit-toggle.active { background: #fff1f2; color: #e11d48; border-color: #fecaca; }
+                .btn-edit-toggle:hover { transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+
+                .btn-delete-profile { display: flex; align-items: center; gap: 0.5rem; background: white; color: #ef4444; border: 1px solid #fecaca; padding: 0.85rem 1.5rem; border-radius: 1rem; font-weight: 800; font-size: 0.875rem; cursor: pointer; transition: 0.2s; }
+                .btn-delete-profile:hover { background: #fff1f2; color: #ef4444; border-color: #ef4444; }
             `}</style>
         </div >
     );
@@ -381,30 +703,59 @@ const DocStatusIcon = ({ type, tooltip }: { type: string, tooltip: string }) => 
     </div>
 );
 
-const DocPreviewCard = ({ label, url, idNo, onView }: any) => {
+const DocPreviewCard = ({ label, url, idNo, onView, isEditing, onEdit, onDelete, onUpload }: any) => {
     return (
-        <div style={{ padding: '1.25rem', background: '#f8fafc', borderRadius: '1.25rem', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-                <p style={{ fontSize: '0.85rem', fontWeight: 900, marginBottom: '0.25rem' }}>{label}</p>
-                <p style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
-                    {idNo ? `No: ${idNo}` : url ? 'Scan Available' : 'No document uploaded'}
-                </p>
+        <div style={{ padding: '1.25rem', background: '#f8fafc', borderRadius: '1.25rem', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isEditing ? '0.75rem' : 0 }}>
+                <div>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 900, marginBottom: '0.25rem' }}>{label}</p>
+                    {!isEditing && (
+                        <p style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
+                            {idNo ? `No: ${idNo}` : url ? 'Scan Available' : 'No document uploaded'}
+                        </p>
+                    )}
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {url && (
+                        <button
+                            onClick={onView}
+                            className="hover-scale"
+                            style={{
+                                width: '36px', height: '36px', background: 'white', borderRadius: '10px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: 'var(--primary)', border: 'none', cursor: 'pointer',
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+                            }}
+                        >
+                            <Eye size={18} />
+                        </button>
+                    )}
+                    {isEditing && url && (
+                        <button onClick={onDelete} style={{ width: '36px', height: '36px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Trash2 size={16} />
+                        </button>
+                    )}
+                    {isEditing && !url && (
+                        <label style={{ width: '36px', height: '36px', background: 'rgba(99,102,241,0.1)', color: 'var(--primary)', border: 'none', borderRadius: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Upload size={16} />
+                            <input type="file" hidden accept="image/*" onChange={e => {
+                                const file = e.target.files?.[0];
+                                if (file) onUpload(file);
+                            }} />
+                        </label>
+                    )}
+                    {!url && !isEditing && <div style={{ color: '#ef4444' }}><XCircle size={20} /></div>}
+                </div>
             </div>
-            {url ? (
-                <button
-                    onClick={onView}
-                    className="hover-scale"
-                    style={{
-                        width: '36px', height: '36px', background: 'white', borderRadius: '10px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'var(--primary)', border: 'none', cursor: 'pointer',
-                        boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
-                    }}
-                >
-                    <Eye size={18} />
-                </button>
-            ) : (
-                <div style={{ color: '#ef4444' }}><XCircle size={20} /></div>
+            {isEditing && onEdit && (
+                <input
+                    type="text"
+                    placeholder={`Enter ${label} No.`}
+                    className="v-input"
+                    style={{ background: 'white', fontSize: '0.8rem' }}
+                    value={idNo || ''}
+                    onChange={e => onEdit(e.target.value)}
+                />
             )}
         </div>
     );

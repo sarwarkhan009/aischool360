@@ -7,10 +7,12 @@ export const Permission = {
     MANAGE_STUDENTS: 'MANAGE_STUDENTS',
     VIEW_STUDENTS: 'VIEW_STUDENTS',
     ADMIT_STUDENT: 'ADMIT_STUDENT',
+    UPLOAD_STUDENT_PHOTO: 'UPLOAD_STUDENT_PHOTO',
     VIEW_REGISTRATIONS: 'VIEW_REGISTRATIONS',
     VIEW_STUDENT_REPORTS: 'VIEW_STUDENT_REPORTS',
     VIEW_RE_REGISTRATION_REPORTS: 'VIEW_RE_REGISTRATION_REPORTS',
     VIEW_DUES_LIST: 'VIEW_DUES_LIST',
+    PROMOTE_STUDENTS: 'PROMOTE_STUDENTS',
 
     // Employees
     MANAGE_EMPLOYEES: 'MANAGE_EMPLOYEES',
@@ -94,6 +96,7 @@ export interface RoleConfig {
     role: Role;
     label: string;
     permissions: Permission[];
+    canWrite: boolean; // If false, this role can only VIEW data — cannot add/edit/delete
 }
 
 export const DEFAULT_ROLES: RoleConfig[] = [
@@ -101,11 +104,13 @@ export const DEFAULT_ROLES: RoleConfig[] = [
         role: 'SUPER_ADMIN',
         label: 'Super Administrator',
         permissions: Object.values(Permission) as Permission[],
+        canWrite: true,
     },
     {
         role: 'ADMIN',
         label: 'Administrator',
         permissions: Object.values(Permission) as Permission[],
+        canWrite: true,
     },
     {
         role: 'MANAGER',
@@ -121,7 +126,10 @@ export const DEFAULT_ROLES: RoleConfig[] = [
             Permission.MANAGE_NOTICES,
             Permission.VIEW_REPORTS,
             Permission.VIEW_GALLERY,
+            Permission.PROMOTE_STUDENTS,
+            Permission.UPLOAD_STUDENT_PHOTO,
         ],
+        canWrite: false, // View-only by default
     },
     {
         role: 'TEACHER',
@@ -132,21 +140,32 @@ export const DEFAULT_ROLES: RoleConfig[] = [
             Permission.MANAGE_ATTENDANCE,
             Permission.VIEW_EXAMS,
             Permission.MANAGE_EXAMS,
+            Permission.MANAGE_EXAM_TIMETABLE,
+            Permission.ENTER_MARKS,
             Permission.POST_NOTICE,
             Permission.MANAGE_HOMEWORK,
             Permission.VIEW_GALLERY,
+            Permission.PROMOTE_STUDENTS,
+            Permission.UPLOAD_STUDENT_PHOTO,
         ],
+        canWrite: true, // Teachers actively enter marks/attendance
     },
     {
         role: 'ACCOUNTANT',
         label: 'Accountant',
         permissions: [
             Permission.VIEW_DASHBOARD,
+            Permission.ADMIT_STUDENT,
+            Permission.VIEW_STUDENTS,
+            Permission.VIEW_REGISTRATIONS,
             Permission.MANAGE_FEES,
             Permission.COLLECT_FEES,
             Permission.VIEW_FEE_STRUCTURE,
+            Permission.VIEW_FEE_REPORTS,
+            Permission.VIEW_DUE_REPORTS,
             Permission.VIEW_REPORTS,
         ],
+        canWrite: true, // Accountants collect fees
     },
     {
         role: 'PARENT',
@@ -159,6 +178,7 @@ export const DEFAULT_ROLES: RoleConfig[] = [
             Permission.PARENT_SHOW_FEE_TAB,
             Permission.PARENT_SHOW_DUES_BANNER,
         ],
+        canWrite: false,
     },
     {
         role: 'DRIVER',
@@ -166,5 +186,6 @@ export const DEFAULT_ROLES: RoleConfig[] = [
         permissions: [
             Permission.VIEW_DASHBOARD,
         ],
+        canWrite: false,
     },
 ];

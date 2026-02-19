@@ -16,6 +16,7 @@ interface CustomRole {
     permissions: Permission[];
     isDefault: boolean;
     status: 'ACTIVE' | 'INACTIVE';
+    canWrite: boolean; // If false, role is view-only; no add/edit/delete
 }
 
 // ─── Menu-based permission structure ────────────────────────────────────────
@@ -29,6 +30,7 @@ interface MenuItem {
     label: string;
     icon: any;
     permissions: Permission[];
+    moduleId?: string;
     children?: SubMenuItem[];
 }
 
@@ -36,6 +38,7 @@ interface SubMenuItem {
     id: string;
     label: string;
     permissions: Permission[];
+    moduleId?: string;
 }
 
 const MENU_STRUCTURE: MenuItem[] = [
@@ -50,15 +53,18 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Student Management',
         icon: Users,
         permissions: [Permission.VIEW_STUDENTS],
+        moduleId: 'students',
         children: [
-            { id: 'students_add', label: 'Add Student', permissions: [Permission.ADMIT_STUDENT] },
-            { id: 'students_form_sale', label: 'Form Sale', permissions: [Permission.ADMIT_STUDENT] },
-            { id: 'students_bulk_upload', label: 'Bulk Student Upload', permissions: [Permission.ADMIT_STUDENT] },
-            { id: 'students_registrations', label: 'Registration Requests', permissions: [Permission.VIEW_REGISTRATIONS] },
-            { id: 'students_manage', label: 'Manage Students', permissions: [Permission.VIEW_STUDENTS] },
-            { id: 'students_report', label: 'Student Report', permissions: [Permission.VIEW_STUDENT_REPORTS] },
-            { id: 'students_re_reg', label: 'Re-Registration Report', permissions: [Permission.VIEW_RE_REGISTRATION_REPORTS] },
-            { id: 'students_dues', label: 'Dues List', permissions: [Permission.VIEW_DUES_LIST] },
+            { id: 'students_add', label: 'Add Student', permissions: [Permission.ADMIT_STUDENT], moduleId: '/students/admission' },
+            { id: 'students_form_sale', label: 'Form Sale', permissions: [Permission.ADMIT_STUDENT], moduleId: '/students/form-sale' },
+            { id: 'students_bulk_upload', label: 'Bulk Student Upload', permissions: [Permission.ADMIT_STUDENT], moduleId: '/students/bulk-upload' },
+            { id: 'students_registrations', label: 'Registration Requests', permissions: [Permission.VIEW_REGISTRATIONS], moduleId: '/students/registrations' },
+            { id: 'students_manage', label: 'Manage Students', permissions: [Permission.VIEW_STUDENTS], moduleId: '/students' },
+            { id: 'students_report', label: 'Student Report', permissions: [Permission.VIEW_STUDENT_REPORTS], moduleId: '/students/report' },
+            { id: 'students_re_reg', label: 'Re-Registration Report', permissions: [Permission.VIEW_RE_REGISTRATION_REPORTS], moduleId: '/students/re-reg' },
+            { id: 'students_dues', label: 'Dues List', permissions: [Permission.VIEW_DUES_LIST], moduleId: '/students/dues' },
+            { id: 'students_promotion', label: 'Promote Students', permissions: [Permission.PROMOTE_STUDENTS], moduleId: '/students/promotion' },
+            { id: 'students_photo_upload', label: 'Student Photo Upload', permissions: [Permission.UPLOAD_STUDENT_PHOTO], moduleId: '/students/photos' },
         ]
     },
     {
@@ -66,13 +72,14 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Fee Management',
         icon: CreditCard,
         permissions: [Permission.COLLECT_FEES],
+        moduleId: 'fees',
         children: [
-            { id: 'fees_collect', label: 'Collect Fees', permissions: [Permission.COLLECT_FEES] },
-            { id: 'fees_structure', label: 'Fee Structure', permissions: [Permission.VIEW_FEE_STRUCTURE] },
-            { id: 'fees_set_amount', label: 'Set Fee Amount', permissions: [Permission.SET_FEE_AMOUNT] },
+            { id: 'fees_collect', label: 'Collect Fees', permissions: [Permission.COLLECT_FEES], moduleId: '/fees' },
+            { id: 'fees_structure', label: 'Fee Structure', permissions: [Permission.VIEW_FEE_STRUCTURE], moduleId: '/fees/structure' },
+            { id: 'fees_set_amount', label: 'Set Fee Amount', permissions: [Permission.SET_FEE_AMOUNT], moduleId: '/fees/set-amount' },
             { id: 'fees_manage_structure', label: 'Manage Fee Structure', permissions: [Permission.MANAGE_FEE_STRUCTURE] },
-            { id: 'fees_report', label: 'Fee Report', permissions: [Permission.VIEW_FEE_REPORTS] },
-            { id: 'fees_dues', label: 'Due Report', permissions: [Permission.VIEW_DUE_REPORTS] },
+            { id: 'fees_report', label: 'Fee Report', permissions: [Permission.VIEW_FEE_REPORTS], moduleId: '/fees/report' },
+            { id: 'fees_dues', label: 'Due Report', permissions: [Permission.VIEW_DUE_REPORTS], moduleId: '/fees/dues' },
         ]
     },
     {
@@ -80,9 +87,11 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Attendance Management',
         icon: UserCheck,
         permissions: [Permission.MANAGE_ATTENDANCE],
+        moduleId: 'attendance',
         children: [
-            { id: 'attendance_mark', label: 'Mark Attendance', permissions: [Permission.MANAGE_ATTENDANCE] },
-            { id: 'attendance_staff', label: 'Staff Attendance', permissions: [Permission.MANAGE_STAFF_ATTENDANCE] },
+            { id: 'attendance_mark', label: 'Mark Attendance', permissions: [Permission.MANAGE_ATTENDANCE], moduleId: '/attendance' },
+            { id: 'attendance_report', label: 'Attendance Report', permissions: [Permission.VIEW_REPORTS], moduleId: '/attendance/report' },
+            { id: 'attendance_staff', label: 'Staff Attendance', permissions: [Permission.MANAGE_STAFF_ATTENDANCE], moduleId: '/attendance/staff' },
         ]
     },
     {
@@ -90,11 +99,12 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Employee Management',
         icon: Users,
         permissions: [Permission.VIEW_EMPLOYEES],
+        moduleId: 'employees',
         children: [
-            { id: 'employees_list', label: 'Employee List', permissions: [Permission.VIEW_EMPLOYEES] },
+            { id: 'employees_list', label: 'Employee List', permissions: [Permission.VIEW_EMPLOYEES], moduleId: '/teachers' },
             { id: 'employees_manage', label: 'Manage Employees', permissions: [Permission.MANAGE_EMPLOYEES] },
-            { id: 'employees_payroll', label: 'Payroll', permissions: [Permission.MANAGE_PAYROLL] },
-            { id: 'employees_teaching_logs', label: 'Teaching Logs', permissions: [Permission.VIEW_TEACHING_LOGS] },
+            { id: 'employees_payroll', label: 'Payroll', permissions: [Permission.MANAGE_PAYROLL], moduleId: '/teachers/payroll' },
+            { id: 'employees_teaching_logs', label: 'Teaching Logs', permissions: [Permission.VIEW_TEACHING_LOGS], moduleId: '/teaching-logs' },
         ]
     },
     {
@@ -102,9 +112,10 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Accounts',
         icon: CreditCard,
         permissions: [Permission.VIEW_ACCOUNTS],
+        moduleId: 'accounts',
         children: [
-            { id: 'accounts_dashboard', label: 'Dashboard', permissions: [Permission.VIEW_ACCOUNTS] },
-            { id: 'accounts_expenses', label: 'Expense Entry', permissions: [Permission.MANAGE_ACCOUNTS] },
+            { id: 'accounts_dashboard', label: 'Dashboard', permissions: [Permission.VIEW_ACCOUNTS], moduleId: '/accounts/dashboard' },
+            { id: 'accounts_expenses', label: 'Expense Entry', permissions: [Permission.MANAGE_ACCOUNTS], moduleId: '/accounts/expenses' },
         ]
     },
     {
@@ -112,21 +123,22 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Exam Management',
         icon: BookOpen,
         permissions: [Permission.VIEW_EXAMS],
+        moduleId: 'exams',
         children: [
-            { id: 'exams_dashboard', label: 'Dashboard', permissions: [Permission.VIEW_EXAMS] },
-            { id: 'exams_academic_year', label: 'Academic Year & Terms', permissions: [Permission.MANAGE_SETTINGS] },
-            { id: 'exams_configuration', label: 'Exam Configuration', permissions: [Permission.MANAGE_SETTINGS] },
-            { id: 'exams_scheduling', label: 'Schedule Exams', permissions: [Permission.MANAGE_EXAM_TIMETABLE] },
-            { id: 'exams_timetable', label: 'Exam Timetable', permissions: [Permission.MANAGE_EXAM_TIMETABLE] },
-            { id: 'exams_admit_cards', label: 'Print Admit Card', permissions: [Permission.PRINT_ADMIT_CARDS] },
-            { id: 'exams_marks_entry', label: 'Marks Entry', permissions: [Permission.ENTER_MARKS] },
-            { id: 'exams_bulk_marks', label: 'Bulk Marks Upload', permissions: [Permission.ENTER_MARKS] },
-            { id: 'exams_results', label: 'View Results', permissions: [Permission.VIEW_EXAMS] },
-            { id: 'exams_analytics', label: 'Performance Analytics', permissions: [Permission.VIEW_EXAMS] },
-            { id: 'exams_syllabus', label: 'Manage Syllabus', permissions: [Permission.MANAGE_EXAM_TIMETABLE] },
-            { id: 'exams_templates', label: 'Customize Templates', permissions: [Permission.MANAGE_EXAMS] },
-            { id: 'exams_report_cards', label: 'Print Report Card', permissions: [Permission.PRINT_REPORT_CARDS] },
-            { id: 'exams_question_gen', label: 'Question Generator', permissions: [Permission.GENERATE_QUESTIONS] },
+            { id: 'exams_dashboard', label: 'Dashboard', permissions: [Permission.VIEW_EXAMS], moduleId: '/exams' },
+            { id: 'exams_academic_year', label: 'Academic Year & Terms', permissions: [Permission.MANAGE_SETTINGS], moduleId: '/exams/academic-year' },
+            { id: 'exams_configuration', label: 'Exam Configuration', permissions: [Permission.MANAGE_SETTINGS], moduleId: '/exams/configuration' },
+            { id: 'exams_scheduling', label: 'Schedule Exams', permissions: [Permission.MANAGE_EXAM_TIMETABLE], moduleId: '/exams/scheduling' },
+            { id: 'exams_timetable', label: 'Exam Timetable', permissions: [Permission.MANAGE_EXAM_TIMETABLE], moduleId: '/exam-timetable' },
+            { id: 'exams_admit_cards', label: 'Print Admit Card', permissions: [Permission.PRINT_ADMIT_CARDS], moduleId: '/admit-cards' },
+            { id: 'exams_marks_entry', label: 'Marks Entry', permissions: [Permission.ENTER_MARKS], moduleId: '/marks-entry' },
+            { id: 'exams_bulk_marks', label: 'Bulk Marks Upload', permissions: [Permission.ENTER_MARKS], moduleId: '/exams/bulk-marks-upload' },
+            { id: 'exams_results', label: 'View Results', permissions: [Permission.VIEW_EXAMS], moduleId: '/exams/results' },
+            { id: 'exams_analytics', label: 'Performance Analytics', permissions: [Permission.VIEW_EXAMS], moduleId: '/exams/analytics' },
+            { id: 'exams_syllabus', label: 'Manage Syllabus', permissions: [Permission.MANAGE_EXAM_TIMETABLE], moduleId: '/exams/syllabus' },
+            { id: 'exams_templates', label: 'Customize Templates', permissions: [Permission.MANAGE_EXAMS], moduleId: '/exams/templates' },
+            { id: 'exams_report_cards', label: 'Print Report Card', permissions: [Permission.PRINT_REPORT_CARDS], moduleId: '/report-cards' },
+            { id: 'exams_question_gen', label: 'Question Generator', permissions: [Permission.GENERATE_QUESTIONS], moduleId: '/question-generator' },
         ]
     },
     {
@@ -134,9 +146,10 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Homework Management',
         icon: FileText,
         permissions: [Permission.MANAGE_HOMEWORK],
+        moduleId: 'homework',
         children: [
-            { id: 'homework_assign', label: 'Assign Homework', permissions: [Permission.MANAGE_HOMEWORK] },
-            { id: 'homework_report', label: 'Homework Report', permissions: [Permission.VIEW_HOMEWORK_REPORTS] },
+            { id: 'homework_assign', label: 'Assign Homework', permissions: [Permission.MANAGE_HOMEWORK], moduleId: '/homework' },
+            { id: 'homework_report', label: 'Homework Report', permissions: [Permission.VIEW_HOMEWORK_REPORTS], moduleId: '/homework/report' },
         ]
     },
     {
@@ -144,36 +157,42 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Transport',
         icon: Bus,
         permissions: [Permission.MANAGE_TRANSPORT],
+        moduleId: 'transport',
     },
     {
         id: 'hostel',
         label: 'Hostel',
         icon: Building2,
         permissions: [Permission.VIEW_REPORTS],
+        moduleId: 'hostel',
     },
     {
         id: 'library',
         label: 'Library',
         icon: BookOpen,
         permissions: [Permission.MANAGE_LIBRARY],
+        moduleId: 'library',
     },
     {
         id: 'notices',
         label: 'Notice Board',
         icon: Bell,
         permissions: [Permission.MANAGE_NOTICES, Permission.POST_NOTICE],
+        moduleId: 'notices',
     },
     {
         id: 'messages',
         label: 'Messages',
         icon: MessageSquare,
         permissions: [Permission.VIEW_MESSAGES],
+        moduleId: 'communication',
     },
     {
         id: 'calendar',
         label: 'Calendar',
         icon: Calendar,
         permissions: [Permission.VIEW_CALENDAR, Permission.MANAGE_CALENDAR],
+        moduleId: 'calendar',
     },
     {
         id: 'routine',
@@ -192,6 +211,7 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Reports',
         icon: FileText,
         permissions: [Permission.VIEW_REPORTS],
+        moduleId: 'reports',
     },
     {
         id: 'roles',
@@ -258,60 +278,70 @@ const UserRoles: React.FC = () => {
     const { currentSchool } = useSchool();
     const [activeTab, setActiveTab] = useState<'ROLES' | 'USERS'>('ROLES');
     const [roles, setRoles] = usePersistence<CustomRole[]>('aischool360_custom_roles',
-        DEFAULT_ROLES.map(r => ({ ...r, id: r.role, isDefault: true, status: 'ACTIVE' }))
+        DEFAULT_ROLES.map(r => ({ ...r, id: r.role, isDefault: true, status: 'ACTIVE', canWrite: r.canWrite ?? (r.role === 'ADMIN' || r.role === 'SUPER_ADMIN') }))
     );
     const { data: teachers } = useFirestore<any>('teachers');
-    const { hasPermission: currentUserHasPermission } = useAuth();
+    const { hasPermission: currentUserHasPermission, refreshPermissions } = useAuth();
 
     const [selectedRole, setSelectedRole] = useState<CustomRole>(roles[0]);
     const [selectedUser, setSelectedUser] = useState<any>(null);
     const [userPermissions, setUserPermissions] = usePersistence<Record<string, Permission[]>>('aischool360_user_overrides', {});
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [newRoleName, setNewRoleName] = useState('');
+    const [newRoleType, setNewRoleType] = useState<Role>('MANAGER');
     const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
     const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
+    const [firestoreLoaded, setFirestoreLoaded] = useState(false);
+    const { data: allSettings } = useFirestore<any>('settings');
+    const [moduleControls, setModuleControls] = useState<Record<string, boolean>>({});
 
-    // Sync roles to Firestore for global persistence
     useEffect(() => {
-        const safeId = currentSchool?.id?.replace(/\//g, '') || '';
-        if (safeId && roles.length > 0) {
-            const syncRoles = async () => {
-                try {
-                    await setDoc(doc(db, 'settings', `role_configs_${safeId}`), {
-                        roles,
-                        type: 'role_configs',
-                        schoolId: currentSchool?.id,
-                        updatedAt: new Date().toISOString()
-                    }, { merge: true });
-                } catch (e) {
-                    console.error("Error syncing roles:", e);
-                }
-            };
-            syncRoles();
+        const docId = `module_controls_${currentSchool?.id?.replace(/\//g, '')}`;
+        const moduleDoc = allSettings?.find(s => s.id === docId);
+        if (moduleDoc) {
+            setModuleControls(moduleDoc);
         }
-    }, [roles, currentSchool?.id]);
+    }, [allSettings, currentSchool?.id]);
 
-    // Sync user overrides to Firestore
-    useEffect(() => {
+    // ─── Direct save to Firestore + both localStorage keys ────────────────
+    const saveRolesToFirestore = async (updatedRoles: CustomRole[]) => {
         const safeId = currentSchool?.id?.replace(/\//g, '') || '';
-        if (safeId && Object.keys(userPermissions).length > 0) {
-            const syncOverrides = async () => {
-                try {
-                    await setDoc(doc(db, 'settings', `user_overrides_${safeId}`), {
-                        overrides: userPermissions,
-                        type: 'user_overrides',
-                        schoolId: currentSchool?.id,
-                        updatedAt: new Date().toISOString()
-                    }, { merge: true });
-                } catch (e) {
-                    console.error("Error syncing overrides:", e);
-                }
-            };
-            syncOverrides();
+        if (!safeId) return;
+        // Sync to both localStorage keys so hasPermission() picks it up immediately
+        localStorage.setItem('aischool360_custom_roles', JSON.stringify(updatedRoles));
+        localStorage.setItem('millat_custom_roles', JSON.stringify(updatedRoles));
+        refreshPermissions();
+        try {
+            await setDoc(doc(db, 'settings', `role_configs_${safeId}`), {
+                roles: updatedRoles,
+                type: 'role_configs',
+                schoolId: currentSchool?.id,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (e) {
+            console.error("Error syncing roles to Firestore:", e);
         }
-    }, [userPermissions, currentSchool?.id]);
+    };
 
-    // Initial Load from Firestore
+    const saveOverridesToFirestore = async (updatedOverrides: Record<string, Permission[]>) => {
+        const safeId = currentSchool?.id?.replace(/\//g, '') || '';
+        if (!safeId) return;
+        localStorage.setItem('aischool360_user_overrides', JSON.stringify(updatedOverrides));
+        localStorage.setItem('millat_user_overrides', JSON.stringify(updatedOverrides));
+        refreshPermissions();
+        try {
+            await setDoc(doc(db, 'settings', `user_overrides_${safeId}`), {
+                overrides: updatedOverrides,
+                type: 'user_overrides',
+                schoolId: currentSchool?.id,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (e) {
+            console.error("Error syncing overrides to Firestore:", e);
+        }
+    };
+
+    // Initial Load from Firestore (only once)
     useEffect(() => {
         const safeId = currentSchool?.id?.replace(/\//g, '') || '';
         if (!safeId) return;
@@ -324,13 +354,20 @@ const UserRoles: React.FC = () => {
                 ]);
 
                 if (rolesDoc.exists()) {
-                    setRoles(rolesDoc.data().roles);
+                    const firestoreRoles = rolesDoc.data().roles;
+                    setRoles(firestoreRoles);
+                    localStorage.setItem('millat_custom_roles', JSON.stringify(firestoreRoles));
                 }
                 if (overridesDoc.exists()) {
-                    setUserPermissions(overridesDoc.data().overrides);
+                    const firestoreOverrides = overridesDoc.data().overrides;
+                    setUserPermissions(firestoreOverrides);
+                    localStorage.setItem('millat_user_overrides', JSON.stringify(firestoreOverrides));
                 }
+                refreshPermissions();
             } catch (e) {
                 console.error("Error loading configs:", e);
+            } finally {
+                setFirestoreLoaded(true);
             }
         };
         loadConfig();
@@ -373,7 +410,9 @@ const UserRoles: React.FC = () => {
 
             const updatedRole = { ...selectedRole, permissions: newPerms };
             setSelectedRole(updatedRole);
-            setRoles(roles.map(r => r.id === updatedRole.id ? updatedRole : r));
+            const updatedRoles = roles.map(r => r.id === updatedRole.id ? updatedRole : r);
+            setRoles(updatedRoles);
+            saveRolesToFirestore(updatedRoles);
         } else {
             if (!selectedUser) return;
             const userId = selectedUser.uid || selectedUser.id;
@@ -391,7 +430,9 @@ const UserRoles: React.FC = () => {
                 const toAdd = permsToToggle.filter(p => !currentPerms.includes(p));
                 newPerms = [...currentPerms, ...toAdd];
             }
-            setUserPermissions({ ...userPermissions, [userId]: newPerms });
+            const updatedOverrides = { ...userPermissions, [userId]: newPerms };
+            setUserPermissions(updatedOverrides);
+            saveOverridesToFirestore(updatedOverrides);
         }
     };
 
@@ -409,6 +450,7 @@ const UserRoles: React.FC = () => {
                 r.id === editingRole.id ? { ...r, label: newRoleName } : r
             );
             setRoles(updatedRoles);
+            saveRolesToFirestore(updatedRoles);
             if (selectedRole?.id === editingRole.id) {
                 setSelectedRole({ ...selectedRole, label: newRoleName });
             }
@@ -421,18 +463,22 @@ const UserRoles: React.FC = () => {
 
             const newRole: CustomRole = {
                 id: newId,
-                role: 'USER' as Role,
+                role: newRoleType as Role,
                 label: newRoleName,
                 permissions: [],
                 isDefault: false,
-                status: 'ACTIVE'
+                status: 'ACTIVE',
+                canWrite: true
             };
 
-            setRoles([...roles, newRole]);
+            const updatedRoles = [...roles, newRole];
+            setRoles(updatedRoles);
+            saveRolesToFirestore(updatedRoles);
             setSelectedRole(newRole);
         }
 
         setNewRoleName('');
+        setNewRoleType('MANAGER');
         setEditingRole(null);
         setShowCreateModal(false);
     };
@@ -441,6 +487,7 @@ const UserRoles: React.FC = () => {
         e.stopPropagation();
         setEditingRole(role);
         setNewRoleName(role.label);
+        setNewRoleType(role.role);
         setShowCreateModal(true);
     };
 
@@ -450,6 +497,7 @@ const UserRoles: React.FC = () => {
 
         const updatedRoles = roles.filter(r => r.id !== roleId);
         setRoles(updatedRoles);
+        saveRolesToFirestore(updatedRoles);
         if (selectedRole?.id === roleId) {
             setSelectedRole(updatedRoles[0]);
         }
@@ -465,6 +513,7 @@ const UserRoles: React.FC = () => {
             return r;
         });
         setRoles(updatedRoles);
+        saveRolesToFirestore(updatedRoles);
 
         if (selectedRole?.id === roleId) {
             const updated = updatedRoles.find(r => r.id === roleId);
@@ -674,7 +723,7 @@ const UserRoles: React.FC = () => {
                                 {activeTab === 'ROLES' ? selectedRole?.label : selectedUser?.name || 'Select a user'}
                             </h2>
                             {(activeTab === 'ROLES' ? !!selectedRole : !!selectedUser) && (
-                                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem' }}>
+                                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                                     <span style={{
                                         background: 'rgba(99, 102, 241, 0.08)',
                                         color: 'var(--primary)',
@@ -685,6 +734,18 @@ const UserRoles: React.FC = () => {
                                     }}>
                                         {enabledCount} / {MENU_STRUCTURE.length} Menus Enabled
                                     </span>
+                                    {activeTab === 'ROLES' && selectedRole && (
+                                        <span style={{
+                                            background: selectedRole.canWrite ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                            color: selectedRole.canWrite ? '#059669' : '#dc2626',
+                                            padding: '0.25rem 0.75rem',
+                                            borderRadius: '2rem',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                        }}>
+                                            {selectedRole.canWrite ? '✏️ Write Access ON' : '👁️ View-Only Mode'}
+                                        </span>
+                                    )}
                                     {isLocked && (
                                         <span style={{
                                             background: 'rgba(245, 158, 11, 0.1)',
@@ -730,18 +791,27 @@ const UserRoles: React.FC = () => {
                         <div style={{ textAlign: 'center', padding: '5rem 0', color: 'var(--text-muted)' }}>Select a user from the sidebar to customize their individual permissions</div>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            {MENU_STRUCTURE.map(menu => {
+                            {MENU_STRUCTURE.filter(menu => {
+                                // Filter based on Master Control (Module Gate)
+                                if (menu.moduleId && moduleControls[menu.moduleId] === false) return false;
+                                return true;
+                            }).map(menu => {
                                 const Icon = menu.icon;
                                 const allPerms = getAllMenuPermissions(menu);
                                 const enabled = isMenuEnabled(menu.permissions, currentPermissions);
-                                const hasChildren = menu.children && menu.children.length > 0;
+
+                                // Filter children based on Master Control
+                                const visibleChildren = menu.children?.filter(child => {
+                                    if (child.moduleId && moduleControls[child.moduleId] === false) return false;
+                                    return true;
+                                }) || [];
+
+                                const hasChildren = visibleChildren.length > 0;
                                 const isExpanded = expandedMenus[menu.id] || false;
 
                                 // Count enabled children
-                                const enabledChildren = menu.children
-                                    ? menu.children.filter(c => isMenuEnabled(c.permissions, currentPermissions)).length
-                                    : 0;
-                                const totalChildren = menu.children?.length || 0;
+                                const enabledChildren = visibleChildren.filter(c => isMenuEnabled(c.permissions, currentPermissions)).length;
+                                const totalChildren = visibleChildren.length;
 
                                 return (
                                     <div key={menu.id} style={{
@@ -872,7 +942,7 @@ const UserRoles: React.FC = () => {
                                                     gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
                                                     gap: '0.5rem',
                                                 }}>
-                                                    {menu.children!.map(child => {
+                                                    {visibleChildren.map(child => {
                                                         const childEnabled = isMenuEnabled(child.permissions, currentPermissions);
 
                                                         return (
@@ -927,6 +997,103 @@ const UserRoles: React.FC = () => {
                             })}
                         </div>
                     )}
+
+                    {/* ──── DATA WRITE ACCESS SECTION ──── */}
+                    {activeTab === 'ROLES' && selectedRole && (
+                        <div style={{
+                            marginTop: '2rem',
+                            borderRadius: '1.25rem',
+                            overflow: 'hidden',
+                            border: selectedRole.canWrite
+                                ? '2px solid rgba(234, 179, 8, 0.4)'
+                                : '2px solid rgba(239, 68, 68, 0.25)',
+                            background: selectedRole.canWrite
+                                ? 'linear-gradient(135deg, rgba(254, 252, 232, 0.8) 0%, rgba(254, 249, 195, 0.5) 100%)'
+                                : 'linear-gradient(135deg, rgba(254, 242, 242, 0.8) 0%, rgba(254, 226, 226, 0.4) 100%)'
+                        }}>
+                            <div style={{ padding: '1.5rem 2rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                                {/* Icon */}
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px', flexShrink: 0,
+                                    background: selectedRole.canWrite
+                                        ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                        : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '1.5rem',
+                                    boxShadow: selectedRole.canWrite
+                                        ? '0 6px 16px rgba(234, 179, 8, 0.35)'
+                                        : '0 6px 16px rgba(239, 68, 68, 0.3)'
+                                }}>
+                                    {selectedRole.canWrite ? '✏️' : '🔒'}
+                                </div>
+
+                                {/* Text */}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '0.25rem', color: selectedRole.canWrite ? '#92400e' : '#991b1b' }}>
+                                        Data Write Access
+                                        {isLocked && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#b45309', fontWeight: 700 }}>🔒 Always ON for Admin</span>}
+                                    </div>
+                                    <div style={{ fontSize: '0.8rem', color: selectedRole.canWrite ? '#a16207' : '#b91c1c', lineHeight: 1.5 }}>
+                                        {selectedRole.canWrite
+                                            ? '⚠️ This role can Add, Edit and Delete data from the database.'
+                                            : '✅ View-Only mode — This role can only read data. No add, edit, or delete allowed.'}
+                                    </div>
+                                </div>
+
+                                {/* Toggle */}
+                                <button
+                                    disabled={isLocked}
+                                    onClick={() => {
+                                        if (isLocked) return;
+                                        const updatedRole = { ...selectedRole, canWrite: !selectedRole.canWrite };
+                                        setSelectedRole(updatedRole);
+                                        const updatedRoles = roles.map(r => r.id === updatedRole.id ? updatedRole : r);
+                                        setRoles(updatedRoles);
+                                        saveRolesToFirestore(updatedRoles);
+                                    }}
+                                    style={{
+                                        width: '68px', height: '36px', borderRadius: '18px', border: 'none',
+                                        background: selectedRole.canWrite ? '#f59e0b' : '#94a3b8',
+                                        position: 'relative', cursor: isLocked ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)', flexShrink: 0,
+                                        opacity: isLocked ? 0.6 : 1,
+                                        boxShadow: selectedRole.canWrite ? '0 4px 12px rgba(234, 179, 8, 0.4)' : 'none',
+                                    }}
+                                >
+                                    <div style={{
+                                        width: '28px', height: '28px', borderRadius: '50%', background: 'white',
+                                        position: 'absolute', top: '4px',
+                                        left: selectedRole.canWrite ? '36px' : '4px',
+                                        transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                                        fontSize: '0.7rem'
+                                    }}>
+                                        {selectedRole.canWrite ? '✏️' : '👁️'}
+                                    </div>
+                                </button>
+                            </div>
+
+                            {/* Sub-info bar */}
+                            <div style={{
+                                padding: '0.75rem 2rem',
+                                borderTop: '1px solid',
+                                borderColor: selectedRole.canWrite ? 'rgba(234, 179, 8, 0.2)' : 'rgba(239, 68, 68, 0.15)',
+                                background: selectedRole.canWrite ? 'rgba(254, 249, 195, 0.4)' : 'rgba(254, 226, 226, 0.3)',
+                                fontSize: '0.7rem',
+                                color: selectedRole.canWrite ? '#92400e' : '#7f1d1d',
+                                fontWeight: 600,
+                                display: 'flex',
+                                gap: '1.5rem',
+                                flexWrap: 'wrap'
+                            }}>
+                                <span>{selectedRole.canWrite ? '✔ Add Records' : '✘ Cannot Add'}</span>
+                                <span>{selectedRole.canWrite ? '✔ Edit Records' : '✘ Cannot Edit'}</span>
+                                <span>{selectedRole.canWrite ? '✔ Delete Records' : '✘ Cannot Delete'}</span>
+                                <span>👁 View Access: Always Allowed</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -947,7 +1114,7 @@ const UserRoles: React.FC = () => {
                                 <X size={24} />
                             </button>
                         </div>
-                        <div style={{ marginBottom: '2rem' }}>
+                        <div style={{ marginBottom: '1.25rem' }}>
                             <label className="field-label">Role Name</label>
                             <input
                                 type="text"
@@ -957,6 +1124,26 @@ const UserRoles: React.FC = () => {
                                 onChange={e => setNewRoleName(e.target.value)}
                                 autoFocus
                             />
+                        </div>
+                        <div style={{ marginBottom: '2rem' }}>
+                            <label className="field-label">Access Template (Base Role)</label>
+                            <select
+                                className="input-field"
+                                value={newRoleType}
+                                onChange={e => setNewRoleType(e.target.value as Role)}
+                                disabled={editingRole?.isDefault}
+                            >
+                                <option value="ADMIN">Administrator (Full Access)</option>
+                                <option value="MANAGER">Manager Template</option>
+                                <option value="ACCOUNTANT">Accountant Template</option>
+                                <option value="TEACHER">Teacher Template</option>
+                                <option value="DRIVER">Driver Template</option>
+                                <option value="PARENT">Parent Template</option>
+                                <option value="USER">Restricted User Template</option>
+                            </select>
+                            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                                This determines which dashboard sections are visible by default. You can still refine granular permissions below.
+                            </p>
                         </div>
                         <div style={{ display: 'flex', gap: '1rem' }}>
                             <button className="btn" style={{ flex: 1 }} onClick={() => { setShowCreateModal(false); setEditingRole(null); setNewRoleName(''); }}>Cancel</button>

@@ -19,6 +19,7 @@ const MODULE_STRUCTURE = [
             { id: '/students/re-reg', label: 'Re-Registration Report' },
             { id: '/students/dues', label: 'Dues List' },
             { id: '/students/promotion', label: 'Promote Students' },
+            { id: '/students/photos', label: 'Student Photo Upload' },
         ]
     },
     {

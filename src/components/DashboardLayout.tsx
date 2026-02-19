@@ -205,7 +205,7 @@ const menuItems = [
     {
         label: 'Student Management',
         icon: Users,
-        roles: ['ADMIN', 'MANAGER', 'TEACHER'],
+        roles: ['ADMIN', 'MANAGER', 'TEACHER', 'ACCOUNTANT'],
         moduleId: 'students',
         children: [
             { to: '/students/admission', label: 'Add Student', permission: Permission.ADMIT_STUDENT, moduleId: '/students/admission' },
@@ -216,7 +216,8 @@ const menuItems = [
             { to: '/students/report', label: 'Student Report', permission: Permission.VIEW_STUDENT_REPORTS, moduleId: '/students/report' },
             { to: '/students/re-reg', label: 'Re-Registration Report', permission: Permission.VIEW_RE_REGISTRATION_REPORTS, moduleId: '/students/re-reg' },
             { to: '/students/dues', label: 'Dues List', permission: Permission.VIEW_DUES_LIST, moduleId: '/students/dues' },
-            { to: '/students/promotion', label: 'Promote Students', permission: Permission.ADMIT_STUDENT, moduleId: '/students/promotion' },
+            { to: '/students/promotion', label: 'Promote Students', permission: Permission.PROMOTE_STUDENTS, moduleId: '/students/promotion' },
+            { to: '/students/photos', label: 'Student Photo Upload', permission: Permission.UPLOAD_STUDENT_PHOTO, moduleId: '/students/photos' },
         ]
     },
     {
@@ -332,7 +333,7 @@ const menuItems = [
 ];
 
 const DashboardLayout: React.FC = () => {
-    const { user, login, logout, hasPermission } = useAuth();
+    const { user, login, logout, hasPermission, refreshPermissions } = useAuth();
     const { currentSchool } = useSchool();
     const { schoolId } = useParams();
     const navigate = useNavigate();
@@ -351,15 +352,21 @@ const DashboardLayout: React.FC = () => {
 
         const safeId = currentSchool.id.replace(/\//g, '');
         const roleConfigs = allSettings.find(s => s.id === `role_configs_${safeId}`);
+        let synced = false;
         if (roleConfigs?.roles) {
             localStorage.setItem('millat_custom_roles', JSON.stringify(roleConfigs.roles));
+            synced = true;
         }
 
         const userOverrides = allSettings.find(s => s.id === `user_overrides_${safeId}`);
         if (userOverrides?.overrides) {
             localStorage.setItem('millat_user_overrides', JSON.stringify(userOverrides.overrides));
+            synced = true;
         }
-    }, [allSettings, currentSchool?.id]);
+
+        // Force all permission-dependent components to re-render with the updated data
+        if (synced) refreshPermissions();
+    }, [allSettings, currentSchool?.id, refreshPermissions]);
 
     // Close mobile menu on route change
 
@@ -425,14 +432,16 @@ const DashboardLayout: React.FC = () => {
 
                 <nav style={{ flex: 1, overflowY: 'auto', marginBottom: '1rem' }} className="sidebar-nav">
                     {menuItems.map((item, idx) => {
-                        // 1. Role-based filtering (Super Admin bypasses this)
+                        // 1. Role & Permission Filtering (Super Admin bypasses this)
                         if (user?.role !== 'SUPER_ADMIN') {
-                            if (item.roles && (!user?.role || !item.roles.includes(user.role as any))) return null;
-                        }
-
-                        // 2. Permission-based filtering (Super Admin bypasses this)
-                        if (user?.role !== 'SUPER_ADMIN') {
-                            if (item.permission && !hasPermission(item.permission)) return null;
+                            // If it has a specific permission, that is our primary gate
+                            if (item.permission) {
+                                if (!hasPermission(item.permission)) return null;
+                            } else {
+                                // If no permission is defined, check roles (e.g. for section headers or role-only items)
+                                // We skip role check for parents with children, as children filtering will decide parent visibility
+                                if (!item.children && item.roles && (!user?.role || !item.roles.includes(user.role as any))) return null;
+                            }
                         }
 
                         // 3. School Module Gate (Tenant level) - APPLIES TO ALL USERS INCLUDING SUPER_ADMIN
@@ -449,23 +458,26 @@ const DashboardLayout: React.FC = () => {
 
                         if (item.children) {
                             const filteredChildren = item.children.filter((child: any) => {
-                                // 1. Role-based check (Super Admin bypasses this)
+                                // 1. Unified filtering (Super Admin bypasses this)
                                 if (user?.role !== 'SUPER_ADMIN') {
-                                    if (child.roles && (!user?.role || !child.roles.includes(user?.role as any))) return false;
-                                }
-
-                                // 2. Permission Check (Super Admin bypasses this)
-                                if (user?.role !== 'SUPER_ADMIN') {
-                                    if (child.permission && !hasPermission(child.permission)) return false;
+                                    if (child.permission) {
+                                        if (!hasPermission(child.permission)) return false;
+                                    } else if (child.roles) {
+                                        if (!user?.role || !child.roles.includes(user?.role as any)) return false;
+                                    }
                                 }
 
                                 // 3. School Module Gate (Tenant level)
                                 if (currentSchool && (child as any).moduleId) {
                                     if (currentSchool.allowedModules) {
                                         const cMid = (child as any).moduleId as string;
-                                        // Direct match OR base-module match (e.g. '/settings/inventory' → 'inventory')
-                                        const baseModule = cMid.startsWith('/settings/') ? cMid.replace('/settings/', '') : null;
-                                        if (!currentSchool.allowedModules.includes(cMid) && !(baseModule && currentSchool.allowedModules.includes(baseModule))) return false;
+                                        // Direct match OR base-module match (e.g. '/students/photos' → 'students')
+                                        const parts = cMid.split('/').filter(Boolean);
+                                        const baseModule = parts[0] || null;
+                                        const isAllowed = currentSchool.allowedModules.includes(cMid) ||
+                                            (baseModule && currentSchool.allowedModules.includes(baseModule));
+
+                                        if (!isAllowed) return false;
                                     }
                                 }
 
@@ -629,7 +641,7 @@ const DashboardLayout: React.FC = () => {
                                 <div className="user-info" style={{ textAlign: 'right' }}>
                                     <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-main)' }}>{user?.username}</div>
                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
-                                        {user?.role}
+                                        {user?.displayRole || user?.role}
                                         {user?.allProfiles && user.allProfiles.length > 1 && <ChevronDown size={14} />}
                                     </div>
                                 </div>

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useFirestore } from '../../hooks/useFirestore';
-import { FileDown, Search, IndianRupee, ArrowLeft, Printer, MessageCircle, Trash2, AlertTriangle, X } from 'lucide-react';
+import { FileDown, Search, IndianRupee, ArrowLeft, Trash2, AlertTriangle, X } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
-import { sortClasses, APP_CONFIG } from '../../constants/app';
-import { amountToWords } from '../../utils/formatters';
+import { sortClasses } from '../../constants/app';
+
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSchool } from '../../context/SchoolContext';
+import FeeReceipt from '../../components/fees/FeeReceipt';
 
 const FeeReport: React.FC = () => {
     const { currentSchool } = useSchool();
@@ -148,90 +149,26 @@ const FeeReport: React.FC = () => {
         setView('RECEIPT');
     };
 
-    const handlePrint = () => {
-        window.print();
-    };
+    const renderReceipt = () => {
+        if (!currentReceipt) return null;
 
-    const handleWhatsAppReceipt = async () => {
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const receiptElement = document.querySelector('.printable-receipt') as HTMLElement;
-            if (!receiptElement) {
-                alert('Receipt not found');
-                return;
-            }
+        const institutionInfo = allSettings?.find((item: any) =>
+            item.id === 'school_info' ||
+            item.type === 'school_info' ||
+            item.type === 'institution' ||
+            item.type === 'Institution Information'
+        );
 
-            // Convert cross-origin logo to base64 data URL to avoid canvas taint
-            const logoImg = receiptElement.querySelector('img') as HTMLImageElement;
-            let originalSrc = '';
-            if (logoImg && logoImg.src) {
-                originalSrc = logoImg.src;
-                try {
-                    const tempImg = new Image();
-                    tempImg.crossOrigin = 'anonymous';
-                    const logoDataUrl = await new Promise<string>((resolve) => {
-                        tempImg.onload = () => {
-                            try {
-                                const c = document.createElement('canvas');
-                                c.width = tempImg.naturalWidth;
-                                c.height = tempImg.naturalHeight;
-                                const ctx = c.getContext('2d');
-                                ctx?.drawImage(tempImg, 0, 0);
-                                resolve(c.toDataURL('image/png'));
-                            } catch {
-                                resolve('');
-                            }
-                        };
-                        tempImg.onerror = () => resolve('');
-                        setTimeout(() => resolve(''), 5000);
-                        tempImg.src = logoImg.src;
-                    });
-                    if (logoDataUrl) {
-                        logoImg.src = logoDataUrl;
-                    }
-                } catch {
-                    // If conversion fails, continue without converting
-                }
-            }
-
-            const canvas = await html2canvas(receiptElement, {
-                scale: 2,
-                backgroundColor: '#ffffff',
-                logging: false,
-                useCORS: true,
-                allowTaint: false
-            });
-
-            // Restore original logo src
-            if (logoImg && originalSrc) {
-                logoImg.src = originalSrc;
-            }
-
-            canvas.toBlob(async (blob) => {
-                if (!blob) {
-                    alert('Failed to generate receipt image');
-                    return;
-                }
-
-                try {
-                    await navigator.clipboard.write([
-                        new ClipboardItem({ 'image/png': blob })
-                    ]);
-
-                    const mobileNumber = selectedStudent?.mobileNo || '';
-                    const message = encodeURIComponent('Thanks for payment, Find attached money receipt.');
-                    const whatsappUrl = `https://wa.me/${mobileNumber.replace(/[^0-9]/g, '')}?text=${message}`;
-                    window.open(whatsappUrl, '_blank');
-                    alert('Receipt copied to clipboard! Paste it in WhatsApp chat.');
-                } catch (clipboardError) {
-                    console.error('Clipboard error:', clipboardError);
-                    alert('Receipt image generated but clipboard access denied.');
-                }
-            }, 'image/png');
-        } catch (error) {
-            console.error('Error generating WhatsApp receipt:', error);
-            alert('Failed to generate receipt image.');
-        }
+        return (
+            <div className="animate-fade-in" style={{ maxWidth: '600px', margin: '0 auto' }}>
+                <FeeReceipt
+                    receipt={currentReceipt}
+                    studentData={selectedStudent}
+                    schoolInfo={institutionInfo}
+                    onClose={() => setView('REPORT')}
+                />
+            </div>
+        );
     };
 
     const handleWipeAllData = async () => {
@@ -275,199 +212,6 @@ const FeeReport: React.FC = () => {
         }
     };
 
-    const renderReceipt = () => {
-        if (!currentReceipt) return null;
-
-        const receipt = currentReceipt;
-        const totalPaid = receipt.paid || 0;
-        const previousDues = receipt.previousDues || 0;
-        const grandTotal = receipt.total || 0;
-        const discount = receipt.discount || 0;
-        const netPayable = grandTotal - discount;
-        const currentDues = netPayable - totalPaid;
-
-        const institutionInfo = allSettings?.find((item: any) =>
-            item.id === 'school_info' ||
-            item.type === 'school_info' ||
-            item.type === 'institution' ||
-            item.type === 'Institution Information'
-        );
-
-        const schoolName = currentSchool?.fullName || currentSchool?.name || institutionInfo?.name || institutionInfo?.schoolName || 'AI School 360';
-        const schoolAddress = currentSchool?.address || institutionInfo?.address || institutionInfo?.schoolAddress || 'Near Moti Nagar, Vickhara, PO-Tarwer, PS-Amnour, Saran Bihar';
-        const schoolPhone = currentSchool?.phone || institutionInfo?.phone || institutionInfo?.contact || institutionInfo?.mobile || '';
-        const schoolWebsite = currentSchool?.website || institutionInfo?.website || institutionInfo?.web || 'www.aischool360.in';
-        const schoolLogo = currentSchool?.logoUrl || currentSchool?.logo || institutionInfo?.logo || APP_CONFIG.logo;
-
-        return (
-            <div className="animate-fade-in" style={{ maxWidth: '600px', margin: '0 auto' }}>
-                <style>
-                    {`
-                        @media print {
-                            body * { visibility: hidden; }
-                            .printable-receipt, .printable-receipt * { visibility: visible; }
-                            .printable-receipt { position: absolute; left: 0; top: 0; width: 100%; }
-                            .no-print { display: none !important; }
-                            @page { size: A5; margin: 0.5cm; }
-                        }
-                    `}
-                </style>
-
-                <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <button onClick={() => setView('REPORT')} className="btn-icon"><ArrowLeft size={20} /></button>
-                        <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Fee Receipt</h1>
-                    </div>
-                    <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button onClick={() => setView('REPORT')} className="btn">Back</button>
-                        <button onClick={handleWhatsAppReceipt} className="btn" style={{ background: '#25D366', color: 'white' }}>
-                            <MessageCircle size={18} /> WhatsApp
-                        </button>
-                        <button onClick={handlePrint} className="btn btn-primary"><Printer size={18} /> Print</button>
-                    </div>
-                </div>
-
-                <div className="printable-receipt">
-                    <div style={{
-                        border: '2px solid #000',
-                        padding: '15px',
-                        background: 'white',
-                        fontFamily: 'Arial, sans-serif',
-                        fontSize: '11px',
-                        width: '148mm',
-                        minHeight: '200mm',
-                        margin: '0 auto'
-                    }}>
-                        {/* Header with School Info */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '10px' }}>
-                            <div style={{ width: '50px', height: '50px', marginRight: '10px', flexShrink: 0 }}>
-                                <img
-                                    src={schoolLogo}
-                                    style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%', border: '2px solid #000' }}
-                                    onError={(e) => {
-                                        (e.target as HTMLImageElement).style.display = 'none';
-                                        (e.target as HTMLImageElement).parentElement!.innerHTML = '<div style="width:50px;height:50px;border:2px solid #000;borderRadius:50%;display:flex;alignItems:center;justifyContent:center;fontSize:8px;fontWeight:700;textAlign:center">LOGO</div>';
-                                    }}
-                                />
-                            </div>
-                            <div style={{ flex: 1, textAlign: 'center' }}>
-                                <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#8B0000' }}>{schoolName}</h2>
-                                <p style={{ margin: '2px 0', fontSize: '10px' }}>{schoolAddress}</p>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '3px', fontSize: '9px' }}>
-                                    <span>📱 {schoolPhone}</span>
-                                    <span>🌐 {schoolWebsite}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Receipt Info Row */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', marginBottom: '8px', fontSize: '10px' }}>
-                            <div style={{ border: '1px solid #000', padding: '3px 6px' }}>
-                                <strong>Receipt No:</strong> {receipt.receiptNo}
-                            </div>
-                            <div style={{ border: '1px solid #000', padding: '3px 6px', minWidth: '150px' }}>
-                                {formatDate(receipt.date)} {new Date(receipt.date?.seconds * 1000 || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                            </div>
-                        </div>
-
-                        {/* For PARENT Label */}
-                        <div style={{ textAlign: 'center', margin: '6px 0', fontSize: '9px', fontStyle: 'italic' }}>
-                            For PARENT - Fee Details of {receipt.paidFor || 'Current Month'}
-                        </div>
-
-                        {/* Student Details Table */}
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px', fontSize: '10px' }}>
-                            <tbody>
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px', width: '100px' }}><strong>Name</strong></td>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}>{receipt.studentName?.toUpperCase()}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Student ID</strong></td>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}>{receipt.admissionNo}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Father's Name</strong></td>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}>{selectedStudent?.fatherName?.toUpperCase() || 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Class</strong></td>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
-                                        {receipt.class}-{receipt.section} <span style={{ float: 'right' }}><strong>Roll No:</strong> {selectedStudent?.rollNo || 'N/A'}</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-
-                        {/* Fee Details Table */}
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px', fontSize: '10px' }}>
-                            <tbody>
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px', width: '50%' }}><strong>Previous Dues</strong></td>
-                                    <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right' }}>{Number(previousDues).toFixed(2)}</td>
-                                </tr>
-                                {receipt.feeBreakdown && Object.entries(receipt.feeBreakdown).map(([feeName, amount]: [string, any]) => (
-                                    <tr key={feeName}>
-                                        <td style={{ border: '1px solid #000', padding: '3px 6px' }}>{feeName}</td>
-                                        <td style={{ border: '1px solid #000', padding: '3px 6px', textAlign: 'right' }}>{Number(amount).toFixed(2)}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-
-                        {/* Totals */}
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px', fontSize: '10px' }}>
-                            <tbody>
-                                <tr style={{ fontWeight: 700 }}>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', width: '50%' }}>Grand Total</td>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{grandTotal.toFixed(2)}</td>
-                                </tr>
-                                {discount > 0 && (
-                                    <tr style={{ fontWeight: 700, color: '#d00' }}>
-                                        <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Discount (-)</td>
-                                        <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>-{discount.toFixed(2)}</td>
-                                    </tr>
-                                )}
-                                <tr style={{ fontWeight: 700, background: '#f8fafc' }}>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Net Payable</td>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{netPayable.toFixed(2)}</td>
-                                </tr>
-                                <tr style={{ fontWeight: 700, background: '#f0f0f0' }}>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Paid Amount (in {receipt.paymentMode || 'CASH'})</td>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{totalPaid.toFixed(2)}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}><strong>Amount In Words:</strong> {amountToWords(totalPaid)} Only</td>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}></td>
-                                </tr>
-                                <tr style={{ fontWeight: 700, background: currentDues > 0 ? '#ffe0e0' : '#f0f0f0' }}>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px' }}>Current Dues</td>
-                                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right', color: currentDues > 0 ? '#d00' : '#000' }}>{currentDues.toFixed(2)}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-
-                        {/* Instructions */}
-                        <div style={{ fontSize: '8px', marginTop: '8px', padding: '6px', border: '1px solid #ccc', background: '#fafafa' }}>
-                            <strong>Instructions:</strong><br />
-                            • Please pay before 10th of every month.<br />
-                            • Always update your mobile number for SMS notification.<br />
-                            • This receipt is auto generated by computer only for information purpose.
-                        </div>
-
-                        {/* Footer */}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-                            <div style={{ textAlign: 'center' }}>
-                                <div style={{ borderTop: '1px solid #000', width: '150px', paddingTop: '3px', fontSize: '9px', fontWeight: 700 }}>
-                                    Authorised Signatory
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    };
 
     return (
         <div className="no-scrollbar" style={{ paddingBottom: '3rem' }}>

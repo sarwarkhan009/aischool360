@@ -378,7 +378,9 @@ const ParentDashboard: React.FC = () => {
                     ]);
 
                     const fTypes = typesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-                    const fAmounts = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+                    const fAmountsOrig = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+                    const activeFY = currentSchool?.activeFinancialYear || '2025-26';
+                    const fAmounts = fAmountsOrig.filter(fa => (fa.financialYear || '2025-26') === activeFY);
                     const fHistory = collSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
                     const MONTH_IDX = getMonthIndexMap();
@@ -406,9 +408,6 @@ const ParentDashboard: React.FC = () => {
 
                     let totalPayable = 0;
 
-                    const studentAdmMonth = admDateRaw ? admDateRaw.getMonth() : -1;
-                    const studentAdmYear = admDateRaw ? admDateRaw.getFullYear() : -1;
-
                     fTypes.forEach(type => {
                         if (type.status !== 'ACTIVE') return;
 
@@ -429,14 +428,18 @@ const ParentDashboard: React.FC = () => {
                             const amountConf = fAmounts.find(fa => fa.feeTypeId === type.id && fa.className === currentStudentData?.class);
                             if (!amountConf || !amountConf.amount) return;
 
+                            const isMonthlyFee = type.feeHeadName?.toLowerCase().includes('monthly');
+                            const studentMonthlyFee = currentStudentData?.monthlyFee ? parseFloat(currentStudentData.monthlyFee) : null;
+                            const useStudentFee = isMonthlyFee && studentMonthlyFee && studentMonthlyFee > 0;
+
                             type.months?.forEach((monthName: string) => {
                                 let isDue = false;
 
                                 if (monthName === 'Admission_month') {
                                     if (admType === 'OLD') {
                                         isDue = true;
-                                    } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
-                                        isDue = true;
+                                    } else if (admType === 'NEW' && admDateRaw) {
+                                        isDue = today >= admDateRaw;
                                     }
                                 } else {
                                     const targetMonthIdx = MONTH_IDX[monthName];
@@ -455,17 +458,19 @@ const ParentDashboard: React.FC = () => {
                                 }
 
                                 if (isDue) {
-                                    totalPayable += Number(amountConf.amount);
+                                    totalPayable += useStudentFee ? studentMonthlyFee! : Number(amountConf.amount);
                                 }
                             });
                         }
                     });
 
-                    const totalPaid = fHistory
-                        .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate)
-                        .reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
+                    const sessionPayments = fHistory
+                        .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate);
 
-                    setFeeBalance(Math.max(0, totalPayable - totalPaid));
+                    const totalPaid = sessionPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
+                    const totalDiscount = sessionPayments.reduce((sum, c) => sum + (Number(c.discount) || 0), 0);
+
+                    setFeeBalance(totalPayable - totalPaid - totalDiscount);
                 } catch (feeErr) {
                     console.warn('⚠️ Fee banner calc failed:', feeErr);
                 }
@@ -592,11 +597,13 @@ const ParentDashboard: React.FC = () => {
                     }
                 });
 
-                const totalPaid = fHistory
-                    .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate)
-                    .reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
+                const sessionPayments = fHistory
+                    .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate);
 
-                setFeeBalance(Math.max(0, totalPayable - totalPaid));
+                const totalPaid = sessionPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
+                const totalDiscount = sessionPayments.reduce((sum, c) => sum + (Number(c.discount) || 0), 0);
+
+                setFeeBalance(Math.max(0, totalPayable - totalPaid - totalDiscount));
             } catch (feeErr) {
                 console.warn('⚠️ Fee banner real-time update failed:', feeErr);
             }

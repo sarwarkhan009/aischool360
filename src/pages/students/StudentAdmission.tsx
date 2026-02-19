@@ -260,8 +260,9 @@ const StudentAdmission: React.FC = () => {
     // Auto-populate monthly fee from fee management when class is selected
     React.useEffect(() => {
         if (formData.class && feeAmounts && feeAmounts.length > 0) {
-            // Filter for this class AND only fees that have "Monthly" in the name
+            // Filter by active financial year first, then by class AND "Monthly" in the name
             const classFees = feeAmounts.filter((fa: any) =>
+                (fa.financialYear === activeFY || (!fa.financialYear && !activeFY)) &&
                 fa.className === formData.class &&
                 fa.feeTypeName &&
                 fa.feeTypeName.toLowerCase().includes('monthly')
@@ -272,7 +273,7 @@ const StudentAdmission: React.FC = () => {
             // Always update when class changes, even if it's 0
             setFormData(prev => ({ ...prev, monthlyFee: totalMonthlyFee.toString() }));
         }
-    }, [formData.class, feeAmounts]);
+    }, [formData.class, feeAmounts, activeFY]);
 
     const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -371,11 +372,12 @@ const StudentAdmission: React.FC = () => {
                 // If this admission came from a public registration, delete the registration request
                 if (initialStudent?.registrationId) {
                     try {
-                        const { doc, deleteDoc } = await import('firebase/firestore');
+                        const { doc } = await import('firebase/firestore');
                         const { db } = await import('../../lib/firebase');
-                        await deleteDoc(doc(db, 'registrations', initialStudent.registrationId));
-                    } catch (regErr) {
-                        console.error("Error deleting registration record:", regErr);
+                        const { guardedDeleteDoc } = await import('../../lib/firestoreWrite');
+                        await guardedDeleteDoc(doc(db, 'registrations', initialStudent.registrationId));
+                    } catch (regErr: any) {
+                        if (regErr?.message !== 'WRITE_DENIED') console.error("Error deleting registration record:", regErr);
                         // Don't fail the whole process if registration deletion fails
                     }
                 }
@@ -768,6 +770,14 @@ const StudentAdmission: React.FC = () => {
                                             <input type="number" placeholder="Years" className="input-field-premium" value={formData.fatherAge} onChange={e => setFormData({ ...formData, fatherAge: e.target.value })} />
                                         </div>
                                     )}
+                                    {isFieldEnabled('familyIncome') && (
+                                        <div className="input-group-vertical">
+                                            <label className="field-label">
+                                                Family Income (Annual){isFieldRequired('familyIncome') && <span style={{ color: '#ef4444' }}> *</span>}
+                                            </label>
+                                            <input type="text" placeholder="e.g. 5,00,000" className="input-field-premium" value={formData.familyIncome} onChange={e => setFormData({ ...formData, familyIncome: e.target.value })} />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1036,14 +1046,7 @@ const StudentAdmission: React.FC = () => {
                                     </div>
                                 )}
 
-                                {isFieldEnabled('familyIncome') && (
-                                    <div className="input-group-vertical">
-                                        <label className="field-label">
-                                            Family Income (Annual){isFieldRequired('familyIncome') && <span style={{ color: '#ef4444' }}> *</span>}
-                                        </label>
-                                        <input type="text" placeholder="e.g. 5,00,000" className="input-field-premium" value={formData.familyIncome} onChange={e => setFormData({ ...formData, familyIncome: e.target.value })} />
-                                    </div>
-                                )}
+
 
                             </div>
 

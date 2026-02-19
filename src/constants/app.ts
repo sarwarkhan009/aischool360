@@ -64,9 +64,16 @@ export const sortClasses = (classes: any[]) => {
  * Get only active classes (where active = true or active is undefined/not set)
  * Classes without the 'active' field are treated as enabled by default
  * Used for dropdowns, filters, and reports
+ * @param classes - Array of class settings documents
+ * @param financialYear - Optional financial year to filter by (e.g., '2025-2026')
  */
-export const getActiveClasses = (classes: any[]) => {
+export const getActiveClasses = (classes: any[], financialYear?: string) => {
+    let filtered = classes;
+    if (financialYear) {
+        // Only include classes that match the given financial year
+        filtered = classes.filter((c: any) => c.financialYear === financialYear);
+    }
     // Filter: include if active=true OR if active field doesn't exist (default enabled)
-    const activeOnly = classes.filter((c: any) => c.active !== false);
+    const activeOnly = filtered.filter((c: any) => c.active !== false);
     return sortClasses(activeOnly);
 };

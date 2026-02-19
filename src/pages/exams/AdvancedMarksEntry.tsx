@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
     BookOpen,
@@ -57,6 +57,7 @@ interface MarksEntry {
     maxMarks: number;
     marks: StudentMarks[];
     enteredBy: string;
+    enteredByName?: string;
     enteredByRole: string;
     entryDate: string;
     status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
@@ -78,6 +79,7 @@ const AdvancedMarksEntry: React.FC = () => {
     const { data: students } = useFirestore<any>('students');
     const { data: gradingSystems } = useFirestore<any>('grading_systems');
     const { data: allSettings } = useFirestore<any>('settings');
+    const { data: teachers } = useFirestore<any>('teachers');
 
     const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || []);
 
@@ -110,6 +112,8 @@ const AdvancedMarksEntry: React.FC = () => {
     const [filterQuery, setFilterQuery] = useState('');
     const [showBulkImport, setShowBulkImport] = useState(false);
     const [currentEntry, setCurrentEntry] = useState<MarksEntry | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const isSavingRef = useRef(false);
 
     const isAdmin = user?.role === 'ADMIN' || user?.role === 'MANAGER';
     const schoolExams = exams?.filter(e => e.schoolId === currentSchool?.id && e.status !== 'CANCELLED') || [];
@@ -118,9 +122,15 @@ const AdvancedMarksEntry: React.FC = () => {
     // Get selected exam details
     const examDetails = schoolExams.find(e => e.id === selectedExam);
     const availableClasses = examDetails?.targetClasses || [];
-    const availableSubjects = examDetails?.subjects?.filter((s: any) =>
-        selectedClass ? examDetails.targetClasses.includes(selectedClass) : true
-    ) || [];
+
+    // Prioritize class-specific routine subjects, fallback to global subjects
+    const classRoutine = examDetails?.classRoutines?.find((cr: any) =>
+        cr.classId === selectedClass || cr.className === getClassName(selectedClass)
+    );
+
+    const availableSubjects = (selectedClass && classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
+        ? classRoutine.routine
+        : (examDetails?.subjects || []);
 
     // Get selected subject details
     const subjectDetails = availableSubjects.find((s: any) => s.subjectId === selectedSubject);
@@ -129,15 +139,22 @@ const AdvancedMarksEntry: React.FC = () => {
     const selectedClassObj = activeClasses.find((c: any) => c.id === selectedClass);
     const selectedClassName = selectedClassObj?.name;
 
-    const classStudents = students?.filter((s: any) =>
+    const classStudents = (students?.filter((s: any) =>
         s.schoolId === currentSchool?.id &&
         (s.class === selectedClass || (selectedClassName && s.class === selectedClassName)) &&
         s.status === 'ACTIVE' &&
         (!selectedSection || s.section === selectedSection)
-    ) || [];
+    ) || []).sort((a: any, b: any) => {
+        const rollA = a.classRollNo || a.rollNo || a.admissionNumber || '';
+        const rollB = b.classRollNo || b.rollNo || b.admissionNumber || '';
+        return rollA.toString().localeCompare(rollB.toString(), undefined, { numeric: true });
+    });
 
     // Check if marks already exist for this combination
     useEffect(() => {
+        // Skip syncing from Firestore while a save is in progress to prevent race conditions
+        if (isSavingRef.current) return;
+
         if (selectedExam && selectedClass && selectedSubject) {
             const existing = marksEntries?.find(entry =>
                 entry.examId === selectedExam &&
@@ -149,20 +166,33 @@ const AdvancedMarksEntry: React.FC = () => {
 
             if (existing) {
                 setCurrentEntry(existing);
-                // Recalculate grades for existing marks
-                const updatedMarks = existing.marks.map((student: StudentMarks) => ({
-                    ...student,
-                    grade: student.isAbsent ? 'AB' :
-                        student.isNA ? 'NA' :
-                            calculateGrade(student.percentage)
-                }));
-                setMarksData(updatedMarks);
+                // Only reload marks from Firestore if we are NOT currently editing
+                // This prevents overwriting user's in-progress edits
+                if (!isEditing) {
+                    // Recalculate grades for existing marks
+                    const updatedMarks = existing.marks.map((student: StudentMarks) => ({
+                        ...student,
+                        grade: student.isAbsent ? 'AB' :
+                            student.isNA ? 'NA' :
+                                calculateGrade(student.percentage)
+                    }));
+                    setMarksData(updatedMarks.sort((a, b) => (a.rollNumber || '').localeCompare(b.rollNumber || '', undefined, { numeric: true })));
+                }
             } else {
-                setCurrentEntry(null);
-                initializeMarksData();
+                // Only initialize (reset to 0) if NOT currently editing
+                // This prevents wiping teacher's in-progress marks when Firestore onSnapshot fires
+                if (!isEditing) {
+                    setCurrentEntry(null);
+                    initializeMarksData();
+                }
             }
         }
     }, [selectedExam, selectedClass, selectedSubject, marksEntries]);
+
+    // Reset isEditing when selection changes so fresh data loads properly
+    useEffect(() => {
+        setIsEditing(false);
+    }, [selectedExam, selectedClass, selectedSubject, selectedSection]);
 
     const initializeMarksData = () => {
         const subjectDetails = availableSubjects.find((s: any) => s.subjectId === selectedSubject);
@@ -241,6 +271,7 @@ const AdvancedMarksEntry: React.FC = () => {
     };
 
     const handleMarksChange = (index: number, field: keyof StudentMarks, value: any) => {
+        setIsEditing(true); // Mark as editing to prevent Firestore sync from overwriting
         const updated = [...marksData];
         updated[index] = { ...updated[index], [field]: value };
 
@@ -270,6 +301,7 @@ const AdvancedMarksEntry: React.FC = () => {
     };
 
     const handleNAToggle = (index: number) => {
+        setIsEditing(true);
         const updated = [...marksData];
         updated[index].isNA = !updated[index].isNA;
 
@@ -288,6 +320,7 @@ const AdvancedMarksEntry: React.FC = () => {
     };
 
     const handleAbsentToggle = (index: number) => {
+        setIsEditing(true);
         const updated = [...marksData];
         updated[index].isAbsent = !updated[index].isAbsent;
 
@@ -311,9 +344,32 @@ const AdvancedMarksEntry: React.FC = () => {
             return;
         }
 
+        // Set saving flag to prevent Firestore onSnapshot from overwriting marks during save
+        isSavingRef.current = true;
+
         try {
             const subjectDetails = availableSubjects.find((s: any) => s.subjectId === selectedSubject);
             const exam = schoolExams.find(e => e.id === selectedExam);
+
+            // Create a deep copy of marksData to ensure all values are properly captured
+            const marksSnapshot = marksData.map(student => ({
+                studentId: student.studentId,
+                admissionNo: student.admissionNo || '',
+                studentName: student.studentName,
+                rollNumber: student.rollNumber,
+                class: student.class,
+                theoryMarks: student.theoryMarks || 0,
+                practicalMarks: student.practicalMarks || 0,
+                internalMarks: student.internalMarks || 0,
+                externalMarks: student.externalMarks || 0,
+                totalMarks: student.totalMarks,
+                obtainedMarks: typeof student.obtainedMarks === 'number' ? student.obtainedMarks : (parseFloat(String(student.obtainedMarks)) || 0),
+                percentage: student.percentage || 0,
+                grade: student.grade || 'F',
+                remarks: student.remarks || '',
+                isAbsent: student.isAbsent || false,
+                isNA: student.isNA || false
+            }));
 
             const entryData: Partial<MarksEntry> = {
                 schoolId: currentSchool?.id,
@@ -326,8 +382,9 @@ const AdvancedMarksEntry: React.FC = () => {
                 sectionId: selectedSection,
                 sectionName: selectedSection,
                 maxMarks: subjectDetails?.maxMarks || 100,
-                marks: marksData,
+                marks: marksSnapshot,
                 enteredBy: user?.id || user?.username || '',
+                enteredByName: user?.name || user?.username || '',
                 enteredByRole: user?.role || '',
                 entryDate: new Date().toISOString(),
                 status,
@@ -344,10 +401,16 @@ const AdvancedMarksEntry: React.FC = () => {
                 } as MarksEntry);
             }
 
+            setIsEditing(false); // Reset editing flag after successful save
             alert(`Marks ${status === 'DRAFT' ? 'saved as draft' : 'submitted'} successfully!`);
         } catch (error) {
             console.error('Error saving marks:', error);
             alert('Failed to save marks');
+        } finally {
+            // Release the saving lock after a short delay to let Firestore sync complete
+            setTimeout(() => {
+                isSavingRef.current = false;
+            }, 2000);
         }
     };
 
@@ -406,6 +469,24 @@ const AdvancedMarksEntry: React.FC = () => {
         } catch (error) {
             console.error('Error rejecting marks:', error);
             alert('Failed to reject marks');
+        }
+    };
+
+    // Teacher can request to edit marks that are in SUBMITTED state (reverts to DRAFT)
+    const handleTeacherEdit = async () => {
+        if (!currentEntry) return;
+
+        try {
+            await update(currentEntry.id, {
+                status: 'DRAFT',
+                isLocked: false,
+                updatedAt: new Date().toISOString()
+            });
+            setIsEditing(true);
+            alert('Marks unlocked for editing. Make your changes and submit again.');
+        } catch (error) {
+            console.error('Error unlocking marks for edit:', error);
+            alert('Failed to unlock marks for editing');
         }
     };
 
@@ -517,6 +598,12 @@ const AdvancedMarksEntry: React.FC = () => {
                 }
             });
 
+            newMatches.sort((a, b) => {
+                const sA = marksData[a.index];
+                const sB = marksData[b.index];
+                return (sA.rollNumber || '').localeCompare(sB.rollNumber || '', undefined, { numeric: true });
+            });
+
             setImportPreview({ matches: newMatches, errors: newErrors, show: true });
             e.target.value = ''; // Reset input
         };
@@ -524,6 +611,7 @@ const AdvancedMarksEntry: React.FC = () => {
     };
 
     const confirmImport = () => {
+        setIsEditing(true);
         const updatedMarks = [...marksData];
         importPreview.matches.forEach(m => {
             const student = updatedMarks[m.index];
@@ -539,15 +627,30 @@ const AdvancedMarksEntry: React.FC = () => {
         alert(`Successfully imported ${importPreview.matches.length} marks!`);
     };
 
-    const filteredMarks = marksData.filter(m =>
-        m.studentName.toLowerCase().includes(filterQuery.toLowerCase()) ||
-        m.rollNumber.toLowerCase().includes(filterQuery.toLowerCase())
-    );
+    const filteredMarks = marksData
+        .filter(m =>
+            m.studentName.toLowerCase().includes(filterQuery.toLowerCase()) ||
+            (m.rollNumber && m.rollNumber.toLowerCase().includes(filterQuery.toLowerCase()))
+        )
+        .sort((a, b) => (a.rollNumber || '').localeCompare(b.rollNumber || '', undefined, { numeric: true }));
 
+    const isTeacherOwner = currentEntry?.enteredBy === (user?.id || user?.username);
     const canEdit = !currentEntry ||
         currentEntry.status === 'DRAFT' ||
-        (currentEntry.status === 'REJECTED' && currentEntry.enteredBy === user?.id) ||
+        (currentEntry.status === 'REJECTED' && (isTeacherOwner || isAdmin)) ||
         isAdmin;
+
+    // Helper: format ISO date to dd-MMM-yy HH:mm
+    const formatEntryDate = (isoDate: string) => {
+        const d = new Date(isoDate);
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mmm = months[d.getMonth()];
+        const yy = String(d.getFullYear()).slice(-2);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${dd}-${mmm}-${yy} ${hh}:${min}`;
+    };
 
     return (
         <div className="page-container">
@@ -563,6 +666,7 @@ const AdvancedMarksEntry: React.FC = () => {
                         flexWrap: 'wrap',
                         justifyContent: 'flex-start'
                     }}>
+                        {/* Admin: Approve/Reject buttons when SUBMITTED */}
                         {currentEntry.status === 'SUBMITTED' && isAdmin && (
                             <>
                                 <button
@@ -636,6 +740,8 @@ const AdvancedMarksEntry: React.FC = () => {
                                 </button>
                             </>
                         )}
+
+                        {/* Teacher edit after submit has been removed – once submitted, only admin can reject/return */}
                     </div>
                 )}
             </div>
@@ -743,8 +849,11 @@ const AdvancedMarksEntry: React.FC = () => {
 
                         <div style={{ flex: 1, fontSize: '0.875rem' }}>
                             <strong>Status:</strong> {currentEntry.status} •
-                            <strong> Entered by:</strong> {currentEntry.enteredByRole} •
-                            <strong> Date:</strong> {new Date(currentEntry.entryDate).toLocaleDateString()}
+                            <strong> Submitted by:</strong> {currentEntry.enteredByName || (() => {
+                                const teacher = teachers?.find((t: any) => t.id === currentEntry.enteredBy);
+                                return teacher?.name || currentEntry.enteredByRole;
+                            })()} •
+                            <strong> Date:</strong> {formatEntryDate(currentEntry.entryDate)}
 
                             {currentEntry.status === 'REJECTED' && currentEntry.rejectionReason && (
                                 <div style={{ marginTop: '0.25rem', color: '#ef4444' }}>
@@ -868,7 +977,14 @@ const AdvancedMarksEntry: React.FC = () => {
                                         <th style={{ padding: '1rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 700 }}>Roll No.</th>
                                         <th style={{ padding: '1rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 700 }}>Student Name</th>
                                         <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Total Marks</th>
-                                        <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Obtained</th>
+                                        {subjectDetails?.theoryMarks > 0 ? (
+                                            <>
+                                                <th style={{ padding: '1rem', textAlign: 'center', color: '#6366f1', fontWeight: 700 }}>Theory ({subjectDetails.theoryMarks})</th>
+                                                <th style={{ padding: '1rem', textAlign: 'center', color: '#f59e0b', fontWeight: 700 }}>Practical ({subjectDetails.practicalMarks})</th>
+                                            </>
+                                        ) : (
+                                            <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Obtained</th>
+                                        )}
                                         <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>%</th>
                                         <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Grade</th>
                                         <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Status</th>
@@ -921,6 +1037,40 @@ const AdvancedMarksEntry: React.FC = () => {
                                                                 <option key={g} value={g}>{g}</option>
                                                             ))}
                                                         </select>
+                                                    ) : subjectDetails?.theoryMarks > 0 ? (
+                                                        // Split Theory + Practical inputs
+                                                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}>
+                                                            <input
+                                                                type="number"
+                                                                className="input-field"
+                                                                style={{ width: '75px', textAlign: 'center', padding: '0.5rem', fontSize: '0.95rem', fontWeight: 700, border: '2px solid #6366f1', borderRadius: '0.5rem', color: '#6366f1' }}
+                                                                min="0"
+                                                                max={subjectDetails.theoryMarks}
+                                                                placeholder="Thy"
+                                                                value={student.theoryMarks || ''}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                                    handleMarksChange(actualIndex, 'theoryMarks', val);
+                                                                }}
+                                                                onFocus={(e) => e.target.select()}
+                                                                disabled={!canEdit}
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                className="input-field"
+                                                                style={{ width: '75px', textAlign: 'center', padding: '0.5rem', fontSize: '0.95rem', fontWeight: 700, border: '2px solid #f59e0b', borderRadius: '0.5rem', color: '#b45309' }}
+                                                                min="0"
+                                                                max={subjectDetails.practicalMarks}
+                                                                placeholder="Prc"
+                                                                value={student.practicalMarks || ''}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                                    handleMarksChange(actualIndex, 'practicalMarks', val);
+                                                                }}
+                                                                onFocus={(e) => e.target.select()}
+                                                                disabled={!canEdit}
+                                                            />
+                                                        </div>
                                                     ) : (
                                                         <input
                                                             type="number"
@@ -937,7 +1087,7 @@ const AdvancedMarksEntry: React.FC = () => {
                                                             }}
                                                             min="0"
                                                             max={student.totalMarks}
-                                                            value={student.obtainedMarks === 0 ? '' : student.obtainedMarks}
+                                                            value={student.obtainedMarks}
                                                             onChange={(e) => {
                                                                 const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
                                                                 handleMarksChange(actualIndex, 'obtainedMarks', val);
@@ -1056,153 +1206,193 @@ const AdvancedMarksEntry: React.FC = () => {
                                             background: preSelectionData?.editStudentId === student.studentId
                                                 ? 'linear-gradient(135deg, rgba(254, 249, 195, 0.3), rgba(250, 204, 21, 0.1))'
                                                 : 'var(--bg-card)',
-                                            borderRadius: '1rem',
-                                            padding: '1.25rem',
-                                            marginBottom: '1rem',
+                                            borderRadius: '0.75rem',
+                                            padding: '0.75rem',
+                                            marginBottom: '0.5rem',
                                             border: preSelectionData?.editStudentId === student.studentId
                                                 ? '2px solid #facc15'
                                                 : '1px solid var(--border)',
-                                            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+                                            boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
                                         }}
                                     >
-                                        {/* Student Header */}
+                                        {/* Student Header - Compact */}
                                         <div style={{
                                             display: 'flex',
                                             justifyContent: 'space-between',
                                             alignItems: 'center',
-                                            marginBottom: '1rem',
-                                            paddingBottom: '0.75rem',
+                                            marginBottom: '0.5rem',
+                                            paddingBottom: '0.4rem',
                                             borderBottom: '1px solid var(--border)'
                                         }}>
-                                            <div>
-                                                <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-main)', marginBottom: '0.25rem' }}>
-                                                    {student.studentName}
-                                                </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <span style={{
                                                     background: '#f3f4f6',
-                                                    padding: '0.25rem 0.6rem',
-                                                    borderRadius: '0.4rem',
-                                                    fontSize: '0.75rem',
+                                                    padding: '0.15rem 0.4rem',
+                                                    borderRadius: '0.25rem',
+                                                    fontSize: '0.65rem',
                                                     fontWeight: 700,
                                                     color: '#6b7280'
                                                 }}>
-                                                    Roll: {student.rollNumber}
+                                                    #{student.rollNumber}
                                                 </span>
+                                                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                                                    {student.studentName}
+                                                </div>
                                             </div>
-                                            <div style={{ textAlign: 'right' }}>
-                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Total</div>
-                                                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>{student.totalMarks}</div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Total</span>
+                                                <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--primary)' }}>{student.totalMarks}</span>
                                             </div>
                                         </div>
 
-                                        {/* Marks Input */}
-                                        <div style={{ marginBottom: '1rem' }}>
-                                            <label style={{
-                                                display: 'block',
-                                                fontSize: '0.75rem',
-                                                fontWeight: 600,
-                                                color: 'var(--text-muted)',
-                                                marginBottom: '0.5rem'
-                                            }}>
-                                                Obtained Marks
-                                            </label>
+                                        {/* Marks Input - Compact */}
+                                        <div style={{ marginBottom: '0.5rem' }}>
                                             {student.isAbsent ? (
                                                 <div style={{
-                                                    padding: '0.75rem',
+                                                    padding: '0.5rem',
                                                     textAlign: 'center',
                                                     background: 'rgba(239, 68, 68, 0.1)',
-                                                    borderRadius: '0.5rem',
+                                                    borderRadius: '0.4rem',
                                                     color: '#ef4444',
                                                     fontWeight: 700,
-                                                    fontSize: '1.1rem'
+                                                    fontSize: '0.9rem'
                                                 }}>
                                                     AB (Absent)
                                                 </div>
                                             ) : student.isNA ? (
                                                 <div style={{
-                                                    padding: '0.75rem',
+                                                    padding: '0.5rem',
                                                     textAlign: 'center',
                                                     background: 'rgba(99, 102, 241, 0.1)',
-                                                    borderRadius: '0.5rem',
+                                                    borderRadius: '0.4rem',
                                                     color: '#6366f1',
                                                     fontWeight: 700,
-                                                    fontSize: '1.1rem'
+                                                    fontSize: '0.9rem'
                                                 }}>
-                                                    NA (Not Applicable)
+                                                    NA
                                                 </div>
                                             ) : subjectDetails?.assessmentType === 'GRADE' ? (
-                                                <select
-                                                    className="input-field"
-                                                    style={{
-                                                        width: '100%',
-                                                        textAlign: 'center',
-                                                        fontWeight: 700,
-                                                        fontSize: '1.1rem',
-                                                        border: '2px solid var(--primary)',
-                                                        borderRadius: '0.5rem',
-                                                        padding: '0.75rem',
-                                                        color: 'var(--primary)'
-                                                    }}
-                                                    value={student.grade === 'N/A' ? '' : student.grade}
-                                                    onChange={(e) => {
-                                                        const updated = [...marksData];
-                                                        updated[actualIndex].grade = e.target.value;
-                                                        updated[actualIndex].obtainedMarks = 0;
-                                                        updated[actualIndex].percentage = 0;
-                                                        setMarksData(updated);
-                                                    }}
-                                                    disabled={!canEdit}
-                                                >
-                                                    <option value="">Select Grade</option>
-                                                    {['A+', 'A', 'B+', 'B', 'C', 'D', 'E', 'F'].map(g => (
-                                                        <option key={g} value={g}>{g}</option>
-                                                    ))}
-                                                </select>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>Grade:</span>
+                                                    <select
+                                                        className="input-field"
+                                                        style={{
+                                                            flex: 1,
+                                                            textAlign: 'center',
+                                                            fontWeight: 700,
+                                                            fontSize: '0.95rem',
+                                                            border: '2px solid var(--primary)',
+                                                            borderRadius: '0.4rem',
+                                                            padding: '0.5rem',
+                                                            color: 'var(--primary)'
+                                                        }}
+                                                        value={student.grade === 'N/A' ? '' : student.grade}
+                                                        onChange={(e) => {
+                                                            const updated = [...marksData];
+                                                            updated[actualIndex].grade = e.target.value;
+                                                            updated[actualIndex].obtainedMarks = 0;
+                                                            updated[actualIndex].percentage = 0;
+                                                            setMarksData(updated);
+                                                        }}
+                                                        disabled={!canEdit}
+                                                    >
+                                                        <option value="">Select Grade</option>
+                                                        {['A+', 'A', 'B+', 'B', 'C', 'D', 'E', 'F'].map(g => (
+                                                            <option key={g} value={g}>{g}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            ) : subjectDetails?.theoryMarks > 0 ? (
+                                                // Split Theory + Practical mobile inputs
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                                        <span style={{ fontSize: '0.65rem', color: '#6366f1', fontWeight: 700, minWidth: '60px' }}>Theory ({subjectDetails.theoryMarks}):</span>
+                                                        <input
+                                                            type="number"
+                                                            className="input-field"
+                                                            style={{ flex: 1, textAlign: 'center', padding: '0.45rem', fontSize: '1rem', fontWeight: 700, border: '2px solid #6366f1', borderRadius: '0.4rem', color: '#6366f1' }}
+                                                            min="0"
+                                                            max={subjectDetails.theoryMarks}
+                                                            placeholder="0"
+                                                            value={student.theoryMarks || ''}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                                handleMarksChange(actualIndex, 'theoryMarks', val);
+                                                            }}
+                                                            onFocus={(e) => e.target.select()}
+                                                            disabled={!canEdit}
+                                                        />
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                                        <span style={{ fontSize: '0.65rem', color: '#b45309', fontWeight: 700, minWidth: '60px' }}>Practical ({subjectDetails.practicalMarks}):</span>
+                                                        <input
+                                                            type="number"
+                                                            className="input-field"
+                                                            style={{ flex: 1, textAlign: 'center', padding: '0.45rem', fontSize: '1rem', fontWeight: 700, border: '2px solid #f59e0b', borderRadius: '0.4rem', color: '#b45309' }}
+                                                            min="0"
+                                                            max={subjectDetails.practicalMarks}
+                                                            placeholder="0"
+                                                            value={student.practicalMarks || ''}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                                handleMarksChange(actualIndex, 'practicalMarks', val);
+                                                            }}
+                                                            onFocus={(e) => e.target.select()}
+                                                            disabled={!canEdit}
+                                                        />
+                                                    </div>
+                                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'right' }}>
+                                                        Total: <strong>{(student.theoryMarks || 0) + (student.practicalMarks || 0)}</strong> / {student.totalMarks}
+                                                    </div>
+                                                </div>
                                             ) : (
-                                                <input
-                                                    type="number"
-                                                    className="input-field"
-                                                    style={{
-                                                        width: '100%',
-                                                        textAlign: 'center',
-                                                        padding: '0.75rem',
-                                                        fontSize: '1.3rem',
-                                                        fontWeight: 700,
-                                                        border: '2px solid var(--primary)',
-                                                        borderRadius: '0.5rem',
-                                                        color: 'var(--primary)'
-                                                    }}
-                                                    min="0"
-                                                    max={student.totalMarks}
-                                                    placeholder="Enter marks"
-                                                    value={student.obtainedMarks === 0 ? '' : student.obtainedMarks}
-                                                    onChange={(e) => {
-                                                        const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                                        handleMarksChange(actualIndex, 'obtainedMarks', val);
-                                                    }}
-                                                    onFocus={(e) => e.target.select()}
-                                                    disabled={!canEdit}
-                                                />
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>Marks:</span>
+                                                    <input
+                                                        type="number"
+                                                        className="input-field"
+                                                        style={{
+                                                            flex: 1,
+                                                            textAlign: 'center',
+                                                            padding: '0.5rem',
+                                                            fontSize: '1.1rem',
+                                                            fontWeight: 700,
+                                                            border: '2px solid var(--primary)',
+                                                            borderRadius: '0.4rem',
+                                                            color: 'var(--primary)'
+                                                        }}
+                                                        min="0"
+                                                        max={student.totalMarks}
+                                                        placeholder="0"
+                                                        value={student.obtainedMarks}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                            handleMarksChange(actualIndex, 'obtainedMarks', val);
+                                                        }}
+                                                        onFocus={(e) => e.target.select()}
+                                                        disabled={!canEdit}
+                                                    />
+                                                </div>
                                             )}
                                         </div>
 
-                                        {/* Stats Row */}
+                                        {/* Stats Row - Compact */}
                                         <div style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: '1fr 1fr',
-                                            gap: '0.75rem',
-                                            marginBottom: '1rem'
+                                            display: 'flex',
+                                            gap: '0.5rem',
+                                            marginBottom: '0.5rem'
                                         }}>
                                             <div style={{
+                                                flex: 1,
                                                 background: 'var(--bg-main)',
-                                                padding: '0.75rem',
-                                                borderRadius: '0.5rem',
+                                                padding: '0.4rem',
+                                                borderRadius: '0.4rem',
                                                 textAlign: 'center'
                                             }}>
-                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Percentage</div>
-                                                <div style={{
+                                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>%: </span>
+                                                <span style={{
                                                     fontWeight: 800,
-                                                    fontSize: '1.1rem',
+                                                    fontSize: '0.85rem',
                                                     color: student.isAbsent || student.isNA ? '#9ca3af' :
                                                         student.percentage >= 90 ? '#10b981' :
                                                             student.percentage >= 75 ? '#3b82f6' :
@@ -1210,18 +1400,19 @@ const AdvancedMarksEntry: React.FC = () => {
                                                                     student.percentage >= 40 ? '#ef4444' : '#6b7280'
                                                 }}>
                                                     {student.isAbsent || student.isNA ? '—' : `${student.percentage.toFixed(1)}%`}
-                                                </div>
+                                                </span>
                                             </div>
                                             <div style={{
+                                                flex: 1,
                                                 background: 'var(--bg-main)',
-                                                padding: '0.75rem',
-                                                borderRadius: '0.5rem',
+                                                padding: '0.4rem',
+                                                borderRadius: '0.4rem',
                                                 textAlign: 'center'
                                             }}>
-                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Grade</div>
-                                                <div style={{
+                                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Grade: </span>
+                                                <span style={{
                                                     fontWeight: 800,
-                                                    fontSize: '1.1rem',
+                                                    fontSize: '0.85rem',
                                                     color: student.grade === 'AB' ? '#ef4444' :
                                                         student.grade === 'NA' ? '#6366f1' :
                                                             student.grade === 'A+' || student.grade === 'A' ? '#10b981' :
@@ -1229,65 +1420,56 @@ const AdvancedMarksEntry: React.FC = () => {
                                                                     student.grade === 'C' ? '#f59e0b' : '#ef4444'
                                                 }}>
                                                     {student.grade}
-                                                </div>
+                                                </span>
                                             </div>
                                         </div>
 
-                                        {/* Status Buttons */}
+                                        {/* Status Buttons - Compact */}
                                         <div style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: '1fr 1fr',
-                                            gap: '0.75rem'
+                                            display: 'flex',
+                                            gap: '0.4rem'
                                         }}>
                                             <button
                                                 onClick={() => handleAbsentToggle(actualIndex)}
                                                 disabled={!canEdit || student.isNA}
                                                 style={{
-                                                    padding: '0.75rem',
-                                                    borderRadius: '0.75rem',
+                                                    flex: 1,
+                                                    padding: '0.45rem',
+                                                    borderRadius: '0.5rem',
                                                     fontWeight: 700,
-                                                    fontSize: '0.85rem',
+                                                    fontSize: '0.7rem',
                                                     cursor: canEdit && !student.isNA ? 'pointer' : 'not-allowed',
                                                     background: student.isAbsent
-                                                        ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.2))'
-                                                        : 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
-                                                    backdropFilter: 'blur(10px)',
+                                                        ? 'rgba(239, 68, 68, 0.15)'
+                                                        : 'rgba(16, 185, 129, 0.15)',
                                                     color: student.isAbsent ? '#ef4444' : '#10b981',
-                                                    border: `2px solid ${student.isAbsent ? '#ef4444' : '#10b981'}`,
+                                                    border: `1.5px solid ${student.isAbsent ? '#ef4444' : '#10b981'}`,
                                                     transition: 'all 0.2s',
-                                                    boxShadow: student.isAbsent
-                                                        ? '0 4px 12px rgba(239, 68, 68, 0.3)'
-                                                        : '0 4px 12px rgba(16, 185, 129, 0.3)',
-                                                    opacity: student.isNA ? 0.5 : 1,
-                                                    transform: student.isAbsent ? 'scale(1.02)' : 'scale(1)'
+                                                    opacity: student.isNA ? 0.5 : 1
                                                 }}
                                             >
-                                                {student.isAbsent ? '🔴 ABSENT' : '🟢 PRESENT'}
+                                                {student.isAbsent ? '✕ ABSENT' : '✓ PRESENT'}
                                             </button>
                                             <button
                                                 onClick={() => handleNAToggle(actualIndex)}
                                                 disabled={!canEdit || student.isAbsent}
                                                 style={{
-                                                    padding: '0.75rem',
-                                                    borderRadius: '0.75rem',
+                                                    flex: 1,
+                                                    padding: '0.45rem',
+                                                    borderRadius: '0.5rem',
                                                     fontWeight: 700,
-                                                    fontSize: '0.85rem',
+                                                    fontSize: '0.7rem',
                                                     cursor: canEdit && !student.isAbsent ? 'pointer' : 'not-allowed',
                                                     background: student.isNA
-                                                        ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.2))'
-                                                        : 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2))',
-                                                    backdropFilter: 'blur(10px)',
+                                                        ? 'rgba(239, 68, 68, 0.15)'
+                                                        : 'rgba(16, 185, 129, 0.15)',
                                                     color: student.isNA ? '#ef4444' : '#10b981',
-                                                    border: `2px solid ${student.isNA ? '#ef4444' : '#10b981'}`,
+                                                    border: `1.5px solid ${student.isNA ? '#ef4444' : '#10b981'}`,
                                                     transition: 'all 0.2s',
-                                                    boxShadow: student.isNA
-                                                        ? '0 4px 12px rgba(239, 68, 68, 0.3)'
-                                                        : '0 4px 12px rgba(16, 185, 129, 0.3)',
-                                                    opacity: student.isAbsent ? 0.5 : 1,
-                                                    transform: student.isNA ? 'scale(1.02)' : 'scale(1)'
+                                                    opacity: student.isAbsent ? 0.5 : 1
                                                 }}
                                             >
-                                                {student.isNA ? '🔴 N.A.' : '🟢 APPLICABLE'}
+                                                {student.isNA ? '✕ N.A.' : '✓ APPLICABLE'}
                                             </button>
                                         </div>
                                     </div>
