@@ -182,7 +182,15 @@ const NoticeBoard: React.FC = () => {
                     background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
                 }}>
-                    <div className="glass-card animate-scale-in" style={{ padding: '2.5rem', width: '500px' }}>
+                    <div className="animate-scale-in" style={{
+                        padding: '2.5rem',
+                        width: '500px',
+                        background: 'white',
+                        borderRadius: '1.25rem',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                        border: '1px solid var(--border)',
+                        position: 'relative'
+                    }}>
                         <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '1.5rem' }}>Create New Notice</h2>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                             <div className="input-group">

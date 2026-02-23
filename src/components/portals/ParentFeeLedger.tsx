@@ -29,8 +29,14 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
 
     const fetchMetadata = async () => {
         try {
-            const typesSnap = await getDocs(collection(db, 'fee_types'));
-            const amountsSnap = await getDocs(collection(db, 'fee_amounts'));
+            const schoolId = studentData?.schoolId || currentSchool?.id;
+            if (!schoolId) return;
+
+            const [typesSnap, amountsSnap] = await Promise.all([
+                getDocs(query(collection(db, 'fee_types'), where('schoolId', '==', schoolId))),
+                getDocs(query(collection(db, 'fee_amounts'), where('schoolId', '==', schoolId)))
+            ]);
+
             setFeeTypes(typesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
             setFeeAmounts(amountsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         } catch (e) {
@@ -39,7 +45,8 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
     };
 
     const fetchHistory = async () => {
-        if (!admissionNo) {
+        const schoolId = studentData?.schoolId || currentSchool?.id;
+        if (!admissionNo || !schoolId) {
             setLoading(false);
             return;
         }
@@ -47,7 +54,8 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
         try {
             const q = query(
                 collection(db, 'fee_collections'),
-                where('admissionNo', '==', admissionNo)
+                where('admissionNo', '==', admissionNo),
+                where('schoolId', '==', schoolId)
             );
             const snap = await getDocs(q);
             const collections = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
@@ -102,8 +110,17 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
             startYear = sessionStartYear;
         }
 
-        let totalPayable = 0;
+        const basicDues = Number(studentData?.basicDues || 0);
+        let totalPayable = basicDues;
         const payableDetails: any[] = [];
+
+        if (basicDues > 0) {
+            payableDetails.push({
+                head: 'Previous Dues (Carry Forward)',
+                month: '—',
+                amount: basicDues
+            });
+        }
         const studentAdmMonth = admDateRaw ? admDateRaw.getMonth() : -1;
         const studentAdmYear = admDateRaw ? admDateRaw.getFullYear() : -1;
 

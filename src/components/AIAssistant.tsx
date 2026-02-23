@@ -3,7 +3,7 @@ import { X, Loader2, FileText, BrainCircuit } from 'lucide-react';
 import { APP_CONFIG } from '../constants/app';
 
 import { transcribeAudioWithGemini, analyzeDataWithGemini } from '../lib/gemini';
-import { getMinifiedERPData } from '../lib/dataMiner';
+import { getMinifiedERPData, buildDetailedSummary } from '../lib/dataMiner';
 import { usePersistence } from '../hooks/usePersistence';
 
 import { db } from '../lib/firebase';
@@ -129,8 +129,10 @@ const AIAssistant: React.FC = () => {
                     // 1. Transcribe (Hidden)
                     const transcription = await transcribeAudioWithGemini(base64Audio, apiKey);
 
-                    // 2. Fetch Complete Database Context
-                    const context = await getMinifiedERPData();
+                    // 2. Fetch Complete Database Context & build detailed summary
+                    const raw = await getMinifiedERPData(currentSchool?.id);
+                    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                    const context = buildDetailedSummary(parsed);
 
                     // 3. Analyze with AI
                     const aiReport = await analyzeDataWithGemini(transcription, context, apiKey, currentSchool?.name || APP_CONFIG.fullName);
@@ -166,12 +168,12 @@ const AIAssistant: React.FC = () => {
         const renderTable = (data: typeof tableData) => {
             let html = '<div style="margin: 2rem 0; overflow-x: auto; border-radius: 1rem; border: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);"><table style="width: 100%; border-collapse: collapse; text-align: left;">';
             html += '<thead><tr style="background: var(--bg-main); border-bottom: 2px solid var(--border);">';
-            data.headers.forEach(h => html += `<th style="padding: 1rem; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); border-right: 1px solid var(--border);">${h}</th>`);
+            data.headers.forEach(h => html += `<th style="padding: 1rem; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); border-right: 1px solid var(--border);">${processInline(h)}</th>`);
             html += '</tr></thead><tbody style="background: white;">';
             data.rows.forEach((row, idx) => {
                 const bgStyle = idx % 2 === 0 ? 'background: #fafafa;' : 'background: white;';
                 html += `<tr style="${bgStyle}">`;
-                for (let j = 0; j < data.headers.length; j++) html += `<td style="padding: 0.75rem 1rem; font-size: 0.875rem; color: var(--text-main); border-right: 1px solid var(--border); border-top: 1px solid var(--border);">${row[j] || ''}</td>`;
+                for (let j = 0; j < data.headers.length; j++) html += `<td style="padding: 0.75rem 1rem; font-size: 0.875rem; color: var(--text-main); border-right: 1px solid var(--border); border-top: 1px solid var(--border);">${processInline(row[j] || '')}</td>`;
                 html += '</tr>';
             });
             html += '</tbody></table></div>';
@@ -436,7 +438,7 @@ const AIAssistant: React.FC = () => {
                         endDrag();
                     }}
                     onContextMenu={(e) => e.preventDefault()}
-                    className={`${isRecording ? 'pulse-animation' : ''}`}
+                    className={`ai-sphere-btn ${isRecording ? 'pulse-animation' : ''}`}
                     style={{
                         width: '80px', height: '80px', borderRadius: '50%',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -489,19 +491,19 @@ const AIAssistant: React.FC = () => {
             </div>
 
             {showModal && (
-                <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-                    <div className="glass-card animate-scale-in" style={{ width: '100%', maxWidth: '800px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', backgroundColor: 'white', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
-                        <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-main)' }}>
+                <div className="ai-report-modal-overlay">
+                    <div className="glass-card animate-scale-in ai-report-modal-container">
+                        <div className="ai-report-modal-header">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><BrainCircuit size={18} /></div>
-                                <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>AI Intelligence Report</h2>
+                                <div className="ai-report-icon-box"><BrainCircuit size={18} /></div>
+                                <h2 className="ai-report-modal-title">AI Intelligence Report</h2>
                             </div>
                             <button onClick={() => setShowModal(false)} className="btn-icon" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={24} /></button>
                         </div>
-                        <div style={{ padding: '2rem', overflowY: 'auto', flex: 1 }}>
+                        <div className="ai-report-modal-content">
                             {report ? <div className="markdown-body" dangerouslySetInnerHTML={{ __html: formatMarkdown(report) }} /> : <div style={{ textAlign: 'center', padding: '3rem' }}><Loader2 size={40} className="animate-spin" style={{ color: 'var(--primary)', marginBottom: '1rem' }} /><p>Gathering intelligence...</p></div>}
                         </div>
-                        <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '1rem', backgroundColor: 'var(--bg-main)' }}>
+                        <div className="ai-report-modal-footer">
                             <button className="btn" style={{ border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={() => setShowModal(false)}>Dismiss</button>
                             <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={handlePrint}><FileText size={18} /> Print Report</button>
                         </div>
@@ -515,6 +517,55 @@ const AIAssistant: React.FC = () => {
                 @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
                 .animate-spin { animation: spin 1s linear infinite; }
                 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+                .ai-report-modal-overlay {
+                    position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); z-index: 2000;
+                    display: flex; align-items: center; justify-content: center; padding: 2rem;
+                }
+                .ai-report-modal-container {
+                    width: 95vw; max-width: 1000px; height: 85vh; display: flex; flex-direction: column;
+                    background: white; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+                    border-radius: 1.5rem; border: 1px solid var(--border);
+                }
+                .ai-report-modal-header {
+                    padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
+                    display: flex; justify-content: space-between; align-items: center; background: white;
+                }
+                .ai-report-modal-title { font-size: 1.15rem; font-weight: 800; margin: 0; color: var(--text-main); }
+                .ai-report-icon-box {
+                    width: 36px; height: 36px; border-radius: 10px; background: var(--primary);
+                    color: white; display: flex; align-items: center; justify-content: center;
+                }
+                .ai-report-modal-content { padding: 2rem; overflow-y: auto; flex: 1; background: #fff; }
+                .ai-report-modal-footer {
+                    padding: 1.25rem 1.5rem; border-top: 1px solid var(--border);
+                    display: flex; justify-content: flex-end; gap: 1rem; background: var(--bg-main);
+                }
+
+                @media (max-width: 768px) {
+                    .ai-report-modal-overlay { padding: 0.5rem; }
+                    .ai-report-modal-container { 
+                        width: 100%; height: 98vh; border-radius: 1rem;
+                        max-width: none;
+                    }
+                    .ai-report-modal-header { padding: 1rem; }
+                    .ai-report-modal-title { font-size: 1rem; }
+                    .ai-report-modal-content { padding: 1.25rem 1rem; }
+                    .ai-report-modal-footer { padding: 1rem; flex-direction: column-reverse; gap: 0.75rem; }
+                    .ai-report-modal-footer button { width: 100%; justify-content: center; height: 48px; }
+                }
+
+                @media (max-width: 480px) {
+                    .ai-report-modal-overlay { padding: 0; }
+                    .ai-report-modal-container { height: 100vh; border-radius: 0; border: none; }
+                }
+
+                @media (max-width: 768px) {
+                    .ai-sphere-btn {
+                        width: 60px !important;
+                        height: 60px !important;
+                    }
+                }
             `}</style>
         </>
     );

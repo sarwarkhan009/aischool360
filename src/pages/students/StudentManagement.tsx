@@ -286,9 +286,9 @@ const StudentManagement: React.FC = () => {
 
         return matchesSession && matchesClass && matchesSection && matchesStatus && matchesSearch && matchesGender;
     }).sort((a, b) => {
-        // Sort by Roll No if available, else by name
-        const rollA = parseInt(a.rollNo);
-        const rollB = parseInt(b.rollNo);
+        // Sort by Class Roll No / Roll No if available, else by name
+        const rollA = parseInt(a.classRollNo || a.rollNo);
+        const rollB = parseInt(b.classRollNo || b.rollNo);
 
         if (!isNaN(rollA) && !isNaN(rollB)) return rollA - rollB;
         if (!isNaN(rollA)) return -1;
@@ -815,7 +815,7 @@ const StudentManagement: React.FC = () => {
                                     {filteredStudents.map((stu) => (
                                         <tr key={stu.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.2s ease' }} className="hover-row">
                                             <td style={{ padding: '1.25rem 1rem' }}>
-                                                <span style={{ fontWeight: 700, color: 'var(--primary)' }}>#{stu.rollNo || stu.classRollNo || '-'}</span>
+                                                <span style={{ fontWeight: 700, color: 'var(--primary)' }}>#{stu.classRollNo || stu.rollNo || '-'}</span>
                                             </td>
                                             <td style={{ padding: '1.25rem 1rem' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

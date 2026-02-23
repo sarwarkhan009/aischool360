@@ -292,10 +292,24 @@ const ExamResultsDashboard: React.FC = () => {
             };
         });
 
-        // Calculate Ranks
-        return results
-            .sort((a, b) => b.percentage - a.percentage)
-            .map((res, index) => ({ ...res, rank: index + 1 }));
+        // Calculate Ranks — Dense Ranking (1, 2, 3… no skipping)
+        // Same totalObtained+totalMax → same rank; next unique score → next rank
+        const sorted = results.sort((a, b) => b.percentage - a.percentage);
+        const ranks: number[] = [];
+        let denseRank = 0;
+        sorted.forEach((res, index) => {
+            if (
+                index > 0 &&
+                res.totalObtained === sorted[index - 1].totalObtained &&
+                res.totalMax === sorted[index - 1].totalMax
+            ) {
+                ranks.push(ranks[index - 1]); // same marks → same rank
+            } else {
+                denseRank += 1; // new score group → next rank
+                ranks.push(denseRank);
+            }
+        });
+        return sorted.map((res, index) => ({ ...res, rank: ranks[index] }));
 
     }, [selectedExamId, selectedClass, selectedSection, marksEntries, studentList, selectedExam, defaultGrading, currentSchool?.id, activeClasses]);
 
@@ -1201,9 +1215,9 @@ const ExamResultsDashboard: React.FC = () => {
                             <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Total</th>
                             <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>%</th>
                             <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Grade</th>
-                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Status</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 2px', textAlign: 'center', fontWeight: 900, fontSize: '10px', color: '#000', maxWidth: '52px' }}>Status</th>
                             <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>Rank</th>
-                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', minWidth: '70px', color: '#000' }}>Parent's Sign</th>
+                            <th style={{ border: '2px solid #000', padding: '5px 3px', textAlign: 'center', fontWeight: 900, fontSize: '11px', minWidth: '100px', color: '#000' }}>Parent's Sign</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1215,6 +1229,10 @@ const ExamResultsDashboard: React.FC = () => {
                                     const val = res.marks[sub.subjectId];
                                     const isAbsent = val === 'AB';
                                     const isNA = val === 'NA';
+                                    const isGradeBased = sub.assessmentType === 'GRADE';
+                                    // Underline if numeric marks are below passing threshold (33%)
+                                    const passThreshold = (sub.maxMarks * (sub.passingMarks || 33)) / 100;
+                                    const isFailing = !isGradeBased && !isAbsent && !isNA && typeof val === 'number' && val < passThreshold;
                                     return (
                                         <td key={sub.subjectId} style={{
                                             border: '2px solid #000',
@@ -1223,7 +1241,10 @@ const ExamResultsDashboard: React.FC = () => {
                                             fontSize: '11px',
                                             fontWeight: 900,
                                             color: isAbsent ? '#ef4444' : (isNA ? '#6b7280' : '#000'),
-                                            fontStyle: isAbsent ? 'italic' : 'normal'
+                                            fontStyle: isAbsent ? 'italic' : 'normal',
+                                            textDecoration: isFailing ? 'underline' : 'none',
+                                            textDecorationStyle: isFailing ? 'solid' : undefined,
+                                            textUnderlineOffset: isFailing ? '2px' : undefined,
                                         }}>
                                             {val}
                                         </td>
@@ -1238,13 +1259,13 @@ const ExamResultsDashboard: React.FC = () => {
                                 <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>
                                     {res.grade}
                                 </td>
-                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: res.status === 'PASS' ? '#059669' : '#000' }}>
-                                    {res.status}
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '10px', color: res.status === 'PASS' ? '#059669' : '#000', maxWidth: '52px' }}>
+                                    {res.status === 'COMPARTMENT' ? 'COMPART' : res.status}
                                 </td>
                                 <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontWeight: 900, fontSize: '11px', color: '#000' }}>
                                     {res.rank}
                                 </td>
-                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontSize: '11px', minWidth: '70px', fontWeight: 900, color: '#000' }}></td>
+                                <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center', fontSize: '11px', minWidth: '100px', fontWeight: 900, color: '#000' }}></td>
                             </tr>
                         ))}
                     </tbody>

@@ -36,14 +36,15 @@ export const parseExcelFile = (file: File): Promise<any[]> => {
 
                 if (headerRowIndex === -1) {
                     // Fallback to traditional way if headers not found
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: false, defval: '' });
+                    // Use raw:true so numbers stay as numbers (not as formatted strings)
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: '' });
                     resolve(jsonData);
                     return;
                 }
 
-                // Parse using detected header row
+                // Parse using detected header row with raw:true so numeric cells stay numeric
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-                    raw: false,
+                    raw: true,
                     defval: '',
                     range: headerRowIndex
                 });
@@ -57,6 +58,7 @@ export const parseExcelFile = (file: File): Promise<any[]> => {
         reader.readAsBinaryString(file);
     });
 };
+
 
 // ===================================
 // Student Data Processing
@@ -348,58 +350,65 @@ export const convertToStudents = (
 // ===================================
 
 export const parseSubjectMarks = (value: string | number): { theoryMarks: number; practicalMarks: number; grade: string; isAbsent: boolean; isNA: boolean } => {
-    if (!value) return { theoryMarks: 0, practicalMarks: 0, grade: '', isAbsent: false, isNA: false };
+    if (value === null || value === undefined || value === '') return { theoryMarks: 0, practicalMarks: 0, grade: '', isAbsent: false, isNA: false };
+
+    // If Excel stored it as a real number, treat directly as theoryMarks
+    if (typeof value === 'number') {
+        return { theoryMarks: value, practicalMarks: 0, grade: '', isAbsent: false, isNA: false };
+    }
 
     const str = value.toString().trim().toUpperCase();
 
+    if (!str) return { theoryMarks: 0, practicalMarks: 0, grade: '', isAbsent: false, isNA: false };
+
     // Check for Absent
-    if (str === 'AB') {
-        return {
-            theoryMarks: 0,
-            practicalMarks: 0,
-            grade: '',
-            isAbsent: true,
-            isNA: false
-        };
+    if (str === 'AB' || str === 'ABS' || str === 'ABSENT') {
+        return { theoryMarks: 0, practicalMarks: 0, grade: '', isAbsent: true, isNA: false };
     }
 
     // Check for Not Applicable
-    if (str === 'NA') {
-        return {
-            theoryMarks: 0,
-            practicalMarks: 0,
-            grade: '',
-            isAbsent: false,
-            isNA: true
-        };
+    if (str === 'NA' || str === 'N/A') {
+        return { theoryMarks: 0, practicalMarks: 0, grade: '', isAbsent: false, isNA: true };
     }
 
     // Grade only (e.g., "B+", "A")
     const gradeOnlyMatch = str.match(/^([A-F][+-]?)$/i);
     if (gradeOnlyMatch) {
-        return {
-            theoryMarks: 0,
-            practicalMarks: 0,
-            grade: gradeOnlyMatch[1].toUpperCase(),
-            isAbsent: false,
-            isNA: false
-        };
+        return { theoryMarks: 0, practicalMarks: 0, grade: gradeOnlyMatch[1].toUpperCase(), isAbsent: false, isNA: false };
     }
 
     // Two numbers + grade (e.g., "95 0 A+", "45 20 C", "80 20 A+")
-    const fullMatch = str.match(/(\d+)\s+(\d+)\s+([A-F][+-]?)/i);
+    const fullMatch = str.match(/(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([A-F][+-]?)/i);
     if (fullMatch) {
         return {
-            theoryMarks: parseInt(fullMatch[1]),
-            practicalMarks: parseInt(fullMatch[2]),
+            theoryMarks: parseFloat(fullMatch[1]),
+            practicalMarks: parseFloat(fullMatch[2]),
             grade: fullMatch[3].toUpperCase(),
             isAbsent: false,
             isNA: false
         };
     }
 
-    // Fallback: just numbers (no grade)
-    const parts = str.split(/\s+/);
+    // Two numbers only (e.g., "80 20") — theory + practical
+    const twoNumMatch = str.match(/^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/);
+    if (twoNumMatch) {
+        return {
+            theoryMarks: parseFloat(twoNumMatch[1]),
+            practicalMarks: parseFloat(twoNumMatch[2]),
+            grade: '',
+            isAbsent: false,
+            isNA: false
+        };
+    }
+
+    // Single number as text (e.g., "71", " 68 ") — treat as theoryMarks
+    const singleNumMatch = str.match(/^(\d+(?:\.\d+)?)$/);
+    if (singleNumMatch) {
+        return { theoryMarks: parseFloat(singleNumMatch[1]), practicalMarks: 0, grade: '', isAbsent: false, isNA: false };
+    }
+
+    // Fallback: space-split parts
+    const parts = str.split(/\s+/).filter(p => p !== '');
     const theoryMarks = parseFloat(parts[0]) || 0;
     const practicalMarks = parseFloat(parts[1]) || 0;
     const grade = parts[2] ? parts[2].toUpperCase() : '';

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
-import { sortClasses } from '../../constants/app';
+import { sortClasses, getActiveClasses } from '../../constants/app';
 import { db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 

@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
-import { collection, Timestamp, query, where, getDocs, doc, orderBy, runTransaction } from 'firebase/firestore';
+import { collection, Timestamp, query, where, getDocs, getDoc, doc, orderBy, runTransaction } from 'firebase/firestore';
 import { guardedAddDoc, guardedUpdateDoc } from '../../lib/firestoreWrite';
 import { useSchool } from '../../context/SchoolContext';
 import FeeReceipt from '../../components/fees/FeeReceipt';
@@ -66,6 +66,32 @@ const FeeManagement: React.FC = () => {
     const [selectedClass, setSelectedClass] = useState('ALL');
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'admissionNo', direction: 'asc' });
     const [saleDiscount, setSaleDiscount] = useState(0);
+    const [paymentSettings, setPaymentSettings] = useState<any>(null);
+
+    // Load payment settings
+    useEffect(() => {
+        const fetchPaymentSettings = async () => {
+            if (!schoolId && !currentSchool?.id) return;
+            try {
+                const schoolIdToUse = currentSchool?.id || schoolId;
+                if (!schoolIdToUse) return;
+                const docRef = doc(db, 'schools', schoolIdToUse, 'settings', 'payment_info');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    setPaymentSettings(docSnap.data());
+                } else {
+                    const globalRef = doc(db, 'settings', 'payment_info');
+                    const globalSnap = await getDoc(globalRef);
+                    if (globalSnap.exists()) {
+                        setPaymentSettings(globalSnap.data());
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching payment settings:', error);
+            }
+        };
+        fetchPaymentSettings();
+    }, [schoolId, currentSchool?.id]);
 
     // Fee Form State
     const [selectedMonths, setSelectedMonths] = useState<Record<string, Record<string, number>>>({});
@@ -169,6 +195,13 @@ const FeeManagement: React.FC = () => {
         const sessionStartYear = currentMonth >= academicStartMonthIdx ? currentYear : currentYear - 1;
         const sessionStartDate = new Date(sessionStartYear, academicStartMonthIdx, 1);
 
+        // Load fee settings
+        const feeSettings = paymentSettings || {};
+        const collectionType = feeSettings.feeCollectionType || 'ADVANCE';
+        const dueDateOfMonth = feeSettings.monthlyFeeDueDate || 5;
+        const startRule = feeSettings.admissionFeeStartRule || 'FROM_ADMISSION_MONTH';
+        const cutoffDate = feeSettings.admissionFeeCutoffDate || 15;
+
         students.forEach(student => {
             const admType = student.admissionType || 'NEW';
             const admDateRaw = student.admissionDate ? new Date(student.admissionDate) : null;
@@ -177,8 +210,25 @@ const FeeManagement: React.FC = () => {
             let startYear: number;
 
             if (admType === 'NEW' && admDateRaw && admDateRaw >= sessionStartDate) {
-                startMonthIdx = admDateRaw.getMonth();
-                startYear = admDateRaw.getFullYear();
+                if (startRule === 'ALWAYS_FROM_APRIL') {
+                    startMonthIdx = academicStartMonthIdx;
+                    startYear = sessionStartYear;
+                } else {
+                    const admDay = admDateRaw.getDate();
+                    if (admDay <= cutoffDate) {
+                        startMonthIdx = admDateRaw.getMonth();
+                        startYear = admDateRaw.getFullYear();
+                    } else {
+                        let nextMonth = admDateRaw.getMonth() + 1;
+                        let nextYear = admDateRaw.getFullYear();
+                        if (nextMonth > 11) {
+                            nextMonth = 0;
+                            nextYear++;
+                        }
+                        startMonthIdx = nextMonth;
+                        startYear = nextYear;
+                    }
+                }
             } else {
                 startMonthIdx = academicStartMonthIdx;
                 startYear = sessionStartYear;
@@ -207,12 +257,22 @@ const FeeManagement: React.FC = () => {
 
                 if (matchesClass && matchesStudentType) {
                     const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === student.class);
-                    if (!amountConfig || !amountConfig.amount) return;
 
+                    // Determine individual student fee override FIRST
                     const headName = (type.feeHeadName || '').toLowerCase();
                     const isMonthlyFee = headName.includes('tuition') || headName.includes('tution') || headName.includes('monthly');
-                    const studentMonthlyFee = student.monthlyFee ? parseFloat(student.monthlyFee) : null;
-                    const useStudentFee = isMonthlyFee && studentMonthlyFee && studentMonthlyFee > 0;
+                    // Only treat as override if monthlyFee is explicitly set (non-empty string), including '0' for exemption
+                    const hasStudentFeeOverride = isMonthlyFee &&
+                        student.monthlyFee !== undefined &&
+                        student.monthlyFee !== null &&
+                        student.monthlyFee !== '';
+                    const studentMonthlyFee = hasStudentFeeOverride ? parseFloat(String(student.monthlyFee)) : null;
+                    const useStudentFee = hasStudentFeeOverride && studentMonthlyFee !== null && !isNaN(studentMonthlyFee);
+
+                    // Skip this fee type only if:
+                    // - Student does NOT have individual monthly fee override, AND
+                    // - No global amount config found (or global amount is 0)
+                    if (!useStudentFee && (!amountConfig || !amountConfig.amount)) return;
 
                     type.months?.forEach((monthName: string) => {
                         let isDue = false;
@@ -228,7 +288,20 @@ const FeeManagement: React.FC = () => {
                             if (targetMonthIdx !== undefined) {
                                 // If month is before academic start month, it belongs to next calendar year
                                 const targetYear = targetMonthIdx < academicStartMonthIdx ? sessionStartYear + 1 : sessionStartYear;
-                                const dueDate = new Date(targetYear, targetMonthIdx, 5); // Using 5 as default due day
+
+                                // Calculate due date based on collection type
+                                let dueDate;
+                                if (collectionType === 'ADVANCE') {
+                                    dueDate = new Date(targetYear, targetMonthIdx, dueDateOfMonth);
+                                } else {
+                                    let nextMonth = targetMonthIdx + 1;
+                                    let nextYear = targetYear;
+                                    if (nextMonth > 11) {
+                                        nextMonth = 0;
+                                        nextYear++;
+                                    }
+                                    dueDate = new Date(nextYear, nextMonth, dueDateOfMonth);
+                                }
 
                                 if (today >= dueDate) {
                                     const monthDate = new Date(targetYear, targetMonthIdx, 1);
@@ -241,11 +314,18 @@ const FeeManagement: React.FC = () => {
                         }
 
                         if (isDue) {
-                            totalPayable += useStudentFee ? studentMonthlyFee : amountConfig.amount;
+                            // Individual override: use student's own fee (even if 0 = exemption)
+                            // Global fallback: use class-based fee from Set Fee Amount
+                            const finalAmount = useStudentFee ? studentMonthlyFee! : (amountConfig?.amount || 0);
+                            totalPayable += finalAmount;
                         }
                     });
                 }
             });
+
+            // Include basicDues (Carry forward)
+            const basicDues = Number((student as any).basicDues || 0);
+            totalPayable += basicDues;
 
             const studentPayments = feeCollections
                 .filter(c =>
@@ -262,7 +342,7 @@ const FeeManagement: React.FC = () => {
         });
 
         return duesMap;
-    }, [students, feeCollections, feeTypes, feeAmounts, currentSchool]);
+    }, [students, feeCollections, feeTypes, feeAmounts, currentSchool, paymentSettings]);
 
     const processedStudents = useMemo(() => {
         if (!searchTerm && selectedClass === 'ALL') return [];
@@ -394,6 +474,16 @@ const FeeManagement: React.FC = () => {
                 });
                 setPaidMonthsMap(map);
 
+                // Calculate Previous Dues: use last receipt's dues, or basicDues if no receipts
+                const nonCancelledHistory = history.filter((rec: any) => rec.status !== 'CANCELLED');
+                nonCancelledHistory.sort((a: any, b: any) => {
+                    const dateA = a.date?.toDate ? a.date.toDate().getTime() : new Date(a.paymentDate || a.date || 0).getTime();
+                    const dateB = b.date?.toDate ? b.date.toDate().getTime() : new Date(b.paymentDate || b.date || 0).getTime();
+                    return dateB - dateA; // newest first
+                });
+                const lastReceipt = nonCancelledHistory[0];
+                const previousDuesValue = lastReceipt ? (Number(lastReceipt.dues) || 0) : (Number(stu.basicDues) || 0);
+
                 // Normalization helper
                 const normalize = (s: string) => (s || '').toString().trim().replace(/\s+/g, ' ');
                 const studentClass = normalize(stu.class);
@@ -420,9 +510,18 @@ const FeeManagement: React.FC = () => {
                     admissionFee: getFee(['admission']),
                     annualFee: getFee(['annual']),
                     transportFee: getFee(['transport']),
-                    tuitionFee: (stu.monthlyFee && Number(stu.monthlyFee) > 0) ? Number(stu.monthlyFee) : getFee(['tuition', 'tution', 'monthly']),
+                    tuitionFee: (() => {
+                        const classFee = getFee(['tuition', 'tution', 'monthly']) || 0;
+                        const hasOverride = stu.monthlyFee !== undefined && stu.monthlyFee !== null && stu.monthlyFee !== '';
+                        if (hasOverride) {
+                            const studentFee = Number(stu.monthlyFee);
+                            // Use student's fee if it's set (including 0 for free/exemption)
+                            return studentFee;
+                        }
+                        return classFee;
+                    })(),
                     miscellaneousFee: 0,
-                    previousDues: studentDuesMap.get(stu.admissionNo || stu.id) || 0,
+                    previousDues: previousDuesValue,
                     discount: 0,
                     paymentMode: 'Cash',
                     remarks: '',
@@ -560,12 +659,8 @@ const FeeManagement: React.FC = () => {
 
             await guardedAddDoc(collection(db, 'fee_collections'), collectionData);
 
-            // 2. Update Student's Current Dues in their record (skip for Form Sale temporary students)
-            if (selectedStudent.id && !selectedStudent.isFormSale) {
-                await guardedUpdateDoc(doc(db, 'students', selectedStudent.id), {
-                    basicDues: currentDues
-                });
-            }
+            // Note: basicDues is a static opening balance set at admission time.
+            // It is never updated by the payment process.
 
             setCurrentReceipt(collectionData);
             setView('RECEIPT');
@@ -908,15 +1003,16 @@ const FeeManagement: React.FC = () => {
                                     const isPaid = !!receiptNo;
                                     const feeHeadName = tuitionFee?.feeHeadName || 'Tuition Fee';
 
-                                    // Robust lookup: try direct match first, then fuzzy match from feeDetails
-                                    let tuitionAmount = (tuitionFee && dynamicFees[tuitionFee.feeHeadName])
+                                    // Class-wise fee is base; if student has an explicit override (including 0), use it
+                                    const classFeeAmt = (tuitionFee && dynamicFees[tuitionFee.feeHeadName] !== undefined)
                                         ? dynamicFees[tuitionFee.feeHeadName]
                                         : feeDetails.tuitionFee;
-
-                                    // OVERRIDE: Use student specific monthly fee if available
-                                    if (selectedStudent?.monthlyFee && Number(selectedStudent.monthlyFee) > 0) {
-                                        tuitionAmount = Number(selectedStudent.monthlyFee);
-                                    }
+                                    const hasStudentOverride = selectedStudent?.monthlyFee !== undefined &&
+                                        selectedStudent?.monthlyFee !== null &&
+                                        selectedStudent?.monthlyFee !== '';
+                                    const studentFeeAmt = hasStudentOverride ? Number(selectedStudent.monthlyFee) : null;
+                                    // If student has an explicit fee set, always use it (even if 0 = exemption)
+                                    let tuitionAmount = hasStudentOverride ? studentFeeAmt! : classFeeAmt;
 
                                     const isSelected = selectedMonths[month]?.[feeHeadName] !== undefined;
 
@@ -995,8 +1091,8 @@ const FeeManagement: React.FC = () => {
                                                                 delete newMonths[month];
                                                             }
                                                         } else {
-                                                            // Use the found amount, ensuring it's not 0 if we know it should be tuitionFee
-                                                            const actualAmount = tuitionAmount || feeDetails.tuitionFee;
+                                                            // Use the found amount specifically, allowing 0
+                                                            const actualAmount = tuitionAmount;
                                                             newMonths[month][feeHeadName] = actualAmount;
                                                         }
                                                         setSelectedMonths(newMonths);

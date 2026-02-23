@@ -273,24 +273,26 @@ const AdminDashboard: React.FC = () => {
             setMonthlyCollection(0);
         });
 
-        // Real-time listener for monthly admissions (createdAt is stored as ISO string)
+        // Real-time listener for monthly admissions (admissionDate is stored as YYYY-MM-DD string)
         const admissionsQuery = query(
             collection(db, 'students'),
             where('schoolId', '==', filterSchoolId || 'NONE'),
             where('session', '==', activeFY)
         );
+        const startOfMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const todayStr = now.toISOString().split('T')[0];
         const unsubscribeAdmissions = onSnapshot(admissionsQuery, (snapshot) => {
-            // Filter students created this month (createdAt is ISO string)
+            // Filter students admitted this month using admissionDate (YYYY-MM-DD)
             const thisMonthStudents = snapshot.docs.filter(doc => {
                 const data = doc.data();
-                if (data.createdAt) {
-                    const created = new Date(data.createdAt);
-                    return created >= startOfMonth && created <= endOfDay;
+                const admDate = data.admissionDate;
+                if (admDate) {
+                    return admDate >= startOfMonthStr && admDate <= todayStr;
                 }
                 return false;
             });
 
-            console.log(`📊 Monthly Admissions: ${thisMonthStudents.length}/${snapshot.size} students`);
+            console.log(`📊 Monthly Admissions: ${thisMonthStudents.length}/${snapshot.size} students (by admissionDate)`);
             setMonthlyAdmissions(thisMonthStudents.length);
         }, (err) => {
             console.error('❌ Admissions query error:', err);
@@ -304,21 +306,24 @@ const AdminDashboard: React.FC = () => {
             where('session', '==', activeFY)
         );
         const unsubscribeTotalStudents = onSnapshot(studentsQuery, (snapshot) => {
-            setTotalStudents(snapshot.size);
-
             let hostel = 0;
             let transport = 0;
             let girls = 0;
             let boys = 0;
+            let activeCount = 0;
 
             snapshot.docs.forEach(doc => {
                 const data = doc.data();
+                // Skip inactive students
+                if (data.status === 'INACTIVE') return;
+                activeCount++;
                 if (data.studentCategory === 'HOSTELER') hostel++;
                 if (data.studentCategory === 'TRANSPORT') transport++;
                 if (data.gender === 'Female') girls++;
                 if (data.gender === 'Male') boys++;
             });
 
+            setTotalStudents(activeCount);
             setHostelCount(hostel);
             setTransportCount(transport);
             setGirlsCount(girls);
@@ -680,7 +685,7 @@ const AdminDashboard: React.FC = () => {
 
             {/* Student Overview Section */}
             <div className="responsive-grid-auto" style={{ marginBottom: '2.5rem' }}>
-                {/* Total Students */}
+                {/* Active Students */}
                 <div className="glass-card hover-lift animate-slide-up" style={{
                     padding: '1.5rem',
                     animationDelay: '0.4s',
@@ -689,7 +694,7 @@ const AdminDashboard: React.FC = () => {
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Total Students</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Active Students</p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#6366f1' }}>
                                 <CountUp value={totalStudents} />
                             </h3>
@@ -718,7 +723,7 @@ const AdminDashboard: React.FC = () => {
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Boys</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Active Boys</p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#10b981' }}>
                                 <CountUp value={boysCount} />
                             </h3>
@@ -747,7 +752,7 @@ const AdminDashboard: React.FC = () => {
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Girls</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Active Girls</p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#f43f5e' }}>
                                 <CountUp value={girlsCount} />
                             </h3>

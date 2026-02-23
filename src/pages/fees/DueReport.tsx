@@ -198,12 +198,21 @@ const DueReport: React.FC = () => {
 
                 if (matchesClass && matchesStudentType) {
                     const amountConfig = feeAmounts.find(fa => fa.feeTypeId === type.id && fa.className === student.class);
-                    if (!amountConfig || !amountConfig.amount) return;
 
-                    // Check if student has custom monthly fee
+                    // Determine individual student fee override FIRST
                     const isMonthlyFee = type.feeHeadName?.toLowerCase().includes('monthly');
-                    const studentMonthlyFee = student.monthlyFee ? parseFloat(student.monthlyFee) : null;
-                    const useStudentFee = isMonthlyFee && studentMonthlyFee && studentMonthlyFee > 0;
+                    // Only treat as override if monthlyFee is explicitly set (non-empty string), including '0' for exemption
+                    const hasStudentFeeOverride = isMonthlyFee &&
+                        student.monthlyFee !== undefined &&
+                        student.monthlyFee !== null &&
+                        student.monthlyFee !== '';
+                    const studentMonthlyFee = hasStudentFeeOverride ? parseFloat(String(student.monthlyFee)) : null;
+                    const useStudentFee = hasStudentFeeOverride && studentMonthlyFee !== null && !isNaN(studentMonthlyFee);
+
+                    // Skip this fee type only if:
+                    // - Student does NOT have individual monthly fee override, AND
+                    // - No global amount config found (or global amount is 0)
+                    if (!useStudentFee && (!amountConfig || !amountConfig.amount)) return;
 
                     type.months?.forEach(monthName => {
                         let isDue = false;
@@ -249,8 +258,9 @@ const DueReport: React.FC = () => {
                         }
 
                         if (isDue) {
-                            // Use student-specific monthly fee if available, otherwise use class-based fee
-                            const finalAmount = useStudentFee ? studentMonthlyFee! : amountConfig.amount;
+                            // Individual override: use student's own fee (even if 0 = exemption)
+                            // Global fallback: use class-based fee from Set Fee Amount
+                            const finalAmount = useStudentFee ? studentMonthlyFee! : (amountConfig?.amount || 0);
                             totalPayable += finalAmount;
                             payableDetails.push({
                                 head: type.feeHeadName,
@@ -324,7 +334,21 @@ const DueReport: React.FC = () => {
 
             const totalPaid = studentPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
             const totalDiscount = studentPayments.reduce((sum, c) => sum + (Number((c as any).discount) || 0), 0);
-            const dues = totalPayable - totalPaid - totalDiscount;
+
+            // Include basicDues (carry-forward dues set at admission time)
+            const basicDues = Number((student as any).basicDues) || 0;
+            const totalPayableWithBasic = totalPayable + basicDues;
+
+            // Add basicDues as a separate line item in breakdown
+            if (basicDues > 0) {
+                payableDetails.unshift({
+                    head: 'Previous Dues (Carry Forward)',
+                    month: '—',
+                    amount: basicDues
+                });
+            }
+
+            const dues = totalPayableWithBasic - totalPaid - totalDiscount;
 
             if (dues <= 0) return null;
 
@@ -340,7 +364,7 @@ const DueReport: React.FC = () => {
                 phone: student.fatherContactNo || student.phone || 'N/A',
                 fatherName: student.fatherName || 'Parent',
                 admissionType: admType,
-                totalPayable,
+                totalPayable: totalPayableWithBasic,
                 payableDetails,
                 totalPaid,
                 totalDiscount,
@@ -354,6 +378,11 @@ const DueReport: React.FC = () => {
         }).filter(Boolean);
     }, [students, feeCollections, feeTypes, feeAmounts, studentsLoading, collectionsLoading, typesLoading, amountsLoading, paymentSettings, activeFY]);
 
+    const uniqueClasses = useMemo(() => {
+        const set = new Set<string>(students.map(s => s.class).filter((c): c is string => Boolean(c)));
+        return sortClasses(Array.from(set));
+    }, [students]);
+
     const filteredResults = useMemo(() => {
         return (studentDues as any[]).filter(s => {
             const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -362,8 +391,22 @@ const DueReport: React.FC = () => {
             const matchesSection = filterSection === 'ALL' || s.section === filterSection;
             return matchesSearch && matchesClass && matchesSection;
         }).sort((a, b) => {
-            const classDiff = (a.class || '').localeCompare(b.class || '');
-            if (classDiff !== 0) return classDiff;
+            // When a specific class is selected, sort only by roll number (numeric)
+            if (filterClass !== 'ALL') {
+                const sectionDiff = (a.section || '').localeCompare(b.section || '');
+                if (sectionDiff !== 0) return sectionDiff;
+                const rollA = parseInt(a.rollNo) || 0;
+                const rollB = parseInt(b.rollNo) || 0;
+                if (rollA !== rollB) return rollA - rollB;
+                return a.name.localeCompare(b.name);
+            }
+            // When ALL classes, sort by class order then section then roll number
+            const classOrder = uniqueClasses;
+            const classIdxA = classOrder.indexOf(a.class);
+            const classIdxB = classOrder.indexOf(b.class);
+            const classAIdx = classIdxA === -1 ? 999 : classIdxA;
+            const classBIdx = classIdxB === -1 ? 999 : classIdxB;
+            if (classAIdx !== classBIdx) return classAIdx - classBIdx;
             const sectionDiff = (a.section || '').localeCompare(b.section || '');
             if (sectionDiff !== 0) return sectionDiff;
             const rollA = parseInt(a.rollNo) || 0;
@@ -371,7 +414,7 @@ const DueReport: React.FC = () => {
             if (rollA !== rollB) return rollA - rollB;
             return a.name.localeCompare(b.name);
         });
-    }, [studentDues, searchTerm, filterClass, filterSection]);
+    }, [studentDues, searchTerm, filterClass, filterSection, uniqueClasses]);
 
     const stats = useMemo(() => {
         return {
@@ -413,11 +456,6 @@ const DueReport: React.FC = () => {
         const encodedMessage = encodeURIComponent(message);
         window.open(`https://wa.me/91${phone}?text=${encodedMessage}`, '_blank');
     };
-
-    const uniqueClasses = useMemo(() => {
-        const set = new Set<string>(students.map(s => s.class).filter((c): c is string => Boolean(c)));
-        return sortClasses(Array.from(set));
-    }, [students]);
 
     const uniqueSections = useMemo(() => {
         if (filterClass === 'ALL') return [];

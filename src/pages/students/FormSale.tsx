@@ -106,6 +106,7 @@ const FormSale: React.FC = () => {
     // Search and filter for reporting
     const [searchQuery, setSearchQuery] = useState('');
     const [dateFilter, setDateFilter] = useState<'this-month' | 'last-month' | 'lifetime'>('this-month');
+    const [classFilter, setClassFilter] = useState('ALL');
     const [currentReceipt, setCurrentReceipt] = useState<any | null>(null);
 
     // Filter form sales
@@ -123,6 +124,9 @@ const FormSale: React.FC = () => {
             if (saleDate < startOfLastMonth || saleDate > endOfLastMonth) return false;
         }
 
+        // Class Filter
+        if (classFilter !== 'ALL' && (sale.studentClass || '') !== classFilter) return false;
+
         const q = searchQuery.toLowerCase();
         const saleName = (sale.studentName || '').toLowerCase();
         const saleClass = (sale.studentClass || '').toLowerCase();
@@ -139,6 +143,61 @@ const FormSale: React.FC = () => {
         const dateB = b.saleDate?.toDate ? b.saleDate.toDate().getTime() : new Date(b.saleDate || 0).getTime();
         return dateB - dateA;
     });
+
+    // Print filtered report
+    const handlePrintReport = () => {
+        if (!filteredFormSales.length) return;
+        const totalAmount = filteredFormSales.reduce((sum: number, sale: any) => sum + (parseFloat(sale.formAmount) || 0), 0);
+        const dateLabel = dateFilter === 'this-month' ? 'This Month' : dateFilter === 'last-month' ? 'Last Month' : 'Life Time';
+        const classLabel = classFilter === 'ALL' ? 'All Classes' : classFilter;
+
+        const rows = filteredFormSales.map((sale: any, idx: number) => `
+            <tr style="background:${idx % 2 === 0 ? '#fff' : '#f8fafc'}">
+                <td>${idx + 1}</td>
+                <td style="font-family:monospace;font-weight:700">${sale.receiptNo || '-'}</td>
+                <td style="font-weight:700">${sale.studentName || '-'}</td>
+                <td>${sale.studentClass || '-'}</td>
+                <td>${sale.whatsappNumber || sale.fatherNumber || '-'}</td>
+                <td style="font-weight:700;color:#16a34a">₹ ${sale.formAmount || '0'}</td>
+                <td>${sale.saleDate?.toDate ? sale.saleDate.toDate().toLocaleDateString('en-IN') : new Date(sale.saleDate || 0).toLocaleDateString('en-IN')}</td>
+            </tr>`).join('');
+
+        const html = `<html><head><title>Form Sales Report</title>
+        <style>
+            @page { size: A4; margin: 12mm; }
+            body { font-family: Arial, sans-serif; font-size: 12px; color: #000; }
+            h1 { font-size: 18px; font-weight: 900; text-align: center; margin: 0; text-transform: uppercase; }
+            .subtitle { text-align: center; font-size: 11px; color: #475569; margin: 2px 0 10px; }
+            .meta { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; font-weight: 600; border-bottom: 2px solid #000; padding-bottom: 6px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+            th { background: #1e40af; color: white; padding: 6px 8px; text-align: left; font-size: 11px; }
+            td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; font-size: 11px; }
+            .footer { margin-top: 12px; display: flex; justify-content: space-between; font-weight: 700; font-size: 12px; border-top: 2px solid #000; padding-top: 6px; }
+        </style></head><body>
+        <h1>${currentSchool?.fullName || currentSchool?.name || 'School'}</h1>
+        <div class="subtitle">Form Sales Report</div>
+        <div class="meta">
+            <span>Period: ${dateLabel} &nbsp;|&nbsp; Class: ${classLabel}${searchQuery ? ` &nbsp;|&nbsp; Search: "${searchQuery}"` : ''}</span>
+            <span>Printed: ${new Date().toLocaleDateString('en-IN')}</span>
+        </div>
+        <table>
+            <thead><tr>
+                <th>#</th><th>Receipt No</th><th>Student Name</th><th>Class</th><th>WhatsApp</th><th>Amount</th><th>Date</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="footer">
+            <span>Total Records: ${filteredFormSales.length}</span>
+            <span>Total Amount: ₹ ${totalAmount.toFixed(2)}</span>
+        </div>
+        </body></html>`;
+
+        const win = window.open('', '_blank');
+        if (!win) { alert('Please allow pop-ups to print.'); return; }
+        win.document.write(html);
+        win.document.close();
+        setTimeout(() => { win.focus(); win.print(); win.close(); }, 300);
+    };
 
     // Handle form submission
     const handleSubmit = async (e: React.FormEvent) => {
@@ -534,31 +593,81 @@ const FormSale: React.FC = () => {
                 {/* Reporting Tab */}
                 {activeTab === 'reporting' && (
                     <div className="glass-card animate-slide-up" style={{ padding: '0' }}>
+                        {/* Top Filter Bar */}
                         <div style={{
                             background: 'rgba(245, 243, 255, 0.5)',
                             padding: '1rem 1.5rem',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            borderBottom: '1px solid var(--border)'
+                            borderBottom: '1px solid var(--border)',
+                            gap: '1rem',
+                            flexWrap: 'wrap'
                         }}>
+                            {/* Title + Count + Print */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                 <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#6366f1' }}></div>
                                 <span style={{ color: 'var(--text-main)', fontWeight: 800, fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                     Form Sales Report
                                 </span>
+                                <span style={{
+                                    background: '#6366f1',
+                                    color: 'white',
+                                    borderRadius: '20px',
+                                    padding: '0.2rem 0.75rem',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 800,
+                                    minWidth: '32px',
+                                    textAlign: 'center'
+                                }}>
+                                    {filteredFormSales.length}
+                                </span>
+                                <button
+                                    onClick={handlePrintReport}
+                                    disabled={filteredFormSales.length === 0}
+                                    title={filteredFormSales.length === 0 ? 'No data to print' : 'Print Report'}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                        background: filteredFormSales.length === 0 ? '#e2e8f0' : '#6366f1',
+                                        color: filteredFormSales.length === 0 ? '#94a3b8' : 'white',
+                                        border: 'none', borderRadius: '10px',
+                                        padding: '0.4rem 0.9rem', fontSize: '0.8125rem',
+                                        fontWeight: 700,
+                                        cursor: filteredFormSales.length === 0 ? 'not-allowed' : 'pointer'
+                                    }}
+                                >
+                                    <Printer size={14} />
+                                    Print
+                                </button>
                             </div>
-                            <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
+
+                            {/* Class Filter Dropdown */}
+                            <select
+                                className="input-field"
+                                style={{ height: '44px', borderRadius: '12px', fontWeight: 600, padding: '0 2rem 0 1rem', minWidth: '140px', background: 'white' }}
+                                value={classFilter}
+                                onChange={(e) => setClassFilter(e.target.value)}
+                            >
+                                <option value="ALL">All Classes</option>
+                                {classesList.map((cls) => (
+                                    <option key={cls} value={cls}>{cls}</option>
+                                ))}
+                            </select>
+
+                            {/* Search */}
+                            <div style={{ position: 'relative', flex: 1, maxWidth: '360px', minWidth: '200px' }}>
                                 <Search size={18} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                                 <input
                                     type="text"
-                                    placeholder="Search by name, receipt, class or WhatsApp..."
+                                    placeholder="Search by name, receipt or WhatsApp..."
                                     className="input-field"
                                     style={{ paddingLeft: '2.8rem', background: 'white', borderRadius: '12px', height: '44px' }}
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                 />
                             </div>
+
+                            {/* Date Chips */}
                             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f1f5f9', padding: '4px', borderRadius: '24px' }}>
                                 {[
                                     { id: 'this-month', label: 'This Month' },

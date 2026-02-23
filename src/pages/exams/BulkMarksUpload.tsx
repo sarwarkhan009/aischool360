@@ -148,30 +148,35 @@ const BulkMarksUpload: React.FC = () => {
             const marks = convertToMarksData(data);
             setParsedMarks(marks);
 
-            // Extract subject list by matching Excel columns to Scheduled Exam Subjects
-            if (data.length > 0 && selectedExamData?.subjects) {
+            // Extract subject list from CLASS ROUTINES (Step 2 class-wise subjects)
+            if (data.length > 0) {
                 const excelKeys = Object.keys(data[0]);
-                const examSubjects = selectedExamData.subjects;
+
+                // Get subjects from classRoutines for the selected class (Step 2)
+                const classRoutine = selectedExamData?.classRoutines?.find((cr: any) =>
+                    cr.classId === selectedClass
+                );
+                // Fallback to global subjects (Step 1) if no class routine exists
+                const examSubjects = classRoutine?.routine?.length > 0
+                    ? classRoutine.routine
+                    : (selectedExamData?.subjects || []);
 
                 const activeSubjects = excelKeys.filter(key => {
                     const upKey = key.toUpperCase().trim();
                     const cleanUpKey = upKey.replace(/[\s./-]/g, '');
 
                     return examSubjects.some((s: any) => {
-                        const sName = (s.subjectName || s.name).toUpperCase().trim();
+                        const sName = (s.subjectName || s.name || '').toUpperCase().trim();
                         const cleanSName = sName.replace(/[\s./-]/g, '');
 
                         // Handle Combined Subjects fuzzy matching
                         const combinedList = (s.combinedSubjects || []).map((c: string) => c.toUpperCase().trim().replace(/[\s./-]/g, ''));
 
-                        // Check exact match first
                         if (cleanSName === cleanUpKey) return true;
 
-                        // Check if Excel header is a substring of the schedule name or vice-versa
                         const isMainMatch = cleanSName.includes(cleanUpKey) || cleanUpKey.includes(cleanSName);
                         const isCombinedMatch = combinedList.some((c: string) => c.includes(cleanUpKey) || cleanUpKey.includes(c));
 
-                        // Special abbreviations
                         const isAbbrevMatch = (cleanUpKey.includes('URDU') && cleanSName.includes('URDU')) ||
                             (cleanUpKey.includes('SANS') && cleanSName.includes('SANS')) ||
                             (cleanUpKey.includes('DEEN') && cleanSName.includes('DEEN')) ||
@@ -230,35 +235,39 @@ const BulkMarksUpload: React.FC = () => {
             let successCount = 0;
 
             // Upload marks for each subject
+            // Helper to find subject config from classRoutine first, then global subjects
+            const findSubjectConfig = (subjectName: string) => {
+                const upSubjectName = subjectName.toUpperCase().trim();
+                const cleanUpSubjectName = upSubjectName.replace(/[\s./-]/g, '');
+
+                const matchFn = (s: any) => {
+                    const sName = (s.subjectName || s.name || '').toUpperCase().trim();
+                    const cleanSName = sName.replace(/[\s./-]/g, '');
+                    const combinedList = (s.combinedSubjects || []).map((c: string) => c.toUpperCase().trim().replace(/[\s./-]/g, ''));
+                    if (cleanSName === cleanUpSubjectName) return true;
+                    const isMainMatch = cleanSName.includes(cleanUpSubjectName) || cleanUpSubjectName.includes(cleanSName);
+                    const isCombinedMatch = combinedList.some((c: string) => c.includes(cleanUpSubjectName) || cleanUpSubjectName.includes(c));
+                    const isAbbrevMatch = (cleanUpSubjectName.includes('URDU') && cleanSName.includes('URDU')) ||
+                        (cleanUpSubjectName.includes('SANS') && cleanSName.includes('SANS')) ||
+                        (cleanUpSubjectName.includes('DEEN') && cleanSName.includes('DEEN')) ||
+                        (cleanUpSubjectName.includes('CONV') && cleanSName.includes('CONV')) ||
+                        (cleanUpSubjectName.includes('COMP') && cleanSName.includes('COMP'));
+                    return isMainMatch || isCombinedMatch || isAbbrevMatch;
+                };
+
+                // Search in class routine first (Step 2)
+                const classRoutine = selectedExamData.classRoutines?.find((cr: any) => cr.classId === selectedClass);
+                if (classRoutine?.routine?.length > 0) {
+                    const found = classRoutine.routine.find(matchFn);
+                    if (found) return found;
+                }
+                // Fallback to global subjects (Step 1)
+                return selectedExamData.subjects?.find(matchFn) || null;
+            };
+
             for (const subjectName of subjectList) {
                 try {
-                    // Get subject configuration from exam schedule BEFORE processing marks
-                    const upSubjectName = subjectName.toUpperCase().trim();
-                    const cleanUpSubjectName = upSubjectName.replace(/[\s.]/g, '');
-
-                    const subjectConfig = selectedExamData.subjects?.find((s: any) => {
-                        const sName = (s.subjectName || s.name).toUpperCase().trim();
-                        const cleanSName = sName.replace(/[\s./-]/g, '');
-                        const combinedList = (s.combinedSubjects || []).map((c: string) => c.toUpperCase().trim().replace(/[\s./-]/g, ''));
-
-                        // Check exact match first
-                        if (cleanSName === cleanUpSubjectName) return true;
-
-                        // Check if Excel header is a substring of the schedule name or vice-versa
-                        const isMainMatch = cleanSName.includes(cleanUpSubjectName) || cleanUpSubjectName.includes(cleanSName);
-
-                        // Check combined subjects
-                        const isCombinedMatch = combinedList.some((c: string) => c.includes(cleanUpSubjectName) || cleanUpSubjectName.includes(c));
-
-                        // Special common school abbreviations
-                        const isAbbrevMatch = (cleanUpSubjectName.includes('URDU') && cleanSName.includes('URDU')) ||
-                            (cleanUpSubjectName.includes('SANS') && cleanSName.includes('SANS')) ||
-                            (cleanUpSubjectName.includes('DEEN') && cleanSName.includes('DEEN')) ||
-                            (cleanUpSubjectName.includes('CONV') && cleanSName.includes('CONV')) ||
-                            (cleanUpSubjectName.includes('COMP') && cleanSName.includes('COMP'));
-
-                        return isMainMatch || isCombinedMatch || isAbbrevMatch;
-                    });
+                    const subjectConfig = findSubjectConfig(subjectName);
 
                     if (!subjectConfig) {
                         console.warn(`Subject config not found for: ${subjectName}`);
@@ -266,7 +275,9 @@ const BulkMarksUpload: React.FC = () => {
                     }
 
                     const isGradeOnly = subjectConfig.assessmentType === 'GRADE';
-                    const maxMarks = (subjectConfig.theoryMarks || 0) + (subjectConfig.practicalMarks || 0) || 100;
+                    const maxMarks = subjectConfig.maxMarks ||
+                        ((subjectConfig.theoryMarks || 0) + (subjectConfig.practicalMarks || 0)) ||
+                        100;
 
                     // Prepare marks data for this subject
                     const subjectMarks: StudentMarks[] = [];

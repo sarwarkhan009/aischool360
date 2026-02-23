@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { useFirestore } from '../../hooks/useFirestore';
-import { FileDown, Search, IndianRupee, ArrowLeft, Trash2, AlertTriangle, X } from 'lucide-react';
+import { FileDown, Search, IndianRupee, Trash2, AlertTriangle, X, Ban } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
+import { useAuth } from '../../context/AuthContext';
 import { sortClasses } from '../../constants/app';
 
-import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, writeBatch, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSchool } from '../../context/SchoolContext';
 import FeeReceipt from '../../components/fees/FeeReceipt';
 
 const FeeReport: React.FC = () => {
     const { currentSchool } = useSchool();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
     const { data: feeRecords, loading } = useFirestore<any>('fee_collections');
     const { data: allSettings } = useFirestore<any>('settings');
     const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
@@ -29,6 +32,17 @@ const FeeReport: React.FC = () => {
     const [wipeConfirmationText, setWipeConfirmationText] = useState('');
     const [isWiping, setIsWiping] = useState(false);
     const [showWipeButton, setShowWipeButton] = useState(false);
+
+    // Cancellation state
+    const [showCancelModal, setShowCancelModal] = useState(false);
+    const [cancelRecord, setCancelRecord] = useState<any>(null);
+    const [cancelReason, setCancelReason] = useState('');
+    const [isCancelling, setIsCancelling] = useState(false);
+
+    // Tab: 'ACTIVE' | 'CANCELLED'
+    const [recordTab, setRecordTab] = useState<'ACTIVE' | 'CANCELLED'>('ACTIVE');
+    const [reportMode, setReportMode] = useState<'DETAILED' | 'CONSOLIDATED'>('DETAILED');
+
 
     const getPeriodDates = (period: string) => {
         const today = new Date();
@@ -71,8 +85,24 @@ const FeeReport: React.FC = () => {
         return { startDate: start, endDate: end };
     };
 
-    const filteredRecords = feeRecords.filter(record => {
-        // Extract date for filtering (need ISO format for comparison)
+    const getRecordTimestamp = (record: any): number => {
+        if (record.date?.toDate) return record.date.toDate().getTime();
+        if (typeof record.date === 'string') return new Date(record.date).getTime() || 0;
+        if (record.createdAt) return new Date(record.createdAt).getTime() || 0;
+        return 0;
+    };
+
+    const getRecordTime = (record: any): string => {
+        try {
+            if (record.date?.toDate) return record.date.toDate().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+            if (typeof record.date === 'string' && record.date.includes('T')) return new Date(record.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+            if (record.createdAt && record.createdAt.includes('T')) return new Date(record.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+        } catch { }
+        return '';
+    };
+
+    // Base filter (date + class + category + search)
+    const baseFilteredRecords = feeRecords.filter((record: any) => {
         let dateStr = '';
         if (record.date?.toDate) {
             dateStr = record.date.toDate().toISOString().split('T')[0];
@@ -85,7 +115,6 @@ const FeeReport: React.FC = () => {
         const isInventory = record.paidFor === 'Inventory Sale' || record.receiptNo?.startsWith('INV');
         const isFee = !isInventory;
         const matchesCategory = (selectedCategories.includes('FEES') && isFee) || (selectedCategories.includes('INVENTORY') && isInventory);
-
         const matchesDate = dateStr && dateStr >= startDate && dateStr <= endDate;
         const matchesClass = !selectedClass || record.class === selectedClass;
         const matchesSearch = !searchQuery ||
@@ -93,30 +122,157 @@ const FeeReport: React.FC = () => {
             (record.admissionNo && String(record.admissionNo).toLowerCase().includes(searchQuery.toLowerCase()));
 
         return matchesDate && matchesClass && matchesCategory && matchesSearch;
-    });
+    }).sort((a: any, b: any) => getRecordTimestamp(b) - getRecordTimestamp(a));
 
-    const totalAmount = filteredRecords.reduce((sum, r) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
-    const paidAmount = filteredRecords
-        .filter(r => r.status === 'PAID')
-        .reduce((sum, r) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
-    const pendingAmount = totalAmount - paidAmount;
+    // Active = not cancelled
+    const filteredRecords = baseFilteredRecords.filter((r: any) => r.status !== 'CANCELLED');
+
+    const EXAM_FEE_TITLES = ['1st Term Exam Fee', '2nd Term Exam Fee', 'Annual Exam Fee', 'Practical Exam Fee', 'Exam Fee'];
+
+    const getConsolidatedData = () => {
+        const groups: Record<string, any> = {};
+        const allDynamicHeads = new Set<string>();
+
+        // Sort filteredRecords by date ascending for the report
+        const sorted = [...filteredRecords].sort((a, b) => getRecordTimestamp(a) - getRecordTimestamp(b));
+
+        sorted.forEach(record => {
+            let dateKey = '';
+            if (record.date?.toDate) {
+                dateKey = record.date.toDate().toISOString().split('T')[0];
+            } else if (typeof record.date === 'string') {
+                dateKey = record.date.split('T')[0];
+            } else if (record.createdAt) {
+                dateKey = record.createdAt.split('T')[0];
+            }
+
+            if (!dateKey) return;
+
+            if (!groups[dateKey]) {
+                groups[dateKey] = {
+                    date: dateKey,
+                    values: {} as Record<string, number>,
+                    total: 0
+                };
+            }
+
+            const g = groups[dateKey];
+            const breakdown = record.feeBreakdown || {};
+
+            if (Object.keys(breakdown).length === 0) {
+                const amount = parseFloat(record.paid || record.amount) || 0;
+                let head = record.paidFor || 'Unknown';
+
+                if (EXAM_FEE_TITLES.some(t => head.includes(t))) {
+                    head = 'Exam Fees';
+                }
+
+                g.values[head] = (g.values[head] || 0) + amount;
+                g.total += amount;
+                allDynamicHeads.add(head);
+            } else {
+                Object.entries(breakdown).forEach(([head, amount]: [string, any]) => {
+                    const val = parseFloat(amount) || 0;
+                    let targetHead = head;
+
+                    if (EXAM_FEE_TITLES.some(t => head.includes(t))) {
+                        targetHead = 'Exam Fees';
+                    }
+
+                    g.values[targetHead] = (g.values[targetHead] || 0) + val;
+                    g.total += val;
+                    allDynamicHeads.add(targetHead);
+                });
+            }
+        });
+
+        // Filter heads that have a non-zero total
+        const finalHeads = Array.from(allDynamicHeads).filter(head => {
+            const headTotal = Object.values(groups).reduce((acc, g) => acc + (g.values[head] || 0), 0);
+            return headTotal > 0;
+        }).sort((a, b) => {
+            if (a === 'Monthly Fee') return -1;
+            if (b === 'Monthly Fee') return 1;
+            if (a === 'Admission Fees' || a === 'Admission Fee') return -1;
+            if (b === 'Admission Fees' || b === 'Admission Fee') return 1;
+            return a.localeCompare(b);
+        });
+
+        return { data: Object.values(groups), heads: finalHeads };
+    };
+
+    const { data: consolidatedData, heads: consolidatedHeads } = getConsolidatedData();
+    // Cancelled records (across all dates, just match class/category/search)
+    const cancelledRecords = feeRecords.filter((record: any) => {
+        if (record.status !== 'CANCELLED') return false;
+        const isInventory = record.paidFor === 'Inventory Sale' || record.receiptNo?.startsWith('INV');
+        const isFee = !isInventory;
+        const matchesCategory = (selectedCategories.includes('FEES') && isFee) || (selectedCategories.includes('INVENTORY') && isInventory);
+        const matchesClass = !selectedClass || record.class === selectedClass;
+        const matchesSearch = !searchQuery ||
+            (record.studentName && record.studentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
+            (record.admissionNo && String(record.admissionNo).toLowerCase().includes(searchQuery.toLowerCase()));
+        return matchesCategory && matchesClass && matchesSearch;
+    }).sort((a: any, b: any) => getRecordTimestamp(b) - getRecordTimestamp(a));
+
+    const displayRecords = recordTab === 'ACTIVE' ? filteredRecords : cancelledRecords;
+
+    const handleExportConsolidated = () => {
+        const headers = ['Date', ...consolidatedHeads, 'Total'];
+        const csvRows = consolidatedData.map(d => {
+            const row = [
+                formatDate(d.date),
+                ...consolidatedHeads.map(h => d.values[h] || ''),
+                d.total
+            ];
+            return row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+        });
+
+        const csvContent = [headers.join(','), ...csvRows].join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `Consolidated_Fee_Report_${startDate}_to_${endDate}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const totalAmount = filteredRecords.reduce((sum: number, r: any) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
+    const cashAmount = filteredRecords
+        .filter((r: any) => !r.paymentMode || r.paymentMode === 'Cash')
+        .reduce((sum: number, r: any) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
+    const onlineAmount = totalAmount - cashAmount;
 
     const handleExport = () => {
-        const csvData = filteredRecords.map(r => ({
+        if (reportMode === 'CONSOLIDATED') {
+            handleExportConsolidated();
+            return;
+        }
+        const csvData = displayRecords.map((r: any) => ({
             'Date': formatDate(r.date),
             'Receipt No': r.receiptNo || r.id,
             'Admission No': r.admissionNo,
             'Student Name': r.studentName,
-            'Class': r.class,
+            'Class': `${r.class || ''}${r.section ? ` - ${r.section}` : ''}`,
             'Fee Type': r.paidFor || 'Monthly Fee',
             'Amount': r.paid || r.amount,
             'Status': r.status,
-            'Payment Mode': r.paymentMode || 'Cash'
+            'Payment Mode': r.paymentMode || 'Cash',
+            'Cancel Reason': r.cancellationReason || ''
         }));
 
+        // Wrap each value in double-quotes so commas inside values (e.g. multi-month fee types) don't split columns
+        const escapeCSV = (value: any) => {
+            const str = String(value ?? '');
+            return `"${str.replace(/"/g, '""')}"`;
+        };
+
         const csv = [
-            Object.keys(csvData[0] || {}).join(','),
-            ...csvData.map(row => Object.values(row).join(','))
+            Object.keys(csvData[0] || {}).map(escapeCSV).join(','),
+            ...csvData.map((row: any) => Object.values(row).map(escapeCSV).join(','))
         ].join('\n');
 
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -129,7 +285,6 @@ const FeeReport: React.FC = () => {
 
     const handleShowReceipt = async (record: any) => {
         setCurrentReceipt(record);
-        // Fetch student details for additional info on receipt
         try {
             const studentQuery = query(
                 collection(db, 'students'),
@@ -171,6 +326,35 @@ const FeeReport: React.FC = () => {
         );
     };
 
+    // Open cancel modal
+    const openCancelModal = (record: any) => {
+        setCancelRecord(record);
+        setCancelReason('');
+        setShowCancelModal(true);
+    };
+
+    // Confirm cancel
+    const handleConfirmCancel = async () => {
+        if (!cancelRecord?.id || !cancelReason.trim()) return;
+        setIsCancelling(true);
+        try {
+            await updateDoc(doc(db, 'fee_collections', cancelRecord.id), {
+                status: 'CANCELLED',
+                cancellationReason: cancelReason.trim(),
+                cancelledAt: new Date().toISOString(),
+                cancelledBy: user?.name || user?.username || 'Admin'
+            });
+            setShowCancelModal(false);
+            setCancelRecord(null);
+            setCancelReason('');
+        } catch (error) {
+            console.error('Error cancelling fee record:', error);
+            alert('Record cancel करने में error आई। कृपया दोबारा try करें।');
+        } finally {
+            setIsCancelling(false);
+        }
+    };
+
     const handleWipeAllData = async () => {
         if (wipeConfirmationText !== 'WIPE ALL DATA' || isWiping) return;
 
@@ -189,7 +373,6 @@ const FeeReport: React.FC = () => {
                 return;
             }
 
-            // Partition into batches of 400 (safety margin under 500)
             const docs = snapshot.docs;
             const batchSize = 400;
 
@@ -203,7 +386,6 @@ const FeeReport: React.FC = () => {
             alert(`Successfully wiped ${docs.length} fee collection records.`);
             setShowWipeModal(false);
             setWipeConfirmationText('');
-            // The useFirestore hook will automatically update the UI
         } catch (error) {
             console.error("Error wiping fee data:", error);
             alert('An error occurred while wiping data. Please try again.');
@@ -251,7 +433,7 @@ const FeeReport: React.FC = () => {
                             <button
                                 className="btn btn-primary"
                                 onClick={handleExport}
-                                disabled={filteredRecords.length === 0}
+                                disabled={displayRecords.length === 0}
                                 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                             >
                                 <FileDown size={18} /> Export Report
@@ -266,12 +448,20 @@ const FeeReport: React.FC = () => {
                             <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)' }}>₹{totalAmount.toFixed(2)}</div>
                         </div>
                         <div className="glass-card" style={{ padding: '1.5rem' }}>
-                            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Paid</div>
-                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#22c55e' }}>₹{paidAmount.toFixed(2)}</div>
+                            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Cash / Online</div>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '1.5rem', fontWeight: 800, color: '#22c55e' }}>₹{cashAmount.toFixed(0)}</span>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>/</span>
+                                <span style={{ fontSize: '1.5rem', fontWeight: 800, color: '#6366f1' }}>₹{onlineAmount.toFixed(0)}</span>
+                            </div>
                         </div>
                         <div className="glass-card" style={{ padding: '1.5rem' }}>
                             <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Records</div>
                             <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)' }}>{filteredRecords.length}</div>
+                        </div>
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Cancelled</div>
+                            <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ef4444' }}>{cancelledRecords.length}</div>
                         </div>
                     </div>
 
@@ -397,12 +587,105 @@ const FeeReport: React.FC = () => {
 
                     {/* Results Table */}
                     <div className="glass-card" style={{ padding: '0' }}>
-                        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)', background: '#f8f9fa' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <IndianRupee size={20} style={{ color: 'var(--primary)' }} />
-                                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>
-                                    Fee Collection Records ({filteredRecords.length})
-                                </h3>
+                        {/* Tab Header */}
+                        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <IndianRupee size={20} style={{ color: 'var(--primary)' }} />
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>
+                                        Fee Collection Records
+                                    </h3>
+                                </div>
+
+                                {/* Report Style Toggle */}
+                                {recordTab === 'ACTIVE' && (
+                                    <div style={{
+                                        display: 'flex',
+                                        background: '#f1f5f9',
+                                        padding: '0.25rem',
+                                        borderRadius: '0.75rem',
+                                        border: '1px solid #e2e8f0'
+                                    }}>
+                                        <button
+                                            onClick={() => setReportMode('DETAILED')}
+                                            style={{
+                                                padding: '0.35rem 1rem',
+                                                borderRadius: '0.5rem',
+                                                border: 'none',
+                                                background: reportMode === 'DETAILED' ? 'white' : 'transparent',
+                                                color: reportMode === 'DETAILED' ? 'var(--primary)' : '#64748b',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                boxShadow: reportMode === 'DETAILED' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                                transition: 'all 0.2s'
+                                            }}
+                                        >
+                                            Detailed List
+                                        </button>
+                                        <button
+                                            onClick={() => setReportMode('CONSOLIDATED')}
+                                            style={{
+                                                padding: '0.35rem 1rem',
+                                                borderRadius: '0.5rem',
+                                                border: 'none',
+                                                background: reportMode === 'CONSOLIDATED' ? 'white' : 'transparent',
+                                                color: reportMode === 'CONSOLIDATED' ? 'var(--primary)' : '#64748b',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                boxShadow: reportMode === 'CONSOLIDATED' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                                transition: 'all 0.2s'
+                                            }}
+                                        >
+                                            Consolidated Report
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            {/* Tab switcher */}
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button
+                                    onClick={() => setRecordTab('ACTIVE')}
+                                    style={{
+                                        padding: '0.4rem 1.1rem',
+                                        borderRadius: '2rem',
+                                        border: '1.5px solid',
+                                        borderColor: recordTab === 'ACTIVE' ? 'var(--primary)' : 'var(--border)',
+                                        background: recordTab === 'ACTIVE' ? 'var(--primary)' : 'white',
+                                        color: recordTab === 'ACTIVE' ? 'white' : 'var(--text-muted)',
+                                        fontWeight: 600,
+                                        fontSize: '0.82rem',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.4rem'
+                                    }}
+                                >
+                                    Active ({filteredRecords.length})
+                                </button>
+                                <button
+                                    onClick={() => setRecordTab('CANCELLED')}
+                                    style={{
+                                        padding: '0.4rem 1.1rem',
+                                        borderRadius: '2rem',
+                                        border: '1.5px solid',
+                                        borderColor: recordTab === 'CANCELLED' ? '#ef4444' : 'var(--border)',
+                                        background: recordTab === 'CANCELLED' ? '#ef4444' : 'white',
+                                        color: recordTab === 'CANCELLED' ? 'white' : '#ef4444',
+                                        fontWeight: 600,
+                                        fontSize: '0.82rem',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.4rem'
+                                    }}
+                                >
+                                    <Ban size={13} />
+                                    Cancelled ({cancelledRecords.length})
+                                </button>
                             </div>
                         </div>
 
@@ -410,16 +693,65 @@ const FeeReport: React.FC = () => {
                             <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                                 Loading fee records...
                             </div>
-                        ) : filteredRecords.length === 0 ? (
+                        ) : displayRecords.length === 0 ? (
                             <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                                No fee records found for the selected criteria
+                                {recordTab === 'CANCELLED'
+                                    ? 'कोई cancelled receipt नहीं मिली।'
+                                    : 'No fee records found for the selected criteria'}
+                            </div>
+                        ) : reportMode === 'CONSOLIDATED' && recordTab === 'ACTIVE' ? (
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                                        <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                                            <th style={{ padding: '1rem', fontWeight: 800 }}>Date</th>
+                                            {consolidatedHeads.map(head => (
+                                                <th key={head} style={{ padding: '1rem', fontWeight: 800 }}>{head}</th>
+                                            ))}
+                                            <th style={{ padding: '1rem', fontWeight: 800, background: '#f1f5f9' }}>Day Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {consolidatedData.map((d: any, idx: number) => (
+                                            <tr key={idx} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.2s' }} className="hover-row">
+                                                <td style={{ padding: '1rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatDate(d.date)}</td>
+                                                {consolidatedHeads.map(head => (
+                                                    <td key={head}
+                                                        style={{
+                                                            padding: '1rem',
+                                                            color: d.values[head] > 0 ? (
+                                                                head.includes('Monthly') ? '#0284c7' :
+                                                                    head.includes('Exam') ? '#7c3aed' :
+                                                                        head.includes('Admission') ? '#059669' : '#4b5563'
+                                                            ) : '#94a3b8'
+                                                        }}
+                                                    >
+                                                        {d.values[head] > 0 ? `₹${d.values[head]}` : '-'}
+                                                    </td>
+                                                ))}
+                                                <td style={{ padding: '1rem', fontWeight: 800, background: '#f1f5f9' }}>₹{d.total}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot style={{ background: '#f8fafc', fontWeight: 800 }}>
+                                        <tr>
+                                            <td style={{ padding: '1.25rem 1rem' }}>GRAND TOTAL</td>
+                                            {consolidatedHeads.map(head => (
+                                                <td key={head} style={{ padding: '1.25rem 1rem' }}>
+                                                    ₹{consolidatedData.reduce((s, d) => s + (d.values[head] || 0), 0).toFixed(0)}
+                                                </td>
+                                            ))}
+                                            <td style={{ padding: '1.25rem 1rem', background: 'var(--primary)', color: 'white' }}>₹{consolidatedData.reduce((s, d) => s + d.total, 0).toFixed(0)}</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
                             </div>
                         ) : (
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
                                         <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)', background: '#f8f9fa' }}>
-                                            <th style={{ padding: '1rem' }}>Date</th>
+                                            <th style={{ padding: '1rem' }}>Date &amp; Time</th>
                                             <th style={{ padding: '1rem' }}>Receipt No</th>
                                             <th style={{ padding: '1rem' }}>Student</th>
                                             <th style={{ padding: '1rem' }}>Class</th>
@@ -427,22 +759,41 @@ const FeeReport: React.FC = () => {
                                             <th style={{ padding: '1rem' }}>Amount</th>
                                             <th style={{ padding: '1rem' }}>Status</th>
                                             <th style={{ padding: '1rem' }}>Mode</th>
+                                            {recordTab === 'CANCELLED' && (
+                                                <th style={{ padding: '1rem', color: '#ef4444' }}>Cancel Reason</th>
+                                            )}
+                                            {isAdmin && recordTab === 'ACTIVE' && (
+                                                <th style={{ padding: '1rem' }}>Action</th>
+                                            )}
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {filteredRecords.map((record, idx) => (
-                                            <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
-                                                <td style={{ padding: '1rem' }}>{formatDate(record.date)}</td>
+                                        {displayRecords.map((record: any, idx: number) => (
+                                            <tr
+                                                key={record.id || idx}
+                                                style={{
+                                                    borderBottom: '1px solid var(--border)',
+                                                    background: record.status === 'CANCELLED' ? '#fff5f5' : 'white',
+                                                    opacity: record.status === 'CANCELLED' ? 0.85 : 1
+                                                }}
+                                            >
+                                                <td style={{ padding: '1rem', whiteSpace: 'nowrap' }}>
+                                                    <div style={{ fontWeight: 600 }}>{formatDate(record.date)}</div>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                        {getRecordTime(record)}
+                                                    </div>
+                                                </td>
                                                 <td style={{ padding: '1rem' }}>
                                                     <button
                                                         onClick={() => handleShowReceipt(record)}
                                                         style={{
                                                             background: 'none',
                                                             border: 'none',
-                                                            color: 'var(--primary)',
+                                                            color: record.status === 'CANCELLED' ? '#ef4444' : 'var(--primary)',
                                                             fontWeight: 700,
                                                             cursor: 'pointer',
-                                                            padding: 0
+                                                            padding: 0,
+                                                            textDecoration: record.status === 'CANCELLED' ? 'line-through' : 'none'
                                                         }}
                                                     >
                                                         {record.receiptNo || record.id}
@@ -452,18 +803,72 @@ const FeeReport: React.FC = () => {
                                                     <div>{record.studentName}</div>
                                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{record.admissionNo}</div>
                                                 </td>
-                                                <td style={{ padding: '1rem' }}>{record.class}</td>
+                                                <td style={{ padding: '1rem' }}>
+                                                    {record.class}
+                                                    {record.section && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{record.section}</div>}
+                                                </td>
                                                 <td style={{ padding: '1rem' }}>{record.paidFor || 'Monthly Fee'}</td>
                                                 <td style={{ padding: '1rem', fontWeight: 600 }}>₹{parseFloat(record.paid || record.amount || 0).toFixed(2)}</td>
                                                 <td style={{ padding: '1rem' }}>
                                                     <span className={`badge ${record.status === 'PAID' ? 'badge-success' :
-                                                        record.status === 'PARTIAL' ? 'badge-warning' :
-                                                            'badge-danger'
+                                                        record.status === 'CANCELLED' ? 'badge-danger' :
+                                                            record.status === 'PARTIAL' ? 'badge-warning' :
+                                                                'badge-danger'
                                                         }`}>
                                                         {record.status}
                                                     </span>
                                                 </td>
                                                 <td style={{ padding: '1rem' }}>{record.paymentMode || 'Cash'}</td>
+
+                                                {/* Cancel Reason column — only in cancelled tab */}
+                                                {recordTab === 'CANCELLED' && (
+                                                    <td style={{ padding: '1rem', maxWidth: '220px' }}>
+                                                        <div style={{
+                                                            fontSize: '0.82rem',
+                                                            color: '#b91c1c',
+                                                            background: '#fee2e2',
+                                                            borderRadius: '0.4rem',
+                                                            padding: '0.3rem 0.6rem',
+                                                            display: 'inline-block',
+                                                            fontWeight: 500
+                                                        }}>
+                                                            {record.cancellationReason || '—'}
+                                                        </div>
+                                                        {record.cancelledBy && (
+                                                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                                                                by {record.cancelledBy}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                )}
+
+                                                {/* Cancel action button — only in active tab, only for admin */}
+                                                {isAdmin && recordTab === 'ACTIVE' && (
+                                                    <td style={{ padding: '1rem' }}>
+                                                        <button
+                                                            onClick={() => openCancelModal(record)}
+                                                            title="Cancel this receipt"
+                                                            style={{
+                                                                background: '#fff7ed',
+                                                                border: '1px solid #fed7aa',
+                                                                color: '#c2410c',
+                                                                borderRadius: '0.4rem',
+                                                                padding: '0.35rem 0.7rem',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.3rem',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: 600,
+                                                                transition: 'all 0.2s',
+                                                                whiteSpace: 'nowrap'
+                                                            }}
+                                                        >
+                                                            <Ban size={13} />
+                                                            Cancel
+                                                        </button>
+                                                    </td>
+                                                )}
                                             </tr>
                                         ))}
                                     </tbody>
@@ -475,7 +880,190 @@ const FeeReport: React.FC = () => {
             )}
             {view === 'RECEIPT' && renderReceipt()}
 
-            {/* Wipe Confirmation Modal */}
+            {/* ── Cancel Receipt Modal ── */}
+            {showCancelModal && cancelRecord && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(0,0,0,0.55)',
+                    backdropFilter: 'blur(6px)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    padding: '1rem'
+                }}>
+                    <div style={{
+                        width: '100%',
+                        maxWidth: '500px',
+                        background: '#ffffff',
+                        borderRadius: '1.25rem',
+                        boxShadow: '0 24px 60px rgba(0,0,0,0.3)',
+                        overflow: 'hidden',
+                        animation: 'slideUp 0.25s ease-out'
+                    }}>
+                        {/* Orange header strip */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                            borderBottom: '1px solid #fed7aa',
+                            padding: '1.25rem 1.5rem',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '1rem'
+                        }}>
+                            <div style={{
+                                width: '42px', height: '42px', flexShrink: 0,
+                                background: '#ffedd5', border: '2px solid #fb923c',
+                                borderRadius: '50%', display: 'flex', alignItems: 'center',
+                                justifyContent: 'center', color: '#c2410c'
+                            }}>
+                                <Ban size={20} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <h2 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#7c2d12', margin: 0, marginBottom: '0.3rem' }}>
+                                    Receipt Cancel करें
+                                </h2>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <span style={{
+                                        background: '#fef3c7', border: '1px solid #fde68a',
+                                        borderRadius: '0.35rem', padding: '0.1rem 0.5rem',
+                                        fontSize: '0.76rem', fontWeight: 700, color: '#92400e'
+                                    }}>
+                                        {cancelRecord.receiptNo || cancelRecord.id}
+                                    </span>
+                                    <span style={{ fontSize: '0.8rem', color: '#9a3412', fontWeight: 600 }}>
+                                        {cancelRecord.studentName}
+                                    </span>
+                                    {cancelRecord.class && (
+                                        <span style={{ fontSize: '0.76rem', color: '#b45309' }}>· {cancelRecord.class}</span>
+                                    )}
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { if (!isCancelling) { setShowCancelModal(false); setCancelReason(''); } }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9a3412', padding: '0.2rem', display: 'flex', alignItems: 'center', marginTop: '-2px' }}
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div style={{ padding: '1.5rem' }}>
+                            {/* Amount row */}
+                            <div style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                background: '#f9fafb', borderRadius: '0.65rem', padding: '0.65rem 1rem',
+                                marginBottom: '1.25rem', border: '1px solid #e5e7eb'
+                            }}>
+                                <span style={{ fontSize: '0.82rem', color: '#6b7280', fontWeight: 600 }}>Amount to be Cancelled</span>
+                                <span style={{ fontSize: '1.1rem', fontWeight: 800, color: '#111827' }}>
+                                    ₹{parseFloat(cancelRecord.paid || cancelRecord.amount || 0).toFixed(2)}
+                                </span>
+                            </div>
+
+                            {/* Quick reason chips */}
+                            <div style={{ marginBottom: '0.75rem' }}>
+                                <p style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6b7280', margin: 0, marginBottom: '0.5rem' }}>Quick Select:</p>
+                                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                    {['Duplicate entry', 'Wrong amount', 'Student withdrew', 'Data correction', 'Other'].map(chip => (
+                                        <button
+                                            key={chip}
+                                            onClick={() => setCancelReason(chip)}
+                                            style={{
+                                                padding: '0.28rem 0.7rem',
+                                                borderRadius: '2rem',
+                                                border: '1.5px solid',
+                                                borderColor: cancelReason === chip ? '#c2410c' : '#e5e7eb',
+                                                background: cancelReason === chip ? '#fff7ed' : '#f9fafb',
+                                                color: cancelReason === chip ? '#c2410c' : '#6b7280',
+                                                fontSize: '0.74rem', fontWeight: 600,
+                                                cursor: 'pointer', transition: 'all 0.15s'
+                                            }}
+                                        >
+                                            {chip}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Reason textarea */}
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <label style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.4rem', display: 'block', color: '#374151' }}>
+                                    Cancellation Reason <span style={{ color: '#ef4444' }}>*</span>
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    autoFocus
+                                    placeholder="Cancel करने का विस्तृत कारण लिखें..."
+                                    value={cancelReason}
+                                    onChange={(e) => setCancelReason(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        resize: 'vertical',
+                                        minHeight: '90px',
+                                        padding: '0.65rem 0.9rem',
+                                        borderRadius: '0.6rem',
+                                        border: `1.5px solid ${cancelReason.trim().length >= 5 ? '#fb923c' : '#d1d5db'}`,
+                                        outline: 'none',
+                                        fontSize: '0.88rem',
+                                        fontFamily: 'inherit',
+                                        background: '#ffffff',
+                                        color: '#111827',
+                                        boxSizing: 'border-box',
+                                        transition: 'border-color 0.2s'
+                                    }}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.3rem' }}>
+                                    {cancelReason.trim().length > 0 && cancelReason.trim().length < 5 ? (
+                                        <span style={{ fontSize: '0.74rem', color: '#ef4444' }}>कम से कम 5 characters जरूरी हैं।</span>
+                                    ) : <span />}
+                                    <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>{cancelReason.trim().length} chars</span>
+                                </div>
+                            </div>
+
+                            {/* Buttons */}
+                            <div style={{ display: 'flex', gap: '0.75rem' }}>
+                                <button
+                                    onClick={() => { setShowCancelModal(false); setCancelReason(''); }}
+                                    disabled={isCancelling}
+                                    style={{
+                                        flex: 1, padding: '0.7rem 1rem',
+                                        borderRadius: '0.6rem',
+                                        border: '1.5px solid #d1d5db',
+                                        background: '#ffffff', color: '#374151',
+                                        fontWeight: 700, fontSize: '0.88rem',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Back
+                                </button>
+                                <button
+                                    onClick={handleConfirmCancel}
+                                    disabled={cancelReason.trim().length < 5 || isCancelling}
+                                    style={{
+                                        flex: 2, padding: '0.7rem 1rem',
+                                        borderRadius: '0.6rem', border: 'none',
+                                        background: cancelReason.trim().length >= 5
+                                            ? 'linear-gradient(135deg, #c2410c 0%, #ea580c 100%)'
+                                            : '#fde8d8',
+                                        color: cancelReason.trim().length >= 5 ? '#ffffff' : '#c2410c',
+                                        fontWeight: 700, fontSize: '0.88rem',
+                                        cursor: cancelReason.trim().length >= 5 && !isCancelling ? 'pointer' : 'not-allowed',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem',
+                                        boxShadow: cancelReason.trim().length >= 5 ? '0 4px 14px rgba(194,65,12,0.3)' : 'none',
+                                        transition: 'all 0.2s'
+                                    }}
+                                >
+                                    <Ban size={15} />
+                                    {isCancelling ? 'Cancelling...' : 'Confirm Cancel'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Wipe Confirmation Modal ── */}
             {showWipeModal && (
                 <div style={{
                     position: 'fixed',

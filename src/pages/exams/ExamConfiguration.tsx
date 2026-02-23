@@ -8,7 +8,8 @@ import {
     TrendingUp,
     Check,
     X,
-    AlertCircle
+    AlertCircle,
+    Database
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
@@ -78,6 +79,23 @@ const DEFAULT_GRADING_TEMPLATES = {
         { min: 50, max: 59, grade: 'C', gradePoint: 6, description: 'Average' },
         { min: 40, max: 49, grade: 'D', gradePoint: 5, description: 'Pass' },
         { min: 0, max: 39, grade: 'F', gradePoint: 0, description: 'Fail' }
+    ]
+};
+
+const DEFAULT_LETTER_GRADE: Omit<GradingSystem, 'id' | 'schoolId' | 'createdAt' | 'updatedAt'> = {
+    name: 'Letter Grade',
+    type: 'LETTER',
+    isDefault: true,
+    applicableClasses: [],
+    ranges: [
+        { min: 91, max: 100, grade: 'A+', description: 'Excellent' },
+        { min: 81, max: 90, grade: 'A', description: 'Very Good' },
+        { min: 71, max: 80, grade: 'B+', description: 'Good' },
+        { min: 61, max: 70, grade: 'B', description: 'Average' },
+        { min: 51, max: 60, grade: 'C', description: 'Satisfactory' },
+        { min: 41, max: 50, grade: 'D', description: 'Poor' },
+        { min: 33, max: 40, grade: 'E', description: 'Very Poor' },
+        { min: 0, max: 32, grade: 'F', description: 'Fail' }
     ]
 };
 
@@ -249,6 +267,52 @@ const ExamConfiguration: React.FC = () => {
         } catch (error) {
             console.error('Error deleting grading system:', error);
             alert('Failed to delete grading system');
+        }
+    };
+
+    const [seedingId, setSeedingId] = useState<string | null>(null);
+
+    const handleSeedGrading = async (grading: GradingSystem) => {
+        if (!currentSchool?.id) return;
+        if (!confirm(`Seed "${grading.name}" grades to the database? This will update the stored grade ranges.`)) return;
+        setSeedingId(grading.id);
+        try {
+            await updateGrading(grading.id, {
+                ...grading,
+                schoolId: currentSchool.id,
+                updatedAt: new Date().toISOString()
+            });
+            alert(`"${grading.name}" seeded successfully!`);
+        } catch (error) {
+            console.error('Error seeding grading system:', error);
+            alert('Failed to seed grading system');
+        } finally {
+            setSeedingId(null);
+        }
+    };
+
+    const handleSeedDefaultLetterGrade = async () => {
+        if (!currentSchool?.id) return;
+        if (!confirm('Seed the default Letter Grade system to the database? This will add a new Letter Grade grading system.')) return;
+        setSeedingId('__default__');
+        try {
+            // If a default already exists, unset it first
+            const existingDefault = schoolGradingSystems.find(g => g.isDefault);
+            if (existingDefault) {
+                await updateGrading(existingDefault.id, { isDefault: false, updatedAt: new Date().toISOString() });
+            }
+            await addGrading({
+                ...DEFAULT_LETTER_GRADE,
+                schoolId: currentSchool.id,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            } as GradingSystem);
+            alert('Default Letter Grade seeded successfully!');
+        } catch (error) {
+            console.error('Error seeding default letter grade:', error);
+            alert('Failed to seed default letter grade');
+        } finally {
+            setSeedingId(null);
         }
     };
 
@@ -555,45 +619,80 @@ const ExamConfiguration: React.FC = () => {
                                 </p>
                             )}
                         </div>
-                        <button
-                            onClick={() => {
-                                setEditingGrading(null);
-                                setNewGrading({
-                                    name: '',
-                                    type: 'PERCENTAGE',
-                                    ranges: DEFAULT_GRADING_TEMPLATES.PERCENTAGE,
-                                    isDefault: false,
-                                    applicableClasses: []
-                                });
-                                setShowGradingModal(true);
-                            }}
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                                color: 'white',
-                                border: 'none',
-                                padding: '0.75rem 1.5rem',
-                                borderRadius: '0.75rem',
-                                fontWeight: 600,
-                                fontSize: '0.9375rem',
-                                cursor: 'pointer',
-                                boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
-                                transition: 'all 0.2s ease'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.transform = 'translateY(-2px)';
-                                e.currentTarget.style.boxShadow = '0 6px 16px rgba(99, 102, 241, 0.4)';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = 'translateY(0)';
-                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(99, 102, 241, 0.3)';
-                            }}
-                        >
-                            <Plus size={20} />
-                            Add Grading System
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <button
+                                onClick={handleSeedDefaultLetterGrade}
+                                disabled={seedingId === '__default__'}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    background: seedingId === '__default__' ? '#6b7280' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '0.75rem 1.5rem',
+                                    borderRadius: '0.75rem',
+                                    fontWeight: 600,
+                                    fontSize: '0.9375rem',
+                                    cursor: seedingId === '__default__' ? 'not-allowed' : 'pointer',
+                                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                                    transition: 'all 0.2s ease',
+                                    opacity: seedingId === '__default__' ? 0.7 : 1
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (seedingId !== '__default__') {
+                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                        e.currentTarget.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.4)';
+                                    }
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+                                }}
+                            >
+                                <Database size={18} />
+                                {seedingId === '__default__' ? 'Seeding...' : 'Seed Default Letter Grade'}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setEditingGrading(null);
+                                    setNewGrading({
+                                        name: '',
+                                        type: 'PERCENTAGE',
+                                        ranges: DEFAULT_GRADING_TEMPLATES.PERCENTAGE,
+                                        isDefault: false,
+                                        applicableClasses: []
+                                    });
+                                    setShowGradingModal(true);
+                                }}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '0.75rem 1.5rem',
+                                    borderRadius: '0.75rem',
+                                    fontWeight: 600,
+                                    fontSize: '0.9375rem',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
+                                    transition: 'all 0.2s ease'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(99, 102, 241, 0.4)';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(99, 102, 241, 0.3)';
+                                }}
+                            >
+                                <Plus size={20} />
+                                Add Grading System
+                            </button>
+                        </div>
                     </div>
 
                     {schoolGradingSystems.length === 0 ? (
@@ -660,7 +759,7 @@ const ExamConfiguration: React.FC = () => {
                                                 Type: {grading.type} • {grading.ranges.length} Grade Ranges
                                             </p>
                                         </div>
-                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                             {!grading.isDefault && (
                                                 <button
                                                     onClick={() => handleSetDefaultGrading(grading.id)}
@@ -671,6 +770,23 @@ const ExamConfiguration: React.FC = () => {
                                                     Set Default
                                                 </button>
                                             )}
+                                            <button
+                                                onClick={() => handleSeedGrading(grading)}
+                                                disabled={seedingId === grading.id}
+                                                className="btn-secondary"
+                                                style={{
+                                                    fontSize: '0.875rem',
+                                                    color: seedingId === grading.id ? '#6b7280' : '#10b981',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.375rem',
+                                                    opacity: seedingId === grading.id ? 0.6 : 1,
+                                                    cursor: seedingId === grading.id ? 'not-allowed' : 'pointer'
+                                                }}
+                                            >
+                                                <Database size={15} />
+                                                {seedingId === grading.id ? 'Seeding...' : 'Seed to DB'}
+                                            </button>
                                             <button
                                                 onClick={() => {
                                                     setEditingGrading(grading);

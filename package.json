@@ -11,6 +11,7 @@
     "generate-pins": "vite-node src/scripts/generate-pins.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.42.0",
     "@google/generative-ai": "^0.24.1",
     "@react-google-maps/api": "^2.20.8",
     "firebase": "^11.1.0",

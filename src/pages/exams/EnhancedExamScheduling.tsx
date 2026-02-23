@@ -1946,10 +1946,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                     <div style={{ color: '#10b981' }}><Users size={18} /></div>
                                                     <span>{exam.targetClasses.length} Classes</span>
                                                 </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-                                                    <div style={{ color: '#8b5cf6' }}><FileText size={18} /></div>
-                                                    <span>{exam.subjects.length} Subjects</span>
-                                                </div>
+
                                             </div>
                                         </div>
 

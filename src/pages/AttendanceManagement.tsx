@@ -18,6 +18,7 @@ import {
     Filter,
     CheckCircle2,
     XCircle,
+    X,
     Download,
     CalendarDays,
     RefreshCcw,
@@ -221,7 +222,20 @@ const AttendanceManagement: React.FC = () => {
     const [filterClass, setFilterClass] = useState('');
     const [filterSection, setFilterSection] = useState('');
     const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
-    const [activeTab, setActiveTab] = useState<'mark' | 'summary' | 'student' | 'report'>('mark');
+    const [activeTab, setActiveTab] = useState<'mark' | 'summary' | 'student' | 'report' | 'entry'>('mark');
+
+    // Attendance Entry Tab States
+    const ACADEMIC_MONTHS = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+    const [entryClass, setEntryClass] = useState('');
+    const [entrySection, setEntrySection] = useState('');
+    const [entryStudent, setEntryStudent] = useState<any>(null);
+    const [entryData, setEntryData] = useState<Record<string, string>>({}); // { April: '22', May: '20', ... }
+    const [workingDays, setWorkingDays] = useState<Record<string, string>>({}); // { April: '25', May: '26', ... }
+    const [savingEntry, setSavingEntry] = useState(false);
+    const [entryEditMode, setEntryEditMode] = useState(false);
+    const [showWorkingDaysModal, setShowWorkingDaysModal] = useState(false);
+    const [tempWorkingDays, setTempWorkingDays] = useState<Record<string, string>>({});
+    const [workingDaysSaved, setWorkingDaysSaved] = useState(false);
     const [monthlyRecords, setMonthlyRecords] = useState<any[]>([]);
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryType, setSummaryType] = useState<'student'>('student');
@@ -620,7 +634,7 @@ const AttendanceManagement: React.FC = () => {
                     width: '100%',
                     maxWidth: '100%'
                 }}>
-                    {(['mark', 'summary', 'student', 'report'] as const).map(tab => (
+                    {(['mark', 'summary', 'student', 'report', 'entry'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -634,7 +648,7 @@ const AttendanceManagement: React.FC = () => {
                                 minWidth: 'fit-content'
                             }}
                         >
-                            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                            {tab === 'entry' ? 'Attendance Entry' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                         </button>
                     ))}
                 </div>
@@ -1465,6 +1479,421 @@ const AttendanceManagement: React.FC = () => {
                                 </div>
                             ))}
                         </div>
+                    </div>
+                )}
+
+                {/* ===================== ATTENDANCE ENTRY TAB ===================== */}
+                {activeTab === 'entry' && (
+                    <div style={{ gridColumn: '1 / -1' }}>
+
+                        {/* Working Days Modal */}
+                        {showWorkingDaysModal && (
+                            <div style={{
+                                position: 'fixed', inset: 0,
+                                background: 'rgba(15, 23, 42, 0.7)',
+                                backdropFilter: 'blur(8px)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                zIndex: 1000, padding: '1.5rem'
+                            }}>
+                                <div style={{
+                                    width: '100%',
+                                    maxWidth: '700px',
+                                    background: 'white',
+                                    borderRadius: '1.25rem',
+                                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                                    maxHeight: '90vh',
+                                    overflow: 'hidden',
+                                    display: 'flex',
+                                    flexDirection: 'column'
+                                }}>
+                                    {/* Modal Header */}
+                                    <div style={{
+                                        padding: '1.5rem 2rem',
+                                        borderBottom: '1px solid #f1f5f9',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        background: '#fff'
+                                    }}>
+                                        <div>
+                                            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <CalendarDays size={24} color="var(--primary)" />
+                                                Total Working Days
+                                            </h3>
+                                            <p style={{ margin: '0.25rem 0 0', color: '#64748b', fontSize: '0.875rem' }}>Set academic year working days for Session {activeFY}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setShowWorkingDaysModal(false)}
+                                            style={{
+                                                background: '#f1f5f9',
+                                                border: 'none',
+                                                borderRadius: '50%',
+                                                width: '32px',
+                                                height: '32px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                cursor: 'pointer',
+                                                color: '#64748b',
+                                                transition: 'all 0.2s'
+                                            }}
+                                            onMouseOver={(e) => e.currentTarget.style.background = '#e2e8f0'}
+                                            onMouseOut={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                                        >
+                                            <X size={20} />
+                                        </button>
+                                    </div>
+
+                                    {/* Modal Body */}
+                                    <div style={{ padding: '2rem', overflowY: 'auto' }}>
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                                            gap: '1.5rem 1rem'
+                                        }}>
+                                            {ACADEMIC_MONTHS.map(month => (
+                                                <div key={month} className="input-group" style={{ marginBottom: 0 }}>
+                                                    <label className="field-label" style={{
+                                                        color: '#475569',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 700,
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.05em',
+                                                        marginBottom: '0.5rem'
+                                                    }}>{month}</label>
+                                                    <div style={{ position: 'relative' }}>
+                                                        <input
+                                                            type="number"
+                                                            className="input-field"
+                                                            placeholder="0"
+                                                            min={0}
+                                                            max={31}
+                                                            value={tempWorkingDays[month] || ''}
+                                                            onChange={e => setTempWorkingDays(prev => ({ ...prev, [month]: e.target.value }))}
+                                                            style={{
+                                                                background: '#f8fafc',
+                                                                border: '2px solid #e2e8f0',
+                                                                padding: '0.75rem 1rem',
+                                                                fontSize: '1rem',
+                                                                fontWeight: 600,
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Modal Footer */}
+                                    <div style={{
+                                        padding: '1.25rem 2rem',
+                                        borderTop: '1px solid #f1f5f9',
+                                        display: 'flex',
+                                        gap: '1rem',
+                                        justifyContent: 'flex-end',
+                                        background: '#f8fafc'
+                                    }}>
+                                        <button
+                                            className="btn"
+                                            onClick={() => setShowWorkingDaysModal(false)}
+                                            style={{
+                                                background: 'white',
+                                                color: '#64748b',
+                                                border: '1px solid #e2e8f0',
+                                                padding: '0.625rem 1.5rem'
+                                            }}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            className="btn btn-primary"
+                                            style={{
+                                                padding: '0.625rem 2rem',
+                                                boxShadow: '0 4px 6px -1px rgba(99, 102, 241, 0.4)'
+                                            }}
+                                            onClick={async () => {
+                                                try {
+                                                    const docRef = doc(db, 'attendance_working_days', `${currentSchool?.id}_${activeFY}`);
+                                                    await setDoc(docRef, {
+                                                        schoolId: currentSchool?.id,
+                                                        financialYear: activeFY,
+                                                        workingDays: tempWorkingDays,
+                                                        updatedAt: serverTimestamp()
+                                                    }, { merge: true });
+                                                    setWorkingDays(tempWorkingDays);
+                                                    setWorkingDaysSaved(true);
+                                                    setShowWorkingDaysModal(false);
+                                                } catch (e: any) {
+                                                    alert('Error saving: ' + e.message);
+                                                }
+                                            }}
+                                        >
+                                            <Save size={18} style={{ marginRight: '0.5rem' }} /> Save Working Days
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Header with Working Days button */}
+                        <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1.125rem' }}>Manual Attendance Entry</h3>
+                                    <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Enter month-wise present days for each student</p>
+                                </div>
+                                <button
+                                    className="btn btn-primary"
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem 1.25rem' }}
+                                    onClick={async () => {
+                                        // Load existing working days
+                                        try {
+                                            const docRef = doc(db, 'attendance_working_days', `${currentSchool?.id}_${activeFY}`);
+                                            const snap = await getDoc(docRef);
+                                            if (snap.exists()) {
+                                                setTempWorkingDays(snap.data().workingDays || {});
+                                                setWorkingDays(snap.data().workingDays || {});
+                                            } else {
+                                                setTempWorkingDays({});
+                                            }
+                                        } catch { }
+                                        setShowWorkingDaysModal(true);
+                                    }}
+                                >
+                                    <CalendarDays size={16} /> Enter Total Working Days
+                                </button>
+                            </div>
+
+                            {/* Working Days Summary */}
+                            {Object.keys(workingDays).length > 0 && (
+                                <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                    {ACADEMIC_MONTHS.map(month => workingDays[month] ? (
+                                        <span key={month} style={{
+                                            background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)',
+                                            border: '1px solid rgba(99, 102, 241, 0.2)', borderRadius: 'var(--radius-sm)',
+                                            padding: '0.25rem 0.625rem', fontSize: '0.75rem', fontWeight: 600
+                                        }}>
+                                            {month}: {workingDays[month]} days
+                                        </span>
+                                    ) : null)}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Class & Section Selector */}
+                        <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                                <div className="input-group" style={{ marginBottom: 0 }}>
+                                    <label className="field-label">SELECT CLASS</label>
+                                    <select
+                                        className="input-field"
+                                        value={entryClass}
+                                        onChange={e => {
+                                            setEntryClass(e.target.value);
+                                            setEntrySection('');
+                                            setEntryStudent(null);
+                                            setEntryData({});
+                                        }}
+                                    >
+                                        <option value="">-- Choose Class --</option>
+                                        {classesList.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                {entryClass && (
+                                    <div className="input-group" style={{ marginBottom: 0 }}>
+                                        <label className="field-label">SELECT SECTION</label>
+                                        <select
+                                            className="input-field"
+                                            value={entrySection}
+                                            onChange={e => {
+                                                setEntrySection(e.target.value);
+                                                setEntryStudent(null);
+                                                setEntryData({});
+                                            }}
+                                        >
+                                            <option value="">All Sections</option>
+                                            {Array.from(new Set(students.filter(s => s.class === entryClass && s.section).map(s => s.section))).sort().map(sec => (
+                                                <option key={String(sec)} value={String(sec)}>Section {sec}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Student Dropdown */}
+                            {entryClass && (() => {
+                                const entryStudentList = students
+                                    .filter(s => s.class === entryClass && (entrySection ? s.section === entrySection : true))
+                                    .sort((a, b) => (parseInt(a.classRollNo) || 0) - (parseInt(b.classRollNo) || 0));
+                                return entryStudentList.length > 0 ? (
+                                    <div className="input-group" style={{ marginTop: '1rem', marginBottom: 0 }}>
+                                        <label className="field-label">SELECT STUDENT</label>
+                                        <select
+                                            className="input-field"
+                                            value={entryStudent?.uid || entryStudent?.id || ''}
+                                            onChange={async (e) => {
+                                                const stu = entryStudentList.find(s => (s.uid || s.id) === e.target.value);
+                                                if (!stu) { setEntryStudent(null); setEntryData({}); return; }
+                                                setEntryStudent(stu);
+                                                setEntryEditMode(false);
+                                                try {
+                                                    const entryRef = doc(db, 'attendance_manual_entry', `${currentSchool?.id}_${activeFY}_${stu.admissionNo || stu.uid}`);
+                                                    const snap = await getDoc(entryRef);
+                                                    if (snap.exists()) {
+                                                        setEntryData(snap.data().presentDays || {});
+                                                        setEntryEditMode(false);
+                                                    } else {
+                                                        setEntryData({});
+                                                        setEntryEditMode(true);
+                                                    }
+                                                } catch {
+                                                    setEntryData({});
+                                                    setEntryEditMode(true);
+                                                }
+                                            }}
+                                            style={{ fontSize: '0.9375rem', fontWeight: 600 }}
+                                        >
+                                            <option value="">-- Choose Student --</option>
+                                            {entryStudentList.map(stu => (
+                                                <option key={stu.uid || stu.id} value={stu.uid || stu.id}>
+                                                    {stu.classRollNo ? `#${stu.classRollNo} ` : ''}{stu.fullName} ({stu.admissionNo})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ) : <p style={{ marginTop: '1rem', color: 'var(--text-muted)' }}>No students found for selected class.</p>;
+                            })()}
+                        </div>
+
+                        {/* Month-wise Present Days Entry */}
+                        {entryStudent && (
+                            <div className="glass-card" style={{ padding: '1.5rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                                    <div>
+                                        <h3 style={{ margin: 0, fontWeight: 700 }}>
+                                            {entryStudent.fullName}
+                                            <span style={{ marginLeft: '0.75rem', fontSize: '0.875rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                                                {entryStudent.class}{entryStudent.section ? ` - ${entryStudent.section}` : ''} | {entryStudent.admissionNo}
+                                            </span>
+                                        </h3>
+                                        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                                            Enter number of present days for each month (Apr – Mar)
+                                        </p>
+                                    </div>
+                                    {!entryEditMode && (
+                                        <button
+                                            className="btn"
+                                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderColor: 'var(--primary)', color: 'var(--primary)' }}
+                                            onClick={() => setEntryEditMode(true)}
+                                        >
+                                            <Edit size={14} /> Edit
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.75rem' }}>
+                                    {ACADEMIC_MONTHS.map(month => (
+                                        <div key={month} style={{
+                                            background: 'rgba(248, 250, 252, 0.8)',
+                                            border: '1px solid var(--border)',
+                                            borderRadius: 'var(--radius-md)',
+                                            padding: '0.875rem',
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text)' }}>{month}</span>
+                                                {workingDays[month] && (
+                                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>/ {workingDays[month]} days</span>
+                                                )}
+                                            </div>
+                                            {entryEditMode ? (
+                                                <input
+                                                    type="number"
+                                                    className="input-field"
+                                                    style={{ marginBottom: 0, padding: '0.5rem 0.75rem', fontSize: '1rem', fontWeight: 700 }}
+                                                    placeholder="0"
+                                                    min={0}
+                                                    max={workingDays[month] ? parseInt(workingDays[month]) : 31}
+                                                    value={entryData[month] || ''}
+                                                    onChange={e => setEntryData(prev => ({ ...prev, [month]: e.target.value }))}
+                                                />
+                                            ) : (
+                                                <div style={{
+                                                    fontSize: '1.5rem', fontWeight: 800,
+                                                    color: entryData[month] ? 'var(--primary)' : 'var(--text-muted)'
+                                                }}>
+                                                    {entryData[month] || '—'}
+                                                </div>
+                                            )}
+                                            {/* Percentage bar */}
+                                            {workingDays[month] && entryData[month] && (
+                                                <div style={{ marginTop: '0.5rem' }}>
+                                                    <div style={{ width: '100%', height: '4px', background: '#e2e8f0', borderRadius: '2px' }}>
+                                                        <div style={{
+                                                            width: `${Math.min(100, (parseInt(entryData[month]) / parseInt(workingDays[month])) * 100)}%`,
+                                                            height: '100%',
+                                                            background: (parseInt(entryData[month]) / parseInt(workingDays[month])) >= 0.75 ? '#10b981' : '#f43f5e',
+                                                            borderRadius: '2px'
+                                                        }} />
+                                                    </div>
+                                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                                                        {((parseInt(entryData[month]) / parseInt(workingDays[month])) * 100).toFixed(0)}%
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {entryEditMode && (
+                                    <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+                                        <button
+                                            className="btn"
+                                            onClick={() => {
+                                                setEntryEditMode(false);
+                                                // reload
+                                                const reload = async () => {
+                                                    const entryRef = doc(db, 'attendance_manual_entry', `${currentSchool?.id}_${activeFY}_${entryStudent.admissionNo || entryStudent.uid}`);
+                                                    const snap = await getDoc(entryRef);
+                                                    if (snap.exists()) setEntryData(snap.data().presentDays || {});
+                                                };
+                                                reload();
+                                            }}
+                                        >Cancel</button>
+                                        <button
+                                            className="btn btn-primary"
+                                            disabled={savingEntry}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                            onClick={async () => {
+                                                setSavingEntry(true);
+                                                try {
+                                                    const entryRef = doc(db, 'attendance_manual_entry', `${currentSchool?.id}_${activeFY}_${entryStudent.admissionNo || entryStudent.uid}`);
+                                                    await setDoc(entryRef, {
+                                                        schoolId: currentSchool?.id,
+                                                        financialYear: activeFY,
+                                                        studentId: entryStudent.uid || entryStudent.id,
+                                                        admissionNo: entryStudent.admissionNo,
+                                                        studentName: entryStudent.fullName,
+                                                        class: entryStudent.class,
+                                                        section: entryStudent.section || '',
+                                                        presentDays: entryData,
+                                                        updatedAt: serverTimestamp()
+                                                    }, { merge: true });
+                                                    setEntryEditMode(false);
+                                                    alert('Attendance entry saved!');
+                                                } catch (e: any) {
+                                                    alert('Error: ' + e.message);
+                                                } finally {
+                                                    setSavingEntry(false);
+                                                }
+                                            }}
+                                        >
+                                            <Save size={14} /> {savingEntry ? 'Saving...' : 'Save Entry'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

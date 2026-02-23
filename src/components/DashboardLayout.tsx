@@ -30,6 +30,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { Permission } from '../types/rbac';
 import AIAssistant from './AIAssistant';
+import VoiceLiveAssistant from './VoiceLiveAssistant';
 import { APP_CONFIG } from '../constants/app';
 import { useFirestore } from '../hooks/useFirestore';
 
@@ -628,13 +629,13 @@ const DashboardLayout: React.FC = () => {
 
                         <div style={{ position: 'relative' }}>
                             <div
-                                style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: (user?.role === 'PARENT' && !(user?.allProfiles && user.allProfiles.length > 1)) ? 'default' : 'pointer' }}
                                 className="user-profile-trigger"
                                 onClick={() => {
                                     if (user?.allProfiles && user.allProfiles.length > 1) {
                                         setShowAccountSwitcher(!showAccountSwitcher);
-                                    } else {
-                                        navigate('/profile');
+                                    } else if (user?.role !== 'PARENT') {
+                                        navigate(`/${schoolId}/profile`);
                                     }
                                 }}
                             >
@@ -734,6 +735,7 @@ const DashboardLayout: React.FC = () => {
 
                 {/* AI Assistant */}
                 {hasPermission(Permission.USE_AI_ASSISTANT) && <AIAssistant />}
+                {hasPermission(Permission.USE_AI_ASSISTANT) && <VoiceLiveAssistant />}
             </div>
 
             <style>{`

@@ -253,7 +253,7 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                         new ClipboardItem({ 'image/png': blob })
                     ]);
                     const mobileNumber = studentData?.mobileNo || '';
-                    const message = encodeURIComponent('Thanks for payment, Find attached money receipt.');
+                    const message = encodeURIComponent('Thanks for payment, find attached money receipt.');
                     const whatsappUrl = `https://wa.me/${mobileNumber.replace(/[^0-9]/g, '')}?text=${message}`;
                     window.open(whatsappUrl, '_blank');
                     alert('Receipt copied to clipboard! Paste it in WhatsApp chat.');

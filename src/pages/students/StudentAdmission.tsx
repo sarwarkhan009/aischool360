@@ -158,7 +158,7 @@ const StudentAdmission: React.FC = () => {
         fatherOccupation: initialStudent?.fatherOccupation || 'Select',
         fatherAddress: initialStudent?.fatherAddress || '',
         isFatherAddressSame: initialStudent?.isFatherAddressSame || false,
-        fatherContactNo: initialStudent?.fatherContactNo || '',
+        fatherContactNo: initialStudent?.fatherContactNo || initialStudent?.fatherMobile || initialStudent?.mobileNo || initialStudent?.phone || '',
         fatherWhatsappNo: initialStudent?.fatherWhatsappNo || '',
         fatherEmailId: initialStudent?.fatherEmailId || '',
         fatherAge: initialStudent?.fatherAge || '',
@@ -171,7 +171,7 @@ const StudentAdmission: React.FC = () => {
         motherOccupation: initialStudent?.motherOccupation || 'Select',
         motherAddress: initialStudent?.motherAddress || '',
         isMotherAddressSame: initialStudent?.isMotherAddressSame || false,
-        motherContactNo: initialStudent?.motherContactNo || '',
+        motherContactNo: initialStudent?.motherContactNo || initialStudent?.motherMobile || '',
         motherWhatsappNo: initialStudent?.motherWhatsappNo || '',
         motherEmailId: initialStudent?.motherEmailId || '',
         motherAge: initialStudent?.motherAge || '',
@@ -260,8 +260,15 @@ const StudentAdmission: React.FC = () => {
         }
     }, [initialStudent]);
 
+    // Track if it's the initial load (to avoid overwriting saved individual fee in edit mode)
+    const [classChangedByUser, setClassChangedByUser] = React.useState(false);
+
     // Auto-populate monthly fee from fee management when class is selected
     React.useEffect(() => {
+        // In edit mode, only auto-populate if the user explicitly changed the class
+        // (not on initial load, to preserve the student's saved individual fee)
+        if (editMode && !classChangedByUser) return;
+
         if (formData.class && feeAmounts && feeAmounts.length > 0) {
             // Filter by active financial year first, then by class AND "Monthly" in the name
             const classFees = feeAmounts.filter((fa: any) =>
@@ -273,10 +280,10 @@ const StudentAdmission: React.FC = () => {
 
             const totalMonthlyFee = classFees.reduce((sum: number, fa: any) => sum + (Number(fa.amount) || 0), 0);
 
-            // Always update when class changes, even if it's 0
+            // Update monthly fee from class configuration
             setFormData(prev => ({ ...prev, monthlyFee: totalMonthlyFee.toString() }));
         }
-    }, [formData.class, feeAmounts, activeFY]);
+    }, [formData.class, feeAmounts, activeFY, classChangedByUser, editMode]);
 
     const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -350,6 +357,7 @@ const StudentAdmission: React.FC = () => {
 
         const studentData = {
             ...transformedData,
+            rollNo: transformedData.classRollNo, // Sync both fields
             photo: imagePreview,
             name: transformedData.fullName,
             parentName: transformedData.fatherName,
@@ -1009,7 +1017,7 @@ const StudentAdmission: React.FC = () => {
                                         <select
                                             className="input-field-premium"
                                             value={formData.class}
-                                            onChange={e => setFormData({ ...formData, class: e.target.value, section: '' })}
+                                            onChange={e => { setClassChangedByUser(true); setFormData({ ...formData, class: e.target.value, section: '' }); }}
                                         >
                                             <option value="">Select Class</option>
                                             {activeClasses.map((cls: any) => (

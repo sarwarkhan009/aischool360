@@ -211,6 +211,7 @@ const ParentDashboard: React.FC = () => {
                     return;
                 }
                 const filterId = user?.schoolId;
+                const activeFY = currentSchool?.activeFinancialYear || '2025-26';
                 const moduleRef = doc(db, 'settings', `module_controls_${filterId}`);
                 const moduleSnap = await getDoc(moduleRef);
                 if (moduleSnap.exists()) {
@@ -244,22 +245,25 @@ const ParentDashboard: React.FC = () => {
 
                         if (studentMonthlyFee > 0) {
                             // Fetch fee_types to get default monthly fee for this class
-                            const feeTypesSnap = await getDocs(collection(db, 'fee_types'));
+                            const feeTypesSnap = await getDocs(query(collection(db, 'fee_types'), where('schoolId', '==', filterId)));
                             const monthlyFeeType = feeTypesSnap.docs.find(d => {
                                 const data = d.data();
                                 // Find the fee type that is ACTIVE, applies to this student's class, and has monthly charges
+                                // We specifically target "Monthly" fees to avoid matching other monthly heads like Transport
                                 return data.status === 'ACTIVE' &&
                                     data.classes?.includes(currentStudentData.class) &&
-                                    data.months && data.months.length > 0; // Has monthly charges
+                                    data.months && data.months.length > 0 &&
+                                    data.feeHeadName?.toLowerCase().includes('monthly');
                             });
 
                             if (monthlyFeeType) {
                                 // Now get the actual amount for this class from fee_amounts
-                                const feeAmountsSnap = await getDocs(collection(db, 'fee_amounts'));
+                                const feeAmountsSnap = await getDocs(query(collection(db, 'fee_amounts'), where('schoolId', '==', filterId)));
                                 const classMonthlyFee = feeAmountsSnap.docs.find(d => {
                                     const data = d.data();
                                     return data.feeTypeId === monthlyFeeType.id &&
-                                        data.className === currentStudentData.class;
+                                        data.className === currentStudentData.class &&
+                                        (data.financialYear || '2025-26') === activeFY;
                                 });
 
                                 const defaultClassFee = classMonthlyFee ? Number(classMonthlyFee.data().amount || 0) : 0;
@@ -372,14 +376,14 @@ const ParentDashboard: React.FC = () => {
                     const admNo = currentStudentData?.admissionNo || studentId;
 
                     const [typesSnap, amountsSnap, collSnap] = await Promise.all([
-                        getDocs(collection(db, 'fee_types')),
-                        getDocs(collection(db, 'fee_amounts')),
-                        getDocs(query(collection(db, 'fee_collections'), where('admissionNo', '==', admNo)))
+                        getDocs(query(collection(db, 'fee_types'), where('schoolId', '==', filterId))),
+                        getDocs(query(collection(db, 'fee_amounts'), where('schoolId', '==', filterId))),
+                        getDocs(query(collection(db, 'fee_collections'), where('admissionNo', '==', admNo), where('schoolId', '==', filterId)))
                     ]);
 
                     const fTypes = typesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
                     const fAmountsOrig = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-                    const activeFY = currentSchool?.activeFinancialYear || '2025-26';
+                    // activeFY already defined at top of fetchAllData
                     const fAmounts = fAmountsOrig.filter(fa => (fa.financialYear || '2025-26') === activeFY);
                     const fHistory = collSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
@@ -470,6 +474,10 @@ const ParentDashboard: React.FC = () => {
                     const totalPaid = sessionPayments.reduce((sum, c) => sum + (Number(c.paid) || 0), 0);
                     const totalDiscount = sessionPayments.reduce((sum, c) => sum + (Number(c.discount) || 0), 0);
 
+                    // Include basicDues (Carry forward)
+                    const basicDues = Number(currentStudentData?.basicDues || 0);
+                    totalPayable += basicDues;
+
                     setFeeBalance(totalPayable - totalPaid - totalDiscount);
                 } catch (feeErr) {
                     console.warn('⚠️ Fee banner calc failed:', feeErr);
@@ -495,11 +503,11 @@ const ParentDashboard: React.FC = () => {
 
         const unsubs: any[] = [];
 
-        // Listen to fee_types, fee_amounts, and fee_collections
-        const typesUnsub = onSnapshot(collection(db, 'fee_types'), () => recalculateFees());
-        const amountsUnsub = onSnapshot(collection(db, 'fee_amounts'), () => recalculateFees());
+        // Listen to fee_types, fee_amounts, and fee_collections for this school
+        const typesUnsub = onSnapshot(query(collection(db, 'fee_types'), where('schoolId', '==', schoolId)), () => recalculateFees());
+        const amountsUnsub = onSnapshot(query(collection(db, 'fee_amounts'), where('schoolId', '==', schoolId)), () => recalculateFees());
         const collUnsub = onSnapshot(
-            query(collection(db, 'fee_collections'), where('admissionNo', '==', admNo)),
+            query(collection(db, 'fee_collections'), where('admissionNo', '==', admNo), where('schoolId', '==', schoolId)),
             () => recalculateFees()
         );
 
@@ -508,13 +516,14 @@ const ParentDashboard: React.FC = () => {
         const recalculateFees = async () => {
             try {
                 const [typesSnap, amountsSnap, collSnap] = await Promise.all([
-                    getDocs(collection(db, 'fee_types')),
-                    getDocs(collection(db, 'fee_amounts')),
-                    getDocs(query(collection(db, 'fee_collections'), where('admissionNo', '==', admNo)))
+                    getDocs(query(collection(db, 'fee_types'), where('schoolId', '==', schoolId))),
+                    getDocs(query(collection(db, 'fee_amounts'), where('schoolId', '==', schoolId))),
+                    getDocs(query(collection(db, 'fee_collections'), where('admissionNo', '==', admNo), where('schoolId', '==', schoolId)))
                 ]);
 
                 const fTypes = typesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-                const fAmounts = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+                const activeFY = currentSchool?.activeFinancialYear || '2025-26';
+                const fAmounts = amountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(fa => (fa.financialYear || '2025-26') === activeFY);
                 const fHistory = collSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
                 const MONTH_IDX = getMonthIndexMap();
@@ -565,14 +574,18 @@ const ParentDashboard: React.FC = () => {
                         const amountConf = fAmounts.find(fa => fa.feeTypeId === type.id && fa.className === studentData?.class);
                         if (!amountConf || !amountConf.amount) return;
 
+                        const isMonthlyFee = type.feeHeadName?.toLowerCase().includes('monthly');
+                        const studentMonthlyFee = studentData?.monthlyFee ? parseFloat(studentData.monthlyFee) : null;
+                        const useStudentFee = isMonthlyFee && studentMonthlyFee && studentMonthlyFee > 0;
+
                         type.months?.forEach((monthName: string) => {
                             let isDue = false;
 
                             if (monthName === 'Admission_month') {
                                 if (admType === 'OLD') {
                                     isDue = true;
-                                } else if (admType === 'NEW' && studentAdmYear === startYear && studentAdmMonth !== -1) {
-                                    isDue = true;
+                                } else if (admType === 'NEW' && admDateRaw) {
+                                    isDue = today >= admDateRaw;
                                 }
                             } else {
                                 const targetMonthIdx = MONTH_IDX[monthName];
@@ -591,11 +604,15 @@ const ParentDashboard: React.FC = () => {
                             }
 
                             if (isDue) {
-                                totalPayable += Number(amountConf.amount);
+                                totalPayable += useStudentFee ? studentMonthlyFee! : Number(amountConf.amount);
                             }
                         });
                     }
                 });
+
+                // Include basicDues (Carry forward)
+                const basicDues = Number(studentData?.basicDues || 0);
+                totalPayable += basicDues;
 
                 const sessionPayments = fHistory
                     .filter(c => c.status !== 'CANCELLED' && (c.date?.toDate ? c.date.toDate() : new Date(c.paymentDate || c.date)) >= sessionStartDate);

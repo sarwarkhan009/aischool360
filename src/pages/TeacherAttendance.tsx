@@ -75,7 +75,7 @@ const TeacherAttendance: React.FC = () => {
             const merged: Record<string, string> = {};
             // Only initialize attendance for active teachers
             teachers.filter(t => t.status !== 'INACTIVE').forEach(t => {
-                merged[t.id] = existing[t.id] || 'PRESENT';
+                merged[t.id] = existing[t.id] || '';
             });
             setTeacherAttendance(merged);
         } catch (error) {
@@ -84,20 +84,29 @@ const TeacherAttendance: React.FC = () => {
     };
 
     const saveTeacherAttendance = async () => {
+        const activeTeachers = teachers.filter(t => t.status !== 'INACTIVE');
+        const unmarked = activeTeachers.filter(t => !teacherAttendance[t.id]);
+
+        if (unmarked.length > 0) {
+            const confirmSave = window.confirm(`${unmarked.length} staff members are not marked. Do you want to save anyway? (Unmarked ones will stay empty)`);
+            if (!confirmSave) return;
+        }
+
         setLoading(true);
         try {
             const batch = writeBatch(db);
-            // Only save attendance for active teachers
-            const activeTeachers = teachers.filter(t => t.status !== 'INACTIVE');
 
             activeTeachers.forEach(t => {
+                const status = teacherAttendance[t.id];
+                if (!status) return; // Skip saving if not marked (optional, or save as empty)
+
                 const docId = `tatt_${t.id}_${currentDate}`;
                 const attRef = doc(db, 'teacherAttendance', docId);
                 batch.set(attRef, {
                     teacherId: t.id,
                     teacherName: t.name,
                     date: currentDate,
-                    status: teacherAttendance[t.id] || 'PRESENT',
+                    status: status,
                     schoolId: currentSchool?.id,
                     updatedAt: serverTimestamp()
                 }, { merge: true });
