@@ -110,10 +110,16 @@ const MODULE_STRUCTURE = [
             { id: '/settings/api-keys', label: 'API Keys' },
             { id: '/settings/data-seeder', label: 'Data Seeder' },
             { id: '/settings/master-control', label: 'Master Control' },
-            { id: '/settings/schools', label: 'Manage Schools' },
             { id: '/settings/payments', label: 'Payment Settings' },
             { id: '/settings/subjects-chapters', label: 'Subjects & Chapters' },
             { id: '/settings/roles', label: 'Roles & Permissions' },
+        ]
+    },
+    {
+        id: 'super_admin',
+        label: 'Super Admin',
+        children: [
+            { id: '/settings/schools', label: 'Manage Schools' }
         ]
     },
     { id: 'ai-assistant', label: 'AI Assistant' },

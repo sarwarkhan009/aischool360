@@ -289,7 +289,7 @@ const UserRoles: React.FC = () => {
     const { data: teachers } = useFirestore<any>('teachers');
     const { hasPermission: currentUserHasPermission, refreshPermissions } = useAuth();
 
-    const [selectedRole, setSelectedRole] = useState<CustomRole>(roles[0]);
+    const [selectedRole, setSelectedRole] = useState<CustomRole>(roles.find(r => r.role !== 'SUPER_ADMIN') || roles[0]);
     const [selectedUser, setSelectedUser] = useState<any>(null);
     const [userPermissions, setUserPermissions] = usePersistence<Record<string, Permission[]>>('aischool360_user_overrides', {});
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -505,7 +505,7 @@ const UserRoles: React.FC = () => {
         setRoles(updatedRoles);
         saveRolesToFirestore(updatedRoles);
         if (selectedRole?.id === roleId) {
-            setSelectedRole(updatedRoles[0]);
+            setSelectedRole(updatedRoles.find(r => r.role !== 'SUPER_ADMIN') || updatedRoles[0]);
         }
     };
 

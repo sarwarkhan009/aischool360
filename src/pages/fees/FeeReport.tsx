@@ -10,6 +10,32 @@ import { db } from '../../lib/firebase';
 import { useSchool } from '../../context/SchoolContext';
 import FeeReceipt from '../../components/fees/FeeReceipt';
 
+const toLocalISODate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const getLocalDateStr = (record: any): string => {
+    let dateObj: Date | null = null;
+    if (record.date?.toDate) {
+        dateObj = record.date.toDate();
+    } else if (typeof record.date === 'string') {
+        dateObj = new Date(record.date);
+    } else if (record.createdAt) {
+        dateObj = new Date(record.createdAt);
+    }
+
+    if (dateObj && !isNaN(dateObj.getTime())) {
+        return toLocalISODate(dateObj);
+    }
+
+    if (typeof record.date === 'string') return record.date.split('T')[0];
+    if (typeof record.createdAt === 'string') return record.createdAt.split('T')[0];
+    return '';
+};
+
 const FeeReport: React.FC = () => {
     const { currentSchool } = useSchool();
     const { user } = useAuth();
@@ -19,8 +45,8 @@ const FeeReport: React.FC = () => {
     const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class') || []);
     const classesList = activeClasses.map((c: any) => c.name);
 
-    const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+    const [startDate, setStartDate] = useState(toLocalISODate(new Date()));
+    const [endDate, setEndDate] = useState(toLocalISODate(new Date()));
     const [selectedClass, setSelectedClass] = useState('');
     const [selectedPeriod, setSelectedPeriod] = useState('TODAY');
     const [selectedCategories, setSelectedCategories] = useState(['FEES', 'INVENTORY']);
@@ -46,24 +72,18 @@ const FeeReport: React.FC = () => {
 
     const getPeriodDates = (period: string) => {
         const today = new Date();
-        const toISOLocal = (date: Date) => {
-            const y = date.getFullYear();
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const d = String(date.getDate()).padStart(2, '0');
-            return `${y}-${m}-${d}`;
-        };
 
-        let start = toISOLocal(today);
-        let end = toISOLocal(today);
+        let start = toLocalISODate(today);
+        let end = toLocalISODate(today);
 
         if (period === 'THIS_MONTH') {
             const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-            start = toISOLocal(firstDay);
+            start = toLocalISODate(firstDay);
         } else if (period === 'LAST_MONTH') {
             const firstDayLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
             const lastDayLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-            start = toISOLocal(firstDayLastMonth);
-            end = toISOLocal(lastDayLastMonth);
+            start = toLocalISODate(firstDayLastMonth);
+            end = toLocalISODate(lastDayLastMonth);
         } else if (period === 'ACADEMIC_YEAR') {
             const MONTH_MAP: Record<string, number> = {
                 'January': 0, 'February': 1, 'March': 2, 'April': 3, 'May': 4, 'June': 5,
@@ -79,8 +99,8 @@ const FeeReport: React.FC = () => {
             const startYear = currentMonth < sessionMonth ? today.getFullYear() - 1 : today.getFullYear();
             const startDateObj = new Date(startYear, sessionMonth, 1);
             const endDateObj = new Date(startYear + 1, sessionMonth, 0);
-            start = toISOLocal(startDateObj);
-            end = toISOLocal(endDateObj);
+            start = toLocalISODate(startDateObj);
+            end = toLocalISODate(endDateObj);
         }
         return { startDate: start, endDate: end };
     };
@@ -103,14 +123,7 @@ const FeeReport: React.FC = () => {
 
     // Base filter (date + class + category + search)
     const baseFilteredRecords = feeRecords.filter((record: any) => {
-        let dateStr = '';
-        if (record.date?.toDate) {
-            dateStr = record.date.toDate().toISOString().split('T')[0];
-        } else if (typeof record.date === 'string') {
-            dateStr = record.date.split('T')[0];
-        } else if (record.createdAt) {
-            dateStr = record.createdAt.split('T')[0];
-        }
+        const dateStr = getLocalDateStr(record);
 
         const isInventory = record.paidFor === 'Inventory Sale' || record.receiptNo?.startsWith('INV');
         const isFee = !isInventory;
@@ -137,14 +150,7 @@ const FeeReport: React.FC = () => {
         const sorted = [...filteredRecords].sort((a, b) => getRecordTimestamp(a) - getRecordTimestamp(b));
 
         sorted.forEach(record => {
-            let dateKey = '';
-            if (record.date?.toDate) {
-                dateKey = record.date.toDate().toISOString().split('T')[0];
-            } else if (typeof record.date === 'string') {
-                dateKey = record.date.split('T')[0];
-            } else if (record.createdAt) {
-                dateKey = record.createdAt.split('T')[0];
-            }
+            const dateKey = getLocalDateStr(record);
 
             if (!dateKey) return;
 
@@ -180,16 +186,30 @@ const FeeReport: React.FC = () => {
                     }
 
                     g.values[targetHead] = (g.values[targetHead] || 0) + val;
-                    g.total += val;
                     allDynamicHeads.add(targetHead);
                 });
+
+                const discount = parseFloat(record.discount) || 0;
+                if (discount > 0) {
+                    g.values['Discount'] = (g.values['Discount'] || 0) - discount;
+                    allDynamicHeads.add('Discount');
+                }
+
+                const prevDues = parseFloat(record.previousDues) || 0;
+                if (prevDues > 0) {
+                    g.values['Prev. Dues'] = (g.values['Prev. Dues'] || 0) + prevDues;
+                    allDynamicHeads.add('Prev. Dues');
+                }
+
+                const actualPaid = parseFloat(record.paid || record.amount) || 0;
+                g.total += actualPaid;
             }
         });
 
         // Filter heads that have a non-zero total
         const finalHeads = Array.from(allDynamicHeads).filter(head => {
             const headTotal = Object.values(groups).reduce((acc, g) => acc + (g.values[head] || 0), 0);
-            return headTotal > 0;
+            return Math.abs(headTotal) > 0.01;
         }).sort((a, b) => {
             if (a === 'Monthly Fee') return -1;
             if (b === 'Monthly Fee') return 1;

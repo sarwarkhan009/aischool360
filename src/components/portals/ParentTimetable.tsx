@@ -107,6 +107,7 @@ const ParentTimetable: React.FC<Props> = ({ studentClass, section }) => {
             const allExamsData = examSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
             const myExams = allExamsData.filter(exam => {
+                if (exam.status === 'COMPLETED' || exam.status === 'CANCELLED') return false;
                 if (!exam.isPublished && exam.status !== 'ONGOING' && exam.status !== 'SCHEDULED') return false;
                 if (!exam.targetClasses) return false;
                 return exam.targetClasses.some((tId: string) =>

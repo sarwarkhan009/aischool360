@@ -325,12 +325,21 @@ const menuItems = [
             { to: '/settings/api-keys', label: 'API Keys', permission: Permission.MANAGE_API_KEYS, moduleId: '/settings/api-keys' },
             { to: '/settings/data-seeder', label: 'Data Seeder', permission: Permission.MANAGE_DATA_SEEDER, moduleId: '/settings/data-seeder' },
             { to: '/settings/master-control', label: 'Master Control', permission: Permission.MANAGE_MASTER_CONTROL, roles: ['SUPER_ADMIN', 'ADMIN'], moduleId: '/settings/master-control' },
-            { to: '/settings/schools', label: 'Manage Schools', permission: Permission.MANAGE_SCHOOLS, roles: ['SUPER_ADMIN', 'ADMIN'], moduleId: '/settings/schools' },
             { to: '/settings/payments', label: 'Payment Settings', permission: Permission.MANAGE_PAYMENT_SETTINGS, moduleId: '/settings/payments' },
             { to: '/settings/upload-holidays', label: 'Upload Master Holidays', permission: Permission.UPLOAD_HOLIDAYS, moduleId: '/settings/upload-holidays' },
             { to: '/settings/roles', label: 'Roles & Permissions', permission: Permission.MANAGE_ROLES, moduleId: '/settings/roles' }
         ]
     },
+    {
+        label: 'Super Admin',
+        icon: Shield,
+        permission: Permission.MANAGE_SCHOOLS,
+        roles: ['SUPER_ADMIN', 'ADMIN'],
+        moduleId: 'super_admin',
+        children: [
+            { to: '/settings/schools', label: 'Manage Schools', permission: Permission.MANAGE_SCHOOLS, roles: ['SUPER_ADMIN', 'ADMIN'], moduleId: '/settings/schools' }
+        ]
+    }
 ];
 
 const DashboardLayout: React.FC = () => {
@@ -472,11 +481,17 @@ const DashboardLayout: React.FC = () => {
                                 if (currentSchool && (child as any).moduleId) {
                                     if (currentSchool.allowedModules) {
                                         const cMid = (child as any).moduleId as string;
-                                        // Direct match OR base-module match (e.g. '/students/photos' → 'students')
-                                        const parts = cMid.split('/').filter(Boolean);
-                                        const baseModule = parts[0] || null;
-                                        const isAllowed = currentSchool.allowedModules.includes(cMid) ||
-                                            (baseModule && currentSchool.allowedModules.includes(baseModule));
+                                        // Check if the school uses the new granular config (has specific submodule ids like /something)
+                                        const isModernConfig = currentSchool.allowedModules.some((m: string) => m.includes('/'));
+
+                                        let isAllowed = currentSchool.allowedModules.includes(cMid);
+
+                                        // Fallback for legacy configs that only have base module names
+                                        if (!isAllowed && !isModernConfig) {
+                                            const parts = cMid.split('/').filter(Boolean);
+                                            const baseModule = parts[0] || null;
+                                            isAllowed = Boolean(baseModule && currentSchool.allowedModules.includes(baseModule));
+                                        }
 
                                         if (!isAllowed) return false;
                                     }

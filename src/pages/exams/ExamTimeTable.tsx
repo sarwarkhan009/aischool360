@@ -47,6 +47,14 @@ const ExamTimeTable: React.FC = () => {
     ) || [];
     const selectedExam = availableExams.find((e: any) => e.id === selectedExamId);
 
+    const examTargetClassesCount = selectedExam?.targetClasses?.length || selectedExam?.classes?.length || 0;
+    let examSubjectsCount = 0;
+    if (selectedExam?.classRoutines && selectedExam.classRoutines.length > 0) {
+        examSubjectsCount = selectedExam.classRoutines.reduce((acc: number, cr: any) => acc + (cr.routine?.length || 0), 0);
+    } else if (selectedExam?.subjects) {
+        examSubjectsCount = selectedExam.subjects.length;
+    }
+
     // Helper to get class name from ID/Slug
     const getClassName = (classId: string) => {
         if (!classId) return '';
@@ -393,20 +401,17 @@ const ExamTimeTable: React.FC = () => {
                             <option value="class">Print Class-Wise</option>
                         </select>
                     </div>
-                    <button className="btn btn-primary" onClick={() => handleAddSlot()} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Plus size={18} /> Add Exam Slot
-                    </button>
                 </div>
             </div>
 
             {/* Auto-Sync Feature */}
-            {selectedExamId && selectedExam?.subjects && selectedExam.subjects.length > 0 && (
+            {selectedExamId && selectedExam && examSubjectsCount > 0 && (
                 <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '2rem', background: 'rgba(99, 102, 241, 0.05)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <h4 style={{ fontWeight: 700, margin: '0 0 0.25rem', color: 'var(--primary)' }}>🚀 Auto-Sync Available</h4>
                             <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', margin: 0 }}>
-                                This exam has {selectedExam.subjects.length} subjects with dates/times configured. Generate calendar entries automatically.
+                                This exam has {examSubjectsCount} subjects configured across {examTargetClassesCount} classes. Generate calendar entries automatically.
                             </p>
                         </div>
                         <button
@@ -514,7 +519,7 @@ const ExamTimeTable: React.FC = () => {
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Selected Exam Details</div>
                             <div style={{ fontWeight: 700, color: 'var(--primary)' }}>{selectedExam.name}</div>
                             <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                                {selectedExam.classes?.length || 0} classes · {selectedExam.subjects?.length || 0} subjects
+                                {examTargetClassesCount} classes · {examSubjectsCount} subjects
                             </div>
                         </div>
                     )}

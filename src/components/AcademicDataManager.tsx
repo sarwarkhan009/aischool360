@@ -280,7 +280,9 @@ const AcademicDataManager: React.FC<AcademicDataManagerProps> = ({ onDataChange 
 
     // Get subjects available for selected class
     const getSubjectsForClass = (className: string) => {
-        return subjects.filter(s => s.enabledFor.includes(className));
+        return subjects
+            .filter(s => s.enabledFor.includes(className))
+            .sort((a, b) => a.name.localeCompare(b.name));
     };
 
     const filteredSubjects = subjects
@@ -643,7 +645,7 @@ Chapter 4: Carbon and its Compounds`}
                                 </p>
                             ) : (
                                 <div style={{ display: 'grid', gap: '2rem' }}>
-                                    {subjects.filter(s => Object.values(s.chaptersPerClass).flat().length > 0).map((subject) => (
+                                    {subjects.filter(s => Object.values(s.chaptersPerClass).flat().length > 0).sort((a, b) => a.name.localeCompare(b.name)).map((subject) => (
                                         <div key={subject.name}>
                                             <h4 style={{ fontWeight: 700, fontSize: '1.125rem', marginBottom: '1rem', color: 'var(--primary)' }}>
                                                 📚 {subject.name}

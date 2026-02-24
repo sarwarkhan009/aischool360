@@ -64,6 +64,7 @@ const FeeManagement: React.FC = () => {
     const [currentReceipt, setCurrentReceipt] = useState<any>(null);
     const [dynamicFees, setDynamicFees] = useState<Record<string, number>>({});
     const [selectedClass, setSelectedClass] = useState('ALL');
+    const [selectedSession, setSelectedSession] = useState('CURRENT');
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'admissionNo', direction: 'asc' });
     const [saleDiscount, setSaleDiscount] = useState(0);
     const [paymentSettings, setPaymentSettings] = useState<any>(null);
@@ -356,7 +357,8 @@ const FeeManagement: React.FC = () => {
                 (stu.mobileNo && stu.mobileNo.includes(searchTerm))
             );
             const matchesClass = selectedClass === 'ALL' || stu.class === selectedClass;
-            const matchesSession = !activeFY || (stu.session && stu.session === activeFY);
+            const effectiveSession = selectedSession === 'CURRENT' ? activeFY : selectedSession;
+            const matchesSession = effectiveSession === 'ALL' || !effectiveSession || (stu.session && stu.session === effectiveSession);
             return matchesSearch && matchesClass && matchesSession;
         });
 
@@ -387,9 +389,18 @@ const FeeManagement: React.FC = () => {
         }
 
         return result.slice(0, (searchTerm || selectedClass !== 'ALL') ? 100 : 10);
-    }, [students, searchTerm, selectedClass, sortConfig, studentDuesMap]);
+    }, [students, searchTerm, selectedClass, selectedSession, activeFY, sortConfig, studentDuesMap]);
 
     const filteredStudents = processedStudents;
+
+    const availableSessions = useMemo(() => {
+        if (!students) return [];
+        const sessions = new Set<string>();
+        students.forEach((stu: any) => {
+            if (stu.session) sessions.add(stu.session);
+        });
+        return Array.from(sessions).sort().reverse();
+    }, [students]);
 
     const activeClasses = (dbItems && dbItems.length > 0) ? getActiveClasses(dbItems.filter((d: any) => d.type === 'class'), activeFY) : [];
 
@@ -787,7 +798,7 @@ const FeeManagement: React.FC = () => {
                 </div>
 
                 <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 200px', gap: '1.5rem', alignItems: 'center', maxWidth: '900px', margin: '0 auto' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 200px 200px', gap: '1.5rem', alignItems: 'center', maxWidth: '1100px', margin: '0 auto' }}>
                         <div style={{ position: 'relative' }}>
                             <Search size={20} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                             <input
@@ -799,6 +810,20 @@ const FeeManagement: React.FC = () => {
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 autoFocus
                             />
+                        </div>
+                        <div>
+                            <select
+                                className="input-field"
+                                style={{ height: '3.5rem', borderRadius: '1.25rem', fontWeight: 600, padding: '0 2.5rem 0 1.25rem', lineHeight: 'normal' }}
+                                value={selectedSession}
+                                onChange={(e) => setSelectedSession(e.target.value)}
+                            >
+                                <option value="ALL">All Sessions</option>
+                                <option value="CURRENT">Current ({activeFY})</option>
+                                {availableSessions.filter(s => s !== activeFY).map(session => (
+                                    <option key={session} value={session}>{session}</option>
+                                ))}
+                            </select>
                         </div>
                         <div>
                             <select

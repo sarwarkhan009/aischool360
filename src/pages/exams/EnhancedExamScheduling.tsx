@@ -226,14 +226,19 @@ const EnhancedExamScheduling: React.FC = () => {
         try {
             // Firestore doesn't accept 'undefined' values. Strip them recursively.
             const cleanData = (obj: any): any => {
-                const newObj: any = Array.isArray(obj) ? [] : {};
+                if (obj === undefined) return undefined;
+                if (obj === null) return null;
+                if (typeof obj !== 'object') return obj;
+                if (Array.isArray(obj)) {
+                    return obj
+                        .map(item => cleanData(item))
+                        .filter(item => item !== undefined);
+                }
+                const newObj: any = {};
                 Object.keys(obj).forEach(key => {
-                    if (obj[key] === undefined) return;
-                    if (obj[key] !== null && typeof obj[key] === 'object') {
-                        newObj[key] = cleanData(obj[key]);
-                    } else {
-                        newObj[key] = obj[key];
-                    }
+                    const val = obj[key];
+                    if (val === undefined) return;
+                    newObj[key] = cleanData(val);
                 });
                 return newObj;
             };
@@ -296,25 +301,31 @@ const EnhancedExamScheduling: React.FC = () => {
         };
     };
 
-    const updateClassRoutine = (classId: string, updatedRoutine: ClassRoutineEntry[]) => {
+    const updateClassRoutine = (classId: string, updatedRoutineOrFn: ClassRoutineEntry[] | ((prevRoutine: ClassRoutineEntry[]) => ClassRoutineEntry[])) => {
         const cls = schoolClasses.find(c => c.id === classId);
-        const existing = newExam.classRoutines || [];
-        const idx = existing.findIndex(cr => cr.classId === classId);
-        const updated = [...existing];
-        if (idx >= 0) {
-            updated[idx] = { ...updated[idx], routine: updatedRoutine };
-        } else {
-            updated.push({ classId, className: cls?.name || classId, routine: updatedRoutine });
-        }
-        setNewExam({ ...newExam, classRoutines: updated });
+        setNewExam(prev => {
+            const existing = prev.classRoutines || [];
+            const idx = existing.findIndex(cr => cr.classId === classId);
+            const updated = [...existing];
+
+            const prevRoutine = idx >= 0 ? updated[idx].routine : [];
+            const finalRoutine = typeof updatedRoutineOrFn === 'function' ? updatedRoutineOrFn(prevRoutine) : updatedRoutineOrFn;
+
+            if (idx >= 0) {
+                updated[idx] = { ...updated[idx], routine: finalRoutine };
+            } else {
+                updated.push({ classId, className: cls?.name || classId, routine: finalRoutine });
+            }
+            return { ...prev, classRoutines: updated };
+        });
     };
 
     const handleAddRoutineEntry = (classId: string) => {
         const selectedAssessment = schoolAssessments.find(a => a.id === newExam.assessmentTypeId);
         const defaultPassMarks = selectedAssessment?.passingMarks ?? 33;
-        const currentRoutine = getClassRoutine(classId);
-        updateClassRoutine(classId, [
-            ...currentRoutine.routine,
+
+        updateClassRoutine(classId, prevRoutine => [
+            ...prevRoutine,
             {
                 subjectId: '',
                 subjectName: '',
@@ -330,30 +341,31 @@ const EnhancedExamScheduling: React.FC = () => {
     };
 
     const handleRemoveRoutineEntry = (classId: string, entryIndex: number) => {
-        const currentRoutine = getClassRoutine(classId);
-        updateClassRoutine(classId, currentRoutine.routine.filter((_, i) => i !== entryIndex));
+        updateClassRoutine(classId, prevRoutine => prevRoutine.filter((_, i) => i !== entryIndex));
     };
 
     const handleRoutineEntryChange = (classId: string, entryIndex: number, field: string, value: any) => {
-        const currentRoutine = getClassRoutine(classId);
-        const updated = [...currentRoutine.routine];
-        const entry = { ...updated[entryIndex] };
+        updateClassRoutine(classId, prevRoutine => {
+            if (!prevRoutine[entryIndex]) return prevRoutine;
+            const updated = [...prevRoutine];
+            const entry = { ...updated[entryIndex] };
 
-        if (field === 'subjectId') {
-            const subject = schoolSubjects.find((s: any) => s.id === value);
-            if (subject) entry.subjectName = subject.name;
-            entry.subjectId = value;
-        } else if (field === 'passMarksNumber') {
-            const max = entry.maxMarks || 100;
-            entry.passingMarks = Math.round((value / max) * 100);
-        } else if (value === undefined) {
-            delete (entry as any)[field];
-        } else {
-            (entry as any)[field] = value;
-        }
+            if (field === 'subjectId') {
+                const subject = schoolSubjects.find((s: any) => s.id === value);
+                if (subject) entry.subjectName = subject.name;
+                entry.subjectId = value;
+            } else if (field === 'passMarksNumber') {
+                const max = entry.maxMarks || 100;
+                entry.passingMarks = Math.round((value / max) * 100);
+            } else if (value === undefined) {
+                delete (entry as any)[field];
+            } else {
+                (entry as any)[field] = value;
+            }
 
-        updated[entryIndex] = entry;
-        updateClassRoutine(classId, updated);
+            updated[entryIndex] = entry;
+            return updated;
+        });
     };
 
     const handleCopyRoutine = (fromClassId: string, toClassId: string) => {
@@ -368,20 +380,21 @@ const EnhancedExamScheduling: React.FC = () => {
     };
 
     const handleDuplicateRoutineEntry = (classId: string, entryIndex: number) => {
-        const currentRoutine = getClassRoutine(classId);
-        const entry = currentRoutine.routine[entryIndex];
-        if (entry) {
+        updateClassRoutine(classId, prevRoutine => {
+            const entry = prevRoutine[entryIndex];
+            if (!entry) return prevRoutine;
+
             let newDate = entry.examDate;
             if (newDate) {
                 const d = new Date(newDate);
                 d.setDate(d.getDate() + 1);
                 newDate = d.toISOString().split('T')[0];
             }
-            updateClassRoutine(classId, [
-                ...currentRoutine.routine,
-                { ...entry, subjectId: '', subjectName: '', examDate: newDate }
-            ]);
-        }
+            return [
+                ...prevRoutine,
+                { ...entry, subjectId: '', subjectName: '', examDate: newDate, theoryMarks: undefined, practicalMarks: undefined, combinedSubjects: undefined }
+            ];
+        });
     };
 
     const handleDeleteExam = async (id: string) => {
@@ -432,10 +445,10 @@ const EnhancedExamScheduling: React.FC = () => {
         const selectedAssessment = schoolAssessments.find(a => a.id === newExam.assessmentTypeId);
         const defaultPassMarks = selectedAssessment?.passingMarks ?? 40;
 
-        setNewExam({
-            ...newExam,
+        setNewExam(prev => ({
+            ...prev,
             subjects: [
-                ...(newExam.subjects || []),
+                ...(prev.subjects || []),
                 {
                     subjectId: '',
                     subjectName: '',
@@ -443,25 +456,27 @@ const EnhancedExamScheduling: React.FC = () => {
                     maxMarks: 100,
                     passingMarks: defaultPassMarks,
                     duration: 180,
-                    examDate: newExam.startDate || '',
+                    examDate: prev.startDate || '',
                     examTime: currentSchool?.examTimeMode === 'GLOBAL' ? (currentSchool.globalExamTime || '09:00') : '09:00',
                     examiner: '',
                     roomNumber: ''
                 }
             ]
-        });
+        }));
     };
 
     const handleRemoveSubject = (index: number) => {
-        setNewExam({
-            ...newExam,
-            subjects: newExam.subjects?.filter((_, i) => i !== index)
-        });
+        setNewExam(prev => ({
+            ...prev,
+            subjects: prev.subjects?.filter((_, i) => i !== index)
+        }));
     };
 
     const handleDuplicateSubject = (index: number) => {
-        const subjectToCopy = newExam.subjects?.[index];
-        if (subjectToCopy) {
+        setNewExam(prev => {
+            const subjectToCopy = prev.subjects?.[index];
+            if (!subjectToCopy) return prev;
+
             // Increment date by 1 day
             let newDate = subjectToCopy.examDate;
             if (newDate) {
@@ -470,40 +485,46 @@ const EnhancedExamScheduling: React.FC = () => {
                 newDate = currentDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
             }
 
-            setNewExam({
-                ...newExam,
+            return {
+                ...prev,
                 subjects: [
-                    ...(newExam.subjects || []),
+                    ...(prev.subjects || []),
                     {
                         ...subjectToCopy,
                         subjectId: '', // Clear subject selection for new entry
                         subjectName: '',
-                        examDate: newDate // Set date to +1 day
+                        examDate: newDate, // Set date to +1 day
+                        theoryMarks: undefined,
+                        practicalMarks: undefined,
+                        combinedSubjects: undefined
                     }
                 ]
-            });
-        }
+            };
+        });
     };
 
     const handleSubjectChange = (index: number, field: string, value: any) => {
-        const updatedSubjects = [...(newExam.subjects || [])];
-        const subjectEntry = { ...updatedSubjects[index] };
+        setNewExam(prev => {
+            if (!prev.subjects || !prev.subjects[index]) return prev;
+            const updatedSubjects = [...prev.subjects];
+            const subjectEntry = { ...updatedSubjects[index] };
 
-        if (field === 'subjectId') {
-            const subject = schoolSubjects.find((s: any) => s.id === value);
-            if (subject) subjectEntry.subjectName = subject.name;
-            subjectEntry.subjectId = value;
-        } else if (field === 'passMarksNumber') {
-            const max = subjectEntry.maxMarks || 100;
-            subjectEntry.passingMarks = Math.round((value / max) * 100);
-        } else if (value === undefined) {
-            delete (subjectEntry as any)[field];
-        } else {
-            (subjectEntry as any)[field] = value;
-        }
+            if (field === 'subjectId') {
+                const subject = schoolSubjects.find((s: any) => s.id === value);
+                if (subject) subjectEntry.subjectName = subject.name;
+                subjectEntry.subjectId = value;
+            } else if (field === 'passMarksNumber') {
+                const max = subjectEntry.maxMarks || 100;
+                subjectEntry.passingMarks = Math.round((value / max) * 100);
+            } else if (value === undefined) {
+                delete (subjectEntry as any)[field];
+            } else {
+                (subjectEntry as any)[field] = value;
+            }
 
-        updatedSubjects[index] = subjectEntry as ExamSubject;
-        setNewExam({ ...newExam, subjects: updatedSubjects });
+            updatedSubjects[index] = subjectEntry as ExamSubject;
+            return { ...prev, subjects: updatedSubjects };
+        });
     };
 
     // ─── Teacher Save Handler (only updates classRoutines on existing exam) ──
@@ -515,14 +536,19 @@ const EnhancedExamScheduling: React.FC = () => {
         setTeacherSaving(true);
         try {
             const cleanData = (obj: any): any => {
-                const newObj: any = Array.isArray(obj) ? [] : {};
+                if (obj === undefined) return undefined;
+                if (obj === null) return null;
+                if (typeof obj !== 'object') return obj;
+                if (Array.isArray(obj)) {
+                    return obj
+                        .map(item => cleanData(item))
+                        .filter(item => item !== undefined);
+                }
+                const newObj: any = {};
                 Object.keys(obj).forEach(key => {
-                    if (obj[key] === undefined) return;
-                    if (obj[key] !== null && typeof obj[key] === 'object') {
-                        newObj[key] = cleanData(obj[key]);
-                    } else {
-                        newObj[key] = obj[key];
-                    }
+                    const val = obj[key];
+                    if (val === undefined) return;
+                    newObj[key] = cleanData(val);
                 });
                 return newObj;
             };
@@ -1150,7 +1176,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                             type="number"
                                                                             className="input-field"
                                                                             value={entry.maxMarks}
-                                                                            onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'maxMarks', parseInt(e.target.value) || 0)}
+                                                                            onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'maxMarks', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                             style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem' }}
                                                                         />
                                                                     </div>
@@ -1160,7 +1186,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                             type="number"
                                                                             className="input-field"
                                                                             value={entry.passingMarks}
-                                                                            onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passingMarks', parseInt(e.target.value) || 0)}
+                                                                            onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passingMarks', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                             style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem' }}
                                                                         />
                                                                     </div>
@@ -1170,7 +1196,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                             type="number"
                                                                             className="input-field"
                                                                             value={Math.round((entry.passingMarks * entry.maxMarks) / 100)}
-                                                                            onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passMarksNumber', parseInt(e.target.value) || 0)}
+                                                                            onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passMarksNumber', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                             style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem' }}
                                                                         />
                                                                     </div>
@@ -1317,7 +1343,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         )}
                                                         <div className="form-group">
                                                             <label style={{ fontSize: '0.625rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.25rem', display: 'block', letterSpacing: '0.04em' }}>Mins</label>
-                                                            <input type="number" className="input-field" value={entry.duration} onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'duration', parseInt(e.target.value) || 0)} style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem' }} />
+                                                            <input type="number" className="input-field" value={entry.duration} onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'duration', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))} style={{ padding: '0.5rem 0.75rem', fontSize: '0.8125rem' }} />
                                                         </div>
                                                         {currentSchool?.showExamVenue !== false && (
                                                             <div className="form-group">
@@ -2814,7 +2840,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                         className="input-field"
                                                                         placeholder="100"
                                                                         value={subject.maxMarks}
-                                                                        onChange={(e) => handleSubjectChange(index, 'maxMarks', parseInt(e.target.value) || 0)}
+                                                                        onChange={(e) => handleSubjectChange(index, 'maxMarks', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                         style={{ padding: '0.75rem', borderRadius: '0.625rem' }}
                                                                     />
                                                                 </div>
@@ -2909,7 +2935,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                             placeholder="33"
                                                                             value={subject.passingMarks}
                                                                             onChange={(e) => {
-                                                                                const pct = parseInt(e.target.value) || 0;
+                                                                                const pct = e.target.value === '' ? '' : (parseInt(e.target.value) || 0);
                                                                                 handleSubjectChange(index, 'passingMarks', pct);
                                                                             }}
                                                                             style={{ padding: '0.75rem', borderRadius: '0.625rem' }}
@@ -2923,8 +2949,9 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                             placeholder={String(Math.ceil((subject.maxMarks * 33) / 100))}
                                                                             value={Math.ceil((subject.maxMarks * (subject.passingMarks || 0)) / 100)}
                                                                             onChange={(e) => {
-                                                                                const marks = parseInt(e.target.value) || 0;
-                                                                                const pct = subject.maxMarks > 0 ? Math.round((marks * 100) / subject.maxMarks) : 0;
+                                                                                const marks = e.target.value === '' ? '' : (parseInt(e.target.value) || 0);
+                                                                                const numericMarks = typeof marks === 'number' ? marks : 0;
+                                                                                const pct = subject.maxMarks > 0 ? Math.round((numericMarks * 100) / subject.maxMarks) : 0;
                                                                                 handleSubjectChange(index, 'passingMarks', pct);
                                                                             }}
                                                                             style={{ padding: '0.75rem', borderRadius: '0.625rem' }}
@@ -3020,7 +3047,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                     className="input-field"
                                                                     placeholder="180"
                                                                     value={subject.duration}
-                                                                    onChange={(e) => handleSubjectChange(index, 'duration', parseInt(e.target.value) || 0)}
+                                                                    onChange={(e) => handleSubjectChange(index, 'duration', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                     style={{ padding: '0.75rem', borderRadius: '0.625rem' }}
                                                                 />
                                                             </div>
@@ -3254,7 +3281,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                                     type="number"
                                                                                     className="input-field"
                                                                                     value={entry.maxMarks}
-                                                                                    onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'maxMarks', parseInt(e.target.value) || 0)}
+                                                                                    onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'maxMarks', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                                 />
                                                                             </div>
                                                                             <div className="form-group" style={{ flex: 1, minWidth: '100px' }}>
@@ -3263,7 +3290,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                                     type="number"
                                                                                     className="input-field"
                                                                                     value={entry.passingMarks}
-                                                                                    onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passingMarks', parseInt(e.target.value) || 0)}
+                                                                                    onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passingMarks', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                                 />
                                                                             </div>
                                                                             <div className="form-group" style={{ flex: 1, minWidth: '100px' }}>
@@ -3272,7 +3299,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                                     type="number"
                                                                                     className="input-field"
                                                                                     value={Math.round((entry.passingMarks * entry.maxMarks) / 100)}
-                                                                                    onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passMarksNumber', parseInt(e.target.value) || 0)}
+                                                                                    onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'passMarksNumber', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                                                                                 />
                                                                             </div>
                                                                         </>
@@ -3437,7 +3464,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                 </div>
                                                                 <div className="form-group">
                                                                     <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'block' }}>Mins</label>
-                                                                    <input type="number" className="input-field" value={entry.duration} onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'duration', parseInt(e.target.value) || 0)} />
+                                                                    <input type="number" className="input-field" value={entry.duration} onChange={(e) => handleRoutineEntryChange(activeRoutineClassId, idx, 'duration', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))} />
                                                                 </div>
                                                                 {currentSchool?.showExamVenue !== false && (
                                                                     <div className="form-group">
