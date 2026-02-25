@@ -222,18 +222,22 @@ const FeeReport: React.FC = () => {
     };
 
     const { data: consolidatedData, heads: consolidatedHeads } = getConsolidatedData();
-    // Cancelled records (across all dates, just match class/category/search)
+    // Cancelled records (date + class + category + search)
     const cancelledRecords = feeRecords.filter((record: any) => {
         if (record.status !== 'CANCELLED') return false;
+        const dateStr = getLocalDateStr(record);
         const isInventory = record.paidFor === 'Inventory Sale' || record.receiptNo?.startsWith('INV');
         const isFee = !isInventory;
         const matchesCategory = (selectedCategories.includes('FEES') && isFee) || (selectedCategories.includes('INVENTORY') && isInventory);
+        const matchesDate = dateStr && dateStr >= startDate && dateStr <= endDate;
         const matchesClass = !selectedClass || record.class === selectedClass;
         const matchesSearch = !searchQuery ||
             (record.studentName && record.studentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
             (record.admissionNo && String(record.admissionNo).toLowerCase().includes(searchQuery.toLowerCase()));
-        return matchesCategory && matchesClass && matchesSearch;
+        return matchesDate && matchesCategory && matchesClass && matchesSearch;
     }).sort((a: any, b: any) => getRecordTimestamp(b) - getRecordTimestamp(a));
+
+    const cancelledTotalAmount = cancelledRecords.reduce((sum: number, r: any) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
 
     const displayRecords = recordTab === 'ACTIVE' ? filteredRecords : cancelledRecords;
 
@@ -465,14 +469,14 @@ const FeeReport: React.FC = () => {
                     <div className="responsive-grid-auto" style={{ marginBottom: '2rem' }}>
                         <div className="glass-card" style={{ padding: '1.5rem' }}>
                             <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Collections</div>
-                            <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)' }}>₹{totalAmount.toFixed(2)}</div>
+                            <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)' }}>₹{totalAmount.toLocaleString('en-IN')}</div>
                         </div>
                         <div className="glass-card" style={{ padding: '1.5rem' }}>
                             <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Cash / Online</div>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                                <span style={{ fontSize: '1.5rem', fontWeight: 800, color: '#22c55e' }}>₹{cashAmount.toFixed(0)}</span>
+                                <span style={{ fontSize: '1.5rem', fontWeight: 800, color: '#22c55e' }}>₹{cashAmount.toLocaleString('en-IN')}</span>
                                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>/</span>
-                                <span style={{ fontSize: '1.5rem', fontWeight: 800, color: '#6366f1' }}>₹{onlineAmount.toFixed(0)}</span>
+                                <span style={{ fontSize: '1.5rem', fontWeight: 800, color: '#6366f1' }}>₹{onlineAmount.toLocaleString('en-IN')}</span>
                             </div>
                         </div>
                         <div className="glass-card" style={{ padding: '1.5rem' }}>
@@ -704,7 +708,7 @@ const FeeReport: React.FC = () => {
                                     }}
                                 >
                                     <Ban size={13} />
-                                    Cancelled ({cancelledRecords.length})
+                                    Cancelled ({cancelledRecords.length}) — ₹{cancelledTotalAmount.toLocaleString('en-IN')}
                                 </button>
                             </div>
                         </div>

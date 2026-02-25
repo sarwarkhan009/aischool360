@@ -29,7 +29,7 @@ const MODULE_STRUCTURE = [
             { id: '/attendance', label: 'Mark Attendance' },
             { id: '/attendance/staff', label: 'Staff Attendance' },
             { id: '/attendance/report', label: 'Student Report' },
-            { id: '/attendance/staff-report', label: 'Staff Report' },
+            { id: '/attendance/staff-report', label: 'Staff Attendance Report' },
         ]
     },
     {
@@ -89,6 +89,7 @@ const MODULE_STRUCTURE = [
         ]
     },
     { id: 'routine', label: 'Routine Management' },
+    { id: 'gallery', label: 'Gallery Management' },
     { id: 'transport', label: 'Transport Management' },
     { id: 'hostel', label: 'Hostel Management' },
     { id: 'inventory', label: 'Inventory Management' },

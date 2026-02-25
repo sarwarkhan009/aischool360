@@ -390,6 +390,24 @@ const DashboardLayout: React.FC = () => {
         window.location.href = loginPath;
     };
 
+    // AI Assistant visibility check (Feature Gate + Master Control)
+    const isAIAssistantEnabledByGates = () => {
+        if (!currentSchool) return true;
+
+        // Feature Gate (School Level)
+        if (currentSchool.allowedModules && currentSchool.allowedModules.length > 0) {
+            if (!currentSchool.allowedModules.includes('ai-assistant')) return false;
+        }
+
+        // Master Control (Module Gate)
+        if (moduleControls && moduleControls['ai-assistant'] === false) {
+            return false;
+        }
+
+        return true;
+    };
+    const showAIAssistant = hasPermission(Permission.USE_AI_ASSISTANT) && isAIAssistantEnabledByGates();
+
     return (
         <div className={`layout-root ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileMenuOpen ? 'mobile-menu-open' : ''}`}>
             {/* Mobile Overlay */}
@@ -481,13 +499,12 @@ const DashboardLayout: React.FC = () => {
                                 if (currentSchool && (child as any).moduleId) {
                                     if (currentSchool.allowedModules) {
                                         const cMid = (child as any).moduleId as string;
-                                        // Check if the school uses the new granular config (has specific submodule ids like /something)
-                                        const isModernConfig = currentSchool.allowedModules.some((m: string) => m.includes('/'));
 
                                         let isAllowed = currentSchool.allowedModules.includes(cMid);
 
-                                        // Fallback for legacy configs that only have base module names
-                                        if (!isAllowed && !isModernConfig) {
+                                        // Fallback: if the specific submodule path isn't listed,
+                                        // check if the base parent module is allowed (e.g. 'students' allows '/students/photos')
+                                        if (!isAllowed) {
                                             const parts = cMid.split('/').filter(Boolean);
                                             const baseModule = parts[0] || null;
                                             isAllowed = Boolean(baseModule && currentSchool.allowedModules.includes(baseModule));
@@ -749,8 +766,8 @@ const DashboardLayout: React.FC = () => {
                 </main>
 
                 {/* AI Assistant */}
-                {hasPermission(Permission.USE_AI_ASSISTANT) && <AIAssistant />}
-                {hasPermission(Permission.USE_AI_ASSISTANT) && <VoiceLiveAssistant />}
+                {showAIAssistant && <AIAssistant />}
+                {showAIAssistant && <VoiceLiveAssistant />}
             </div>
 
             <style>{`

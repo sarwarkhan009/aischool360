@@ -90,6 +90,14 @@ const MODULE_STRUCTURE = [
     { id: 'reports', label: 'Advanced Reports', icon: '📊' },
 ];
 
+// Helper: check if a module/sub-module is allowed by the school's Feature Gate.
+// Strict exact match only — Feature Gate stores explicit IDs for every enabled item.
+// No base-module fallback here (that is only for legacy sidebar logic in DashboardLayout).
+const isFeatureAllowed = (moduleId: string, allowedModules?: string[]): boolean => {
+    if (!allowedModules || allowedModules.length === 0) return true; // no restriction = allow all
+    return allowedModules.includes(moduleId); // strict match only
+};
+
 const MasterControl: React.FC = () => {
     const { currentSchool } = useSchool();
     const { data: allSettings, loading } = useFirestore<any>('settings');
@@ -173,7 +181,7 @@ const MasterControl: React.FC = () => {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2rem' }}>
-                {MODULE_STRUCTURE.map(module => (
+                {MODULE_STRUCTURE.filter(module => isFeatureAllowed(module.id, currentSchool?.allowedModules)).map(module => (
                     <div key={module.id} className="glass-card" style={{
                         padding: '0',
                         overflow: 'hidden',
@@ -250,7 +258,7 @@ const MasterControl: React.FC = () => {
                                 opacity: controls[module.id] ? 1 : 0.6,
                                 pointerEvents: controls[module.id] ? 'all' : 'none'
                             }}>
-                                {module.children.map(child => (
+                                {module.children.filter(child => isFeatureAllowed(child.id, currentSchool?.allowedModules)).map(child => (
                                     <div key={child.id} style={{
                                         padding: '1rem',
                                         borderRadius: '0.75rem',

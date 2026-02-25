@@ -199,12 +199,14 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'Routine Management',
         icon: Clock,
         permissions: [Permission.VIEW_ROUTINE, Permission.MANAGE_ROUTINE],
+        moduleId: 'routine',
     },
     {
         id: 'gallery',
         label: 'Gallery',
         icon: User,
         permissions: [Permission.VIEW_GALLERY, Permission.MANAGE_GALLERY],
+        moduleId: 'gallery',
     },
     {
         id: 'reports',
@@ -261,6 +263,7 @@ const MENU_STRUCTURE: MenuItem[] = [
         label: 'AI Assistant',
         icon: BookOpen,
         permissions: [Permission.USE_AI_ASSISTANT],
+        moduleId: 'ai-assistant',
     },
 ];
 
@@ -545,9 +548,21 @@ const UserRoles: React.FC = () => {
 
     const currentPermissions = getCurrentPermissions();
     const isLocked = activeTab === 'ROLES' && selectedRole?.role === 'ADMIN';
+    const globalEffectiveCanWrite = isLocked ? true : selectedRole?.canWrite;
 
-    // Count enabled menus for the role
-    const enabledCount = MENU_STRUCTURE.filter(m => isMenuEnabled(m.permissions, currentPermissions)).length;
+    // Count enabled menus for the role — only from menus visible in this school's Feature Gate
+    const featureGateAllowed = (moduleId?: string) => {
+        if (!moduleId) return true; // no moduleId = always visible (Dashboard, Roles, etc.)
+        if (!currentSchool?.allowedModules || currentSchool.allowedModules.length === 0) return true;
+        return currentSchool.allowedModules.includes(moduleId);
+    };
+    const enabledCount = MENU_STRUCTURE.filter(m => {
+        if (!featureGateAllowed(m.moduleId)) return false; // hidden by Feature Gate
+        if (isMenuEnabled(m.permissions, currentPermissions)) return true;
+        // Also count as enabled if any child is enabled
+        if (m.children && m.children.some(c => isMenuEnabled(c.permissions, currentPermissions))) return true;
+        return false;
+    }).length;
 
     return (
         <div className="animate-fade-in no-scrollbar" style={{ paddingBottom: '3rem' }}>
@@ -742,14 +757,14 @@ const UserRoles: React.FC = () => {
                                     </span>
                                     {activeTab === 'ROLES' && selectedRole && (
                                         <span style={{
-                                            background: selectedRole.canWrite ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                            color: selectedRole.canWrite ? '#059669' : '#dc2626',
+                                            background: globalEffectiveCanWrite ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                            color: globalEffectiveCanWrite ? '#059669' : '#dc2626',
                                             padding: '0.25rem 0.75rem',
                                             borderRadius: '2rem',
                                             fontSize: '0.75rem',
                                             fontWeight: 700,
                                         }}>
-                                            {selectedRole.canWrite ? '✏️ Write Access ON' : '👁️ View-Only Mode'}
+                                            {globalEffectiveCanWrite ? '✏️ Write Access ON' : '👁️ View-Only Mode'}
                                         </span>
                                     )}
                                     {isLocked && (
@@ -798,16 +813,25 @@ const UserRoles: React.FC = () => {
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {MENU_STRUCTURE.filter(menu => {
+                                // Filter based on Feature Gate (school allowedModules)
+                                if (menu.moduleId && currentSchool?.allowedModules && currentSchool.allowedModules.length > 0) {
+                                    const allowed = currentSchool.allowedModules.includes(menu.moduleId);
+                                    if (!allowed) return false;
+                                }
                                 // Filter based on Master Control (Module Gate)
                                 if (menu.moduleId && moduleControls[menu.moduleId] === false) return false;
                                 return true;
                             }).map(menu => {
                                 const Icon = menu.icon;
                                 const allPerms = getAllMenuPermissions(menu);
-                                const enabled = isMenuEnabled(menu.permissions, currentPermissions);
 
-                                // Filter children based on Master Control
+                                // Filter children based on Feature Gate (strict) + Master Control
                                 const visibleChildren = menu.children?.filter(child => {
+                                    // Feature Gate: strict exact match only (no base-module fallback)
+                                    if (child.moduleId && currentSchool?.allowedModules && currentSchool.allowedModules.length > 0) {
+                                        if (!currentSchool.allowedModules.includes(child.moduleId)) return false;
+                                    }
+                                    // Master Control
                                     if (child.moduleId && moduleControls[child.moduleId] === false) return false;
                                     return true;
                                 }) || [];
@@ -815,9 +839,19 @@ const UserRoles: React.FC = () => {
                                 const hasChildren = visibleChildren.length > 0;
                                 const isExpanded = expandedMenus[menu.id] || false;
 
+                                // For Admin (isLocked), all visible items are treated as enabled —
+                                // Admin always has full access to everything that passed the Feature Gate.
+                                // For other roles, check actual stored permissions.
+                                const isEffectivelyEnabled = (perms: Permission[]) =>
+                                    isLocked ? true : isMenuEnabled(perms, currentPermissions);
+
                                 // Count enabled children
-                                const enabledChildren = visibleChildren.filter(c => isMenuEnabled(c.permissions, currentPermissions)).length;
+                                const enabledChildren = visibleChildren.filter(c => isEffectivelyEnabled(c.permissions)).length;
                                 const totalChildren = visibleChildren.length;
+
+                                // Parent is enabled if its own permissions are active, OR if any child is enabled
+                                const enabled = isEffectivelyEnabled(menu.permissions)
+                                    || (hasChildren && enabledChildren > 0);
 
                                 return (
                                     <div key={menu.id} style={{
@@ -949,7 +983,7 @@ const UserRoles: React.FC = () => {
                                                     gap: '0.5rem',
                                                 }}>
                                                     {visibleChildren.map(child => {
-                                                        const childEnabled = isMenuEnabled(child.permissions, currentPermissions);
+                                                        const childEnabled = isEffectivelyEnabled(child.permissions);
 
                                                         return (
                                                             <div
@@ -1005,101 +1039,105 @@ const UserRoles: React.FC = () => {
                     )}
 
                     {/* ──── DATA WRITE ACCESS SECTION ──── */}
-                    {activeTab === 'ROLES' && selectedRole && (
-                        <div style={{
-                            marginTop: '2rem',
-                            borderRadius: '1.25rem',
-                            overflow: 'hidden',
-                            border: selectedRole.canWrite
-                                ? '2px solid rgba(234, 179, 8, 0.4)'
-                                : '2px solid rgba(239, 68, 68, 0.25)',
-                            background: selectedRole.canWrite
-                                ? 'linear-gradient(135deg, rgba(254, 252, 232, 0.8) 0%, rgba(254, 249, 195, 0.5) 100%)'
-                                : 'linear-gradient(135deg, rgba(254, 242, 242, 0.8) 0%, rgba(254, 226, 226, 0.4) 100%)'
-                        }}>
-                            <div style={{ padding: '1.5rem 2rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                                {/* Icon */}
-                                <div style={{
-                                    width: '52px', height: '52px', borderRadius: '14px', flexShrink: 0,
-                                    background: selectedRole.canWrite
-                                        ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                                        : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: '1.5rem',
-                                    boxShadow: selectedRole.canWrite
-                                        ? '0 6px 16px rgba(234, 179, 8, 0.35)'
-                                        : '0 6px 16px rgba(239, 68, 68, 0.3)'
-                                }}>
-                                    {selectedRole.canWrite ? '✏️' : '🔒'}
-                                </div>
-
-                                {/* Text */}
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '0.25rem', color: selectedRole.canWrite ? '#92400e' : '#991b1b' }}>
-                                        Data Write Access
-                                        {isLocked && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#b45309', fontWeight: 700 }}>🔒 Always ON for Admin</span>}
-                                    </div>
-                                    <div style={{ fontSize: '0.8rem', color: selectedRole.canWrite ? '#a16207' : '#b91c1c', lineHeight: 1.5 }}>
-                                        {selectedRole.canWrite
-                                            ? '⚠️ This role can Add, Edit and Delete data from the database.'
-                                            : '✅ View-Only mode — This role can only read data. No add, edit, or delete allowed.'}
-                                    </div>
-                                </div>
-
-                                {/* Toggle */}
-                                <button
-                                    disabled={isLocked}
-                                    onClick={() => {
-                                        if (isLocked) return;
-                                        const updatedRole = { ...selectedRole, canWrite: !selectedRole.canWrite };
-                                        setSelectedRole(updatedRole);
-                                        const updatedRoles = roles.map(r => r.id === updatedRole.id ? updatedRole : r);
-                                        setRoles(updatedRoles);
-                                        saveRolesToFirestore(updatedRoles);
-                                    }}
-                                    style={{
-                                        width: '68px', height: '36px', borderRadius: '18px', border: 'none',
-                                        background: selectedRole.canWrite ? '#f59e0b' : '#94a3b8',
-                                        position: 'relative', cursor: isLocked ? 'not-allowed' : 'pointer',
-                                        transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)', flexShrink: 0,
-                                        opacity: isLocked ? 0.6 : 1,
-                                        boxShadow: selectedRole.canWrite ? '0 4px 12px rgba(234, 179, 8, 0.4)' : 'none',
-                                    }}
-                                >
-                                    <div style={{
-                                        width: '28px', height: '28px', borderRadius: '50%', background: 'white',
-                                        position: 'absolute', top: '4px',
-                                        left: selectedRole.canWrite ? '36px' : '4px',
-                                        transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-                                        fontSize: '0.7rem'
-                                    }}>
-                                        {selectedRole.canWrite ? '✏️' : '👁️'}
-                                    </div>
-                                </button>
-                            </div>
-
-                            {/* Sub-info bar */}
+                    {activeTab === 'ROLES' && selectedRole && (() => {
+                        // Admin always has write access — override stored value if wrong
+                        const effectiveCanWrite = isLocked ? true : selectedRole.canWrite;
+                        return (
                             <div style={{
-                                padding: '0.75rem 2rem',
-                                borderTop: '1px solid',
-                                borderColor: selectedRole.canWrite ? 'rgba(234, 179, 8, 0.2)' : 'rgba(239, 68, 68, 0.15)',
-                                background: selectedRole.canWrite ? 'rgba(254, 249, 195, 0.4)' : 'rgba(254, 226, 226, 0.3)',
-                                fontSize: '0.7rem',
-                                color: selectedRole.canWrite ? '#92400e' : '#7f1d1d',
-                                fontWeight: 600,
-                                display: 'flex',
-                                gap: '1.5rem',
-                                flexWrap: 'wrap'
+                                marginTop: '2rem',
+                                borderRadius: '1.25rem',
+                                overflow: 'hidden',
+                                border: effectiveCanWrite
+                                    ? '2px solid rgba(234, 179, 8, 0.4)'
+                                    : '2px solid rgba(239, 68, 68, 0.25)',
+                                background: effectiveCanWrite
+                                    ? 'linear-gradient(135deg, rgba(254, 252, 232, 0.8) 0%, rgba(254, 249, 195, 0.5) 100%)'
+                                    : 'linear-gradient(135deg, rgba(254, 242, 242, 0.8) 0%, rgba(254, 226, 226, 0.4) 100%)'
                             }}>
-                                <span>{selectedRole.canWrite ? '✔ Add Records' : '✘ Cannot Add'}</span>
-                                <span>{selectedRole.canWrite ? '✔ Edit Records' : '✘ Cannot Edit'}</span>
-                                <span>{selectedRole.canWrite ? '✔ Delete Records' : '✘ Cannot Delete'}</span>
-                                <span>👁 View Access: Always Allowed</span>
+                                <div style={{ padding: '1.5rem 2rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                                    {/* Icon */}
+                                    <div style={{
+                                        width: '52px', height: '52px', borderRadius: '14px', flexShrink: 0,
+                                        background: effectiveCanWrite
+                                            ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                            : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '1.5rem',
+                                        boxShadow: effectiveCanWrite
+                                            ? '0 6px 16px rgba(234, 179, 8, 0.35)'
+                                            : '0 6px 16px rgba(239, 68, 68, 0.3)'
+                                    }}>
+                                        {effectiveCanWrite ? '✏️' : '🔒'}
+                                    </div>
+
+                                    {/* Text */}
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '0.25rem', color: effectiveCanWrite ? '#92400e' : '#991b1b' }}>
+                                            Data Write Access
+                                            {isLocked && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#b45309', fontWeight: 700 }}>🔒 Always ON for Admin</span>}
+                                        </div>
+                                        <div style={{ fontSize: '0.8rem', color: effectiveCanWrite ? '#a16207' : '#b91c1c', lineHeight: 1.5 }}>
+                                            {effectiveCanWrite
+                                                ? '⚠️ This role can Add, Edit and Delete data from the database.'
+                                                : '✅ View-Only mode — This role can only read data. No add, edit, or delete allowed.'}
+                                        </div>
+                                    </div>
+
+                                    {/* Toggle */}
+                                    <button
+                                        disabled={isLocked}
+                                        onClick={() => {
+                                            if (isLocked) return;
+                                            const updatedRole = { ...selectedRole, canWrite: !selectedRole.canWrite };
+                                            setSelectedRole(updatedRole);
+                                            const updatedRoles = roles.map(r => r.id === updatedRole.id ? updatedRole : r);
+                                            setRoles(updatedRoles);
+                                            saveRolesToFirestore(updatedRoles);
+                                        }}
+                                        style={{
+                                            width: '68px', height: '36px', borderRadius: '18px', border: 'none',
+                                            background: effectiveCanWrite ? '#f59e0b' : '#94a3b8',
+                                            position: 'relative', cursor: isLocked ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)', flexShrink: 0,
+                                            opacity: isLocked ? 0.85 : 1,
+                                            boxShadow: effectiveCanWrite ? '0 4px 12px rgba(234, 179, 8, 0.4)' : 'none',
+                                        }}
+                                    >
+                                        <div style={{
+                                            width: '28px', height: '28px', borderRadius: '50%', background: 'white',
+                                            position: 'absolute', top: '4px',
+                                            left: effectiveCanWrite ? '36px' : '4px',
+                                            transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                                            fontSize: '0.7rem'
+                                        }}>
+                                            {effectiveCanWrite ? '✏️' : '👁️'}
+                                        </div>
+                                    </button>
+                                </div>
+
+                                {/* Sub-info bar */}
+                                <div style={{
+                                    padding: '0.75rem 2rem',
+                                    borderTop: '1px solid',
+                                    borderColor: effectiveCanWrite ? 'rgba(234, 179, 8, 0.2)' : 'rgba(239, 68, 68, 0.15)',
+                                    background: effectiveCanWrite ? 'rgba(254, 249, 195, 0.4)' : 'rgba(254, 226, 226, 0.3)',
+                                    fontSize: '0.7rem',
+                                    color: effectiveCanWrite ? '#92400e' : '#7f1d1d',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    gap: '1.5rem',
+                                    flexWrap: 'wrap'
+                                }}>
+                                    <span>{effectiveCanWrite ? '✔ Add Records' : '✘ Cannot Add'}</span>
+                                    <span>{effectiveCanWrite ? '✔ Edit Records' : '✘ Cannot Edit'}</span>
+                                    <span>{effectiveCanWrite ? '✔ Delete Records' : '✘ Cannot Delete'}</span>
+                                    <span>👁 View Access: Always Allowed</span>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
                 </div>
             </div>
 

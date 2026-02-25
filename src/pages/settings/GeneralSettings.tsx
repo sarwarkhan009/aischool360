@@ -611,19 +611,27 @@ export function ClassMaster() {
         return `class_${className.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${currentSchool?.id}`;
     };
 
+    const getDedupKey = (s: string) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+
     const toggleClass = async (className: string) => {
         if (!currentSchool?.id || !selectedSession) return;
-        const docId = getDocId(className, selectedSession);
-        const existingClass = classSettings.find((c: any) => c.name === className);
+        const targetDedup = getDedupKey(className);
+        const matchingDocs = classSettings.filter((c: any) => getDedupKey(c.name) === targetDedup);
+        const isCurrentlyActive = matchingDocs.length > 0 && matchingDocs.some((c: any) => c.active !== false);
 
         setIsSaving(`toggle-${className}`);
         try {
-            if (existingClass) {
-                await updateDoc(doc(db, 'settings', docId), {
-                    active: !existingClass.active,
-                    updatedAt: new Date().toISOString()
-                });
+            if (matchingDocs.length > 0) {
+                const batch = writeBatch(db);
+                for (const cls of matchingDocs) {
+                    batch.update(doc(db, 'settings', cls.id), {
+                        active: !isCurrentlyActive,
+                        updatedAt: new Date().toISOString()
+                    });
+                }
+                await batch.commit();
             } else {
+                const docId = getDocId(className, selectedSession);
                 await setDoc(doc(db, 'settings', docId), {
                     name: className,
                     sections: [],
@@ -643,27 +651,31 @@ export function ClassMaster() {
 
     const toggleSection = async (className: string, section: string) => {
         if (!currentSchool?.id || !selectedSession) return;
-        const docId = getDocId(className, selectedSession);
-        const existingClass = classSettings.find((c: any) => c.name === className);
+        const targetDedup = getDedupKey(className);
+        const matchingDocs = classSettings.filter((c: any) => getDedupKey(c.name) === targetDedup);
+        const isClassActive = matchingDocs.length > 0 && matchingDocs.some((c: any) => c.active !== false);
 
-        if (!existingClass?.active) {
+        if (!isClassActive) {
             alert('Please activate the class first before adding sections.');
             return;
         }
 
         setIsSaving(`${className}-${section}`);
         try {
-            let updatedSections = [...(existingClass.sections || [])];
-            if (updatedSections.includes(section)) {
-                updatedSections = updatedSections.filter(s => s !== section);
-            } else {
-                updatedSections.push(section);
+            const batch = writeBatch(db);
+            for (const existingClass of matchingDocs) {
+                let updatedSections = [...(existingClass.sections || [])];
+                if (updatedSections.includes(section)) {
+                    updatedSections = updatedSections.filter(s => s !== section);
+                } else {
+                    updatedSections.push(section);
+                }
+                batch.update(doc(db, 'settings', existingClass.id), {
+                    sections: Array.from(new Set(updatedSections)).sort(),
+                    updatedAt: new Date().toISOString()
+                });
             }
-
-            await updateDoc(doc(db, 'settings', docId), {
-                sections: updatedSections.sort(),
-                updatedAt: new Date().toISOString()
-            });
+            await batch.commit();
         } catch (err) {
             alert('Failed to update section: ' + (err as Error).message);
         } finally {
@@ -692,9 +704,8 @@ export function ClassMaster() {
                     financialYear: targetSession,
                     createdAt: new Date().toISOString()
                 });
-                // Delete old untagged doc
-                const legacyId = getLegacyDocId(cls.name);
-                batch.delete(doc(db, 'settings', legacyId));
+                // Delete old untagged doc using its actual Firestore ID
+                batch.delete(doc(db, 'settings', cls.id));
             }
             await batch.commit();
             alert(`✅ Successfully migrated ${untaggedClasses.length} classes to session ${targetSession}`);
@@ -940,8 +951,16 @@ export function ClassMaster() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {PRESET_CLASSES.map(clsName => {
-                    const classData = classSettings.find((c: any) => c.name === clsName);
-                    const isClassActive = !!classData && classData.active !== false;
+                    const targetDedup = getDedupKey(clsName);
+                    const matchingDocs = classSettings.filter((c: any) => getDedupKey(c.name) === targetDedup);
+                    const isClassActive = matchingDocs.length > 0 && matchingDocs.some((c: any) => c.active !== false);
+
+                    let classSections: string[] = [];
+                    matchingDocs.forEach((c: any) => {
+                        if (c.sections) classSections.push(...c.sections);
+                    });
+                    const uniqueSections = Array.from(new Set(classSections));
+
                     const isToggling = isSaving === `toggle-${clsName}`;
 
                     return (
@@ -1001,7 +1020,7 @@ export function ClassMaster() {
                                         Sections:
                                     </span>
                                     {PRESET_SECTIONS.map(sec => {
-                                        const isSectionActive = classData?.sections?.includes(sec);
+                                        const isSectionActive = uniqueSections.includes(sec);
                                         const savingKey = `${clsName}-${sec}`;
                                         const processing = isSaving === savingKey;
 

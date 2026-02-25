@@ -243,8 +243,13 @@ const AdminDashboard: React.FC = () => {
         const unsubscribeFees = onSnapshot(feesQuery, (snapshot) => {
             const total = snapshot.docs.reduce((sum, doc) => {
                 const data = doc.data();
-                const val = data.paid || data.amount || data.total;
-                return sum + (Number(val) || 0);
+                if (data.status === 'CANCELLED') return sum;
+                // 'paid' already reflects net of discount; use it if explicitly present
+                const discount = Number(data.discount) || 0;
+                const val = (data.paid !== undefined && data.paid !== null)
+                    ? Number(data.paid) || 0
+                    : ((Number(data.amount) || Number(data.total) || 0) - discount);
+                return sum + val;
             }, 0);
             console.log(`💰 Today's Collection: ₹${total} (${snapshot.docs.length} records)`);
             setTodayCollection(total);
@@ -263,8 +268,13 @@ const AdminDashboard: React.FC = () => {
         const unsubscribeMonthlyFees = onSnapshot(monthlyFeesQuery, (snapshot) => {
             const total = snapshot.docs.reduce((sum, doc) => {
                 const data = doc.data();
-                const val = data.paid || data.amount || data.total;
-                return sum + (Number(val) || 0);
+                if (data.status === 'CANCELLED') return sum;
+                // 'paid' already reflects net of discount; use it if explicitly present
+                const discount = Number(data.discount) || 0;
+                const val = (data.paid !== undefined && data.paid !== null)
+                    ? Number(data.paid) || 0
+                    : ((Number(data.amount) || Number(data.total) || 0) - discount);
+                return sum + val;
             }, 0);
             console.log(`💰 Monthly Collection: ₹${total} (${snapshot.docs.length} records)`);
             setMonthlyCollection(total);

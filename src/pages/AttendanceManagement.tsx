@@ -84,7 +84,10 @@ const AttendanceManagement: React.FC = () => {
     const { user } = useAuth();
     const { currentSchool } = useSchool();
     const { data: allSettings } = useFirestore<any>('settings');
+    const { data: academicYears } = useFirestore<any>('academic_years');
     const activeFY = currentSchool?.activeFinancialYear || '';
+    const schoolYears = (academicYears || []).filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived).map((y: any) => y.name).sort();
+    const [selectedSession, setSelectedSession] = useState('');
     const activeClasses = getActiveClasses(allSettings?.filter((d: any) => d.type === 'class') || [], activeFY);
 
     const [assignedClasses, setAssignedClasses] = useState<string[]>([]);
@@ -222,6 +225,13 @@ const AttendanceManagement: React.FC = () => {
     const [filterClass, setFilterClass] = useState('');
     const [filterSection, setFilterSection] = useState('');
     const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Sync selectedSession when activeFY loads from Firestore
+    useEffect(() => {
+        if (activeFY && !selectedSession) {
+            setSelectedSession(activeFY);
+        }
+    }, [activeFY]);
     const [activeTab, setActiveTab] = useState<'mark' | 'summary' | 'student' | 'report' | 'entry'>('mark');
 
     // Attendance Entry Tab States
@@ -327,18 +337,12 @@ const AttendanceManagement: React.FC = () => {
         ];
     }, [monthlyRecords]);
 
+    // Initial Data Fetch (on mount, school change, or session change)
     useEffect(() => {
         if (currentSchool?.id) {
             fetchStudents();
         }
-    }, [currentSchool?.id]);
-
-    // 1. Initial Data Fetch (on mount or school change)
-    useEffect(() => {
-        if (currentSchool?.id) {
-            fetchStudents();
-        }
-    }, [currentSchool?.id]);
+    }, [currentSchool?.id, selectedSession]);
 
     // 2. Fetch attendance for 'Mark' tab
     useEffect(() => {
@@ -416,6 +420,11 @@ const AttendanceManagement: React.FC = () => {
             const data = snap.docs
                 .map(doc => ({ uid: doc.id, ...doc.data() }))
                 .filter((s: any) => s.status !== 'INACTIVE')
+                .filter((s: any) => {
+                    const session = selectedSession || activeFY;
+                    if (!session || selectedSession === 'ALL') return true;
+                    return s.session === session || !s.session;
+                })
                 .sort((a: any, b: any) => a.fullName?.localeCompare(b.fullName));
             setStudents(data);
         } catch (error) {
@@ -670,6 +679,19 @@ const AttendanceManagement: React.FC = () => {
                                 gap: '1rem',
                                 width: '100%'
                             }}>
+                                <div className="input-group" style={{ marginBottom: 0 }}>
+                                    <label className="field-label">SESSION</label>
+                                    <select
+                                        className="input-field"
+                                        value={selectedSession}
+                                        onChange={(e) => setSelectedSession(e.target.value)}
+                                    >
+                                        <option value="ALL">All Sessions</option>
+                                        {schoolYears.map(s => (
+                                            <option key={s} value={s}>{s}{s === activeFY ? ' (Active)' : ''}</option>
+                                        ))}
+                                    </select>
+                                </div>
                                 <div className="input-group" style={{ marginBottom: 0 }}>
                                     <label className="field-label">DATE</label>
                                     <input
