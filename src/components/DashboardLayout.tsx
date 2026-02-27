@@ -24,7 +24,8 @@ import {
     Building2,
     FileQuestion,
     QrCode as QrIcon,
-    Shield
+    Shield,
+    Cake
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
@@ -302,6 +303,7 @@ const menuItems = [
     { to: '/library', icon: BookOpen, label: 'Library', permission: Permission.MANAGE_LIBRARY, roles: ['ADMIN', 'MANAGER'], moduleId: 'library' },
     { to: '/notices', icon: Bell, label: 'Notice Board', permission: Permission.MANAGE_NOTICES, roles: ['ADMIN', 'MANAGER', 'TEACHER'], moduleId: 'notices' },
     { to: '/messages', icon: MessageSquare, label: 'Messages', permission: Permission.VIEW_MESSAGES, roles: ['ADMIN', 'MANAGER'], moduleId: 'communication' },
+    { to: '/birthdays', icon: Cake, label: 'Today\'s Birthday', permission: Permission.VIEW_DASHBOARD, roles: ['ADMIN', 'MANAGER', 'TEACHER'], moduleId: 'birthdays' },
     { to: '/calendar', icon: Calendar, label: 'Calendar', roles: ['ADMIN', 'MANAGER', 'TEACHER', 'DRIVER', 'ACCOUNTANT', 'PARENT'], moduleId: 'calendar' },
     { to: '/routine', icon: Clock, label: 'My Timetable', permission: Permission.VIEW_ROUTINE, roles: ['TEACHER'], moduleId: 'routine' },
     { to: '/routine', icon: Clock, label: 'Routine Management', permission: Permission.MANAGE_ROUTINE, roles: ['ADMIN', 'MANAGER'], moduleId: 'routine' },

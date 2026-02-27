@@ -194,6 +194,45 @@ const EnhancedExamScheduling: React.FC = () => {
     const schoolAssessments = assessmentTypes?.filter(a => a.schoolId === currentSchool?.id && a.isActive) || [];
     const schoolClasses = sortClasses(settings?.filter(s => s.schoolId === currentSchool?.id && s.type === 'class' && s.active !== false) || []);
 
+    // Resolve a stored classId → human readable name.
+    // Priority: (1) exact ID match in schoolClasses, (2) name-based fuzzy match,
+    // (3) derive name from the ID pattern "class_<name>_<schoolId>_<fy>"
+    const resolveClassName = (classId: string): string => {
+        // 1. exact ID match
+        const byId = schoolClasses.find((c: any) => c.id === classId);
+        if (byId) return byId.name;
+        // 2. Try to extract class name from the ID pattern: class_<name_parts>_<schoolId>_<fy>
+        //    e.g. "class_pre_nursery_gmschool_2025_2026" -> "Pre Nursery"
+        //    Strip leading "class_", trailing "_<schoolId>_YYYY_YYYY", then title-case
+        const schoolId = currentSchool?.id || '';
+        // Remove known suffix patterns like _YYYY_YYYY or _YYYY-YYYY
+        const withoutFy = classId.replace(/_\d{4}[_-]\d{4}$/, '').replace(/_\d{4}$/, '');
+        // Remove school ID part
+        const withoutSchool = schoolId ? withoutFy.replace(new RegExp(`_${schoolId}$`, 'i'), '') : withoutFy;
+        // Remove leading "class_"
+        const namePart = withoutSchool.replace(/^class_/, '');
+        if (!namePart || namePart === classId) return classId; // fallback: show raw ID
+        // Title-case: replace underscores with spaces and capitalize
+        const derived = namePart.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        // 3. Try to match derived name against schoolClasses names
+        const byName = schoolClasses.find((c: any) =>
+            (c.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') ===
+            derived.toLowerCase().replace(/[^a-z0-9]/g, '')
+        );
+        return byName ? byName.name : derived;
+    };
+
+    // Check if a stored classId belongs to this school's current schoolClasses.
+    // Uses both ID and name-based matching so stored IDs from any era still resolve.
+    const isClassInSchool = (classId: string): boolean => {
+        if (schoolClasses.some((c: any) => c.id === classId)) return true;
+        const resolvedName = resolveClassName(classId);
+        return schoolClasses.some((c: any) =>
+            (c.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') ===
+            resolvedName.toLowerCase().replace(/[^a-z0-9]/g, '')
+        );
+    };
+
 
     // Get subjects from academic structure in settings
     // The academic structure document ID is: academic_structure_${schoolId}
@@ -243,8 +282,20 @@ const EnhancedExamScheduling: React.FC = () => {
                 return newObj;
             };
 
+            // Only filter orphaned class IDs when schoolClasses has actually loaded.
+            // If schoolClasses is empty (still loading), skip the filter entirely —
+            // otherwise every stored ID looks "orphaned" and gets wiped on save.
+            const validSchoolClassIds = new Set(schoolClasses.map((c: any) => c.id));
+            const shouldFilterOrphans = validSchoolClassIds.size > 0;
+
             const examData = cleanData({
                 ...newExam,
+                targetClasses: shouldFilterOrphans
+                    ? (newExam.targetClasses || []).filter((id: string) => validSchoolClassIds.has(id))
+                    : (newExam.targetClasses || []),
+                classRoutines: shouldFilterOrphans
+                    ? (newExam.classRoutines || []).filter((cr: any) => validSchoolClassIds.has(cr.classId))
+                    : (newExam.classRoutines || []),
                 schoolId: currentSchool.id,
                 updatedAt: new Date().toISOString()
             });
@@ -293,16 +344,14 @@ const EnhancedExamScheduling: React.FC = () => {
 
     // ─── Class Routine Handlers ───────────────────────────────────
     const getClassRoutine = (classId: string): ClassRoutine => {
-        const cls = schoolClasses.find(c => c.id === classId);
         return newExam.classRoutines?.find(cr => cr.classId === classId) || {
             classId,
-            className: cls?.name || classId,
+            className: resolveClassName(classId),
             routine: []
         };
     };
 
     const updateClassRoutine = (classId: string, updatedRoutineOrFn: ClassRoutineEntry[] | ((prevRoutine: ClassRoutineEntry[]) => ClassRoutineEntry[])) => {
-        const cls = schoolClasses.find(c => c.id === classId);
         setNewExam(prev => {
             const existing = prev.classRoutines || [];
             const idx = existing.findIndex(cr => cr.classId === classId);
@@ -314,7 +363,7 @@ const EnhancedExamScheduling: React.FC = () => {
             if (idx >= 0) {
                 updated[idx] = { ...updated[idx], routine: finalRoutine };
             } else {
-                updated.push({ classId, className: cls?.name || classId, routine: finalRoutine });
+                updated.push({ classId, className: resolveClassName(classId), routine: finalRoutine });
             }
             return { ...prev, classRoutines: updated };
         });
@@ -1503,11 +1552,18 @@ const EnhancedExamScheduling: React.FC = () => {
                                     const exam = schoolExams.find(e => e.id === selectedProgramExamId);
                                     if (!exam) return null;
 
-                                    // Filter target classes to teacher's assigned classes only
-                                    const allTargetClasses = sortClasses(schoolClasses.filter(c => exam.targetClasses.includes(c.id)));
+                                    // Build a synthetic class-like list from stored targetClass IDs.
+                                    // This handles both current-format and legacy-format IDs gracefully.
+                                    const rawTargetIds: string[] = exam.targetClasses || [];
+                                    const allTargetClasses = rawTargetIds.map((classId: string) => ({
+                                        id: classId,
+                                        name: resolveClassName(classId)
+                                    }));
+                                    // Sort by resolved name using CLASS_ORDER
+                                    const sortedTargetClasses = sortClasses(allTargetClasses);
                                     const scopedClasses = teacherAssignedClasses.length > 0
-                                        ? allTargetClasses.filter(c => teacherAssignedClasses.includes(c.name))
-                                        : allTargetClasses;
+                                        ? sortedTargetClasses.filter(c => teacherAssignedClasses.includes(c.name))
+                                        : sortedTargetClasses;
 
                                     if (scopedClasses.length === 0) return (
                                         <div style={{
@@ -1520,13 +1576,14 @@ const EnhancedExamScheduling: React.FC = () => {
                                             <AlertCircle size={48} style={{ color: 'var(--text-muted)', marginBottom: '1rem' }} />
                                             <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.5rem' }}>No Classes Found</h3>
                                             <p style={{ color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto', lineHeight: 1.6 }}>
-                                                This exam doesn't cover any of your assigned classes, or class assignments haven't been set up yet.
+                                                This exam doesn't cover any classes. Please edit the exam and add applicable classes.
                                             </p>
                                         </div>
                                     );
 
                                     return scopedClasses.map(cls => {
-                                        const routine = exam.classRoutines?.find(r => r.classId === cls.id)?.routine ||
+                                        // Match classRoutines by the stored classId (works for any ID format)
+                                        const routine = exam.classRoutines?.find((r: any) => r.classId === cls.id)?.routine ||
                                             (exam.subjects?.length > 0 ? exam.subjects : []);
 
                                         if (routine.length === 0) return (
@@ -1970,7 +2027,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                 </div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
                                                     <div style={{ color: '#10b981' }}><Users size={18} /></div>
-                                                    <span>{exam.targetClasses.length} Classes</span>
+                                                    <span>{(exam.targetClasses || []).length} Classes</span>
                                                 </div>
 
                                             </div>
@@ -2017,8 +2074,12 @@ const EnhancedExamScheduling: React.FC = () => {
                                             </button>
                                             <button
                                                 onClick={() => {
+                                                    // Load exam as-is — do NOT filter class IDs here.
+                                                    // Orphan filtering (if needed) happens only on save,
+                                                    // and only when schoolClasses has actually loaded.
                                                     setEditingExam(exam);
-                                                    setNewExam(exam);
+                                                    setNewExam({ ...exam });
+                                                    setActiveRoutineClassId('');
                                                     setShowModal(true);
                                                 }}
                                                 className="btn-icon"
@@ -2215,10 +2276,14 @@ const EnhancedExamScheduling: React.FC = () => {
                                 const exam = schoolExams.find(e => e.id === selectedProgramExamId);
                                 if (!exam) return null;
 
-                                const targetClasses = sortClasses(schoolClasses.filter(c => exam.targetClasses.includes(c.id)));
+                                const rawTargetIds: string[] = exam.targetClasses || [];
+                                const targetClasses = sortClasses(rawTargetIds.map((classId: string) => ({
+                                    id: classId,
+                                    name: resolveClassName(classId)
+                                })));
 
                                 return targetClasses.map(cls => {
-                                    const routine = exam.classRoutines?.find(r => r.classId === cls.id)?.routine ||
+                                    const routine = exam.classRoutines?.find((r: any) => r.classId === cls.id)?.routine ||
                                         (exam.subjects?.length > 0 ? exam.subjects : []);
 
                                     if (routine.length === 0) return (
@@ -2652,45 +2717,63 @@ const EnhancedExamScheduling: React.FC = () => {
                                                 border: '1px solid var(--border)',
                                                 borderRadius: '1rem'
                                             }}>
-                                                {schoolClasses.map(cls => (
-                                                    <label
-                                                        key={cls.id}
-                                                        style={{
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: '0.625rem',
-                                                            cursor: 'pointer',
-                                                            padding: '0.75rem',
-                                                            borderRadius: '0.75rem',
-                                                            background: newExam.targetClasses?.includes(cls.id) ? '#6366f110' : 'transparent',
-                                                            border: '1px solid',
-                                                            borderColor: newExam.targetClasses?.includes(cls.id) ? '#6366f130' : 'transparent',
-                                                            transition: 'all 0.2s'
-                                                        }}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={newExam.targetClasses?.includes(cls.id) || false}
-                                                            onChange={(e) => {
-                                                                if (e.target.checked) {
-                                                                    setNewExam({
-                                                                        ...newExam,
-                                                                        targetClasses: [...(newExam.targetClasses || []), cls.id]
-                                                                    });
-                                                                } else {
-                                                                    setNewExam({
-                                                                        ...newExam,
-                                                                        targetClasses: newExam.targetClasses?.filter(id => id !== cls.id)
-                                                                    });
-                                                                }
+                                                {schoolClasses.map(cls => {
+                                                    // Check by direct ID match OR by name match
+                                                    // (handles stored IDs from older format)
+                                                    const isChecked = (newExam.targetClasses || []).some(storedId => {
+                                                        if (storedId === cls.id) return true;
+                                                        // Name-based fallback
+                                                        return resolveClassName(storedId).toLowerCase().replace(/[^a-z0-9]/g, '') ===
+                                                            (cls.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                                    });
+                                                    return (
+                                                        <label
+                                                            key={cls.id}
+                                                            style={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.625rem',
+                                                                cursor: 'pointer',
+                                                                padding: '0.75rem',
+                                                                borderRadius: '0.75rem',
+                                                                background: isChecked ? '#6366f110' : 'transparent',
+                                                                border: '1px solid',
+                                                                borderColor: isChecked ? '#6366f130' : 'transparent',
+                                                                transition: 'all 0.2s'
                                                             }}
-                                                            style={{ width: '1.125rem', height: '1.125rem', accentColor: '#6366f1' }}
-                                                        />
-                                                        <span style={{ fontSize: '0.875rem', fontWeight: 600, color: newExam.targetClasses?.includes(cls.id) ? '#4338ca' : 'var(--text-main)' }}>
-                                                            {cls.name}
-                                                        </span>
-                                                    </label>
-                                                ))}
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isChecked}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        // Add this class's current ID, replacing any old-format ID for same class
+                                                                        const filtered = (newExam.targetClasses || []).filter(storedId => {
+                                                                            if (storedId === cls.id) return false;
+                                                                            return resolveClassName(storedId).toLowerCase().replace(/[^a-z0-9]/g, '') !==
+                                                                                (cls.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                                                        });
+                                                                        setNewExam({ ...newExam, targetClasses: [...filtered, cls.id] });
+                                                                    } else {
+                                                                        // Remove any stored ID that resolves to this class name
+                                                                        setNewExam({
+                                                                            ...newExam,
+                                                                            targetClasses: (newExam.targetClasses || []).filter(storedId => {
+                                                                                if (storedId === cls.id) return false;
+                                                                                return resolveClassName(storedId).toLowerCase().replace(/[^a-z0-9]/g, '') !==
+                                                                                    (cls.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                                                            })
+                                                                        });
+                                                                    }
+                                                                }}
+                                                                style={{ width: '1.125rem', height: '1.125rem', accentColor: '#6366f1' }}
+                                                            />
+                                                            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: isChecked ? '#4338ca' : 'var(--text-main)' }}>
+                                                                {cls.name}
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     </div>
@@ -3116,46 +3199,57 @@ const EnhancedExamScheduling: React.FC = () => {
                                         paddingBottom: '0.5rem',
                                         borderBottom: '1px solid var(--border)'
                                     }}>
-                                        {(newExam.targetClasses || []).map(classId => {
-                                            const cls = schoolClasses.find(c => c.id === classId);
-                                            const isActive = activeRoutineClassId === classId;
-                                            const routineCount = getClassRoutine(classId).routine.length;
-                                            return (
-                                                <button
-                                                    key={classId}
-                                                    onClick={() => setActiveRoutineClassId(classId)}
-                                                    style={{
-                                                        padding: '0.75rem 1.25rem',
-                                                        borderRadius: '0.75rem',
-                                                        background: isActive ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : 'white',
-                                                        color: isActive ? 'white' : 'var(--text-main)',
-                                                        border: isActive ? 'none' : '1px solid var(--border)',
-                                                        fontWeight: 700,
-                                                        fontSize: '0.875rem',
-                                                        whiteSpace: 'nowrap',
-                                                        cursor: 'pointer',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '0.5rem',
-                                                        boxShadow: isActive ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none',
-                                                        transition: 'all 0.2s'
-                                                    }}
-                                                >
-                                                    {cls?.name || classId}
-                                                    {routineCount > 0 && (
-                                                        <span style={{
-                                                            background: isActive ? 'rgba(255,255,255,0.2)' : '#6366f115',
-                                                            color: isActive ? 'white' : '#6366f1',
-                                                            padding: '0.125rem 0.5rem',
-                                                            borderRadius: '999px',
-                                                            fontSize: '0.75rem'
-                                                        }}>
-                                                            {routineCount}
-                                                        </span>
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
+                                        {(() => {
+                                            // Show ALL stored targetClass IDs — resolveClassName handles
+                                            // both current-format and legacy-format IDs gracefully.
+                                            const allClassIds = newExam.targetClasses || [];
+                                            // Auto-set first class if none selected
+                                            if (activeRoutineClassId &&
+                                                !allClassIds.includes(activeRoutineClassId) &&
+                                                allClassIds.length > 0) {
+                                                setTimeout(() => setActiveRoutineClassId(allClassIds[0]), 0);
+                                            }
+                                            return allClassIds.map(classId => {
+                                                const resolvedName = resolveClassName(classId);
+                                                const isActive = activeRoutineClassId === classId;
+                                                const routineCount = getClassRoutine(classId).routine.length;
+                                                return (
+                                                    <button
+                                                        key={classId}
+                                                        onClick={() => setActiveRoutineClassId(classId)}
+                                                        style={{
+                                                            padding: '0.75rem 1.25rem',
+                                                            borderRadius: '0.75rem',
+                                                            background: isActive ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : 'white',
+                                                            color: isActive ? 'white' : 'var(--text-main)',
+                                                            border: isActive ? 'none' : '1px solid var(--border)',
+                                                            fontWeight: 700,
+                                                            fontSize: '0.875rem',
+                                                            whiteSpace: 'nowrap',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.5rem',
+                                                            boxShadow: isActive ? '0 4px 12px rgba(99, 102, 241, 0.2)' : 'none',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                    >
+                                                        {resolvedName}
+                                                        {routineCount > 0 && (
+                                                            <span style={{
+                                                                background: isActive ? 'rgba(255,255,255,0.2)' : '#6366f115',
+                                                                color: isActive ? 'white' : '#6366f1',
+                                                                padding: '0.125rem 0.5rem',
+                                                                borderRadius: '999px',
+                                                                fontSize: '0.75rem'
+                                                            }}>
+                                                                {routineCount}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })
+                                        })()}
                                     </div>
 
                                     {activeRoutineClassId ? (
@@ -3163,7 +3257,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                                                 <div>
                                                     <h4 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                                                        Program for {schoolClasses.find(c => c.id === activeRoutineClassId)?.name || activeRoutineClassId}
+                                                        Program for {resolveClassName(activeRoutineClassId)}
                                                     </h4>
                                                     <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                                                         Define subjects and schedule for this specific class.
@@ -3181,7 +3275,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                 }}
                                                             >
                                                                 <option value="">Copy From...</option>
-                                                                {newExam.targetClasses.filter(id => id !== activeRoutineClassId).map(id => (
+                                                                {newExam.targetClasses.filter(id => id !== activeRoutineClassId && schoolClasses.some((c: any) => c.id === id)).map(id => (
                                                                     <option key={id} value={id}>{schoolClasses.find(c => c.id === id)?.name || id}</option>
                                                                 ))}
                                                             </select>

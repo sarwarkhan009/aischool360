@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     Save,
@@ -10,11 +10,12 @@ import {
     Edit,
     Plus,
     X,
-    Copy
+    Copy,
+    Clock
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, deleteDoc, writeBatch, getDoc, setDoc } from 'firebase/firestore';
 import { getActiveClasses, CLASS_ORDER, sortClasses } from '../../constants/app';
 import { formatClassName } from '../../utils/formatters';
 import { useSchool } from '../../context/SchoolContext';
@@ -54,6 +55,66 @@ const SetFeeAmount: React.FC = () => {
     // Edit Modal State
     const [editingClass, setEditingClass] = useState<string | null>(null);
     const [showEditModal, setShowEditModal] = useState(false);
+
+    // Late Fine Settings State
+    const [lateFineSettings, setLateFineSettings] = useState({
+        slab1StartDay: 15,
+        slab1EndDay: 20,
+        slab1Amount: 50,
+        slab2EndDay: 27,
+        slab2Amount: 100,
+        slab3Amount: 150,
+    });
+    const [savingLateFine, setSavingLateFine] = useState(false);
+
+    // Load Late Fine Settings from Firestore
+    useEffect(() => {
+        const loadLateFineSettings = async () => {
+            const schoolIdToUse = currentSchool?.id || schoolId;
+            if (!schoolIdToUse) return;
+            try {
+                const docRef = doc(db, 'schools', schoolIdToUse, 'settings', 'late_fine_settings');
+                const snap = await getDoc(docRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    setLateFineSettings({
+                        slab1StartDay: data.slab1StartDay ?? 15,
+                        slab1EndDay: data.slab1EndDay ?? 20,
+                        slab1Amount: data.slab1Amount ?? 50,
+                        slab2EndDay: data.slab2EndDay ?? 27,
+                        slab2Amount: data.slab2Amount ?? 100,
+                        slab3Amount: data.slab3Amount ?? 150,
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading late fine settings:', e);
+            }
+        };
+        loadLateFineSettings();
+    }, [currentSchool?.id, schoolId]);
+
+    // Save Late Fine Settings
+    const handleSaveLateFine = async () => {
+        const schoolIdToUse = currentSchool?.id || schoolId;
+        if (!schoolIdToUse) { alert('School not found'); return; }
+        setSavingLateFine(true);
+        try {
+            const docRef = doc(db, 'schools', schoolIdToUse, 'settings', 'late_fine_settings');
+            await setDoc(docRef, { ...lateFineSettings, updatedAt: new Date().toISOString() }, { merge: true });
+            alert('Late Fine settings saved successfully!');
+        } catch (e) {
+            alert('Error saving: ' + (e as Error).message);
+        } finally {
+            setSavingLateFine(false);
+        }
+    };
+
+    // Calculate today's auto late fine (for live preview)
+    const todayDay = new Date().getDate();
+    let previewLateFine = 0;
+    if (todayDay >= lateFineSettings.slab1StartDay && todayDay < lateFineSettings.slab1EndDay) previewLateFine = lateFineSettings.slab1Amount;
+    else if (todayDay >= lateFineSettings.slab1EndDay && todayDay < lateFineSettings.slab2EndDay) previewLateFine = lateFineSettings.slab2Amount;
+    else if (todayDay >= lateFineSettings.slab2EndDay) previewLateFine = lateFineSettings.slab3Amount;
 
     // Multiple fee rows state
     interface FeeRow {
@@ -1295,6 +1356,178 @@ const SetFeeAmount: React.FC = () => {
                     `}</style>
                 </>
             )}
+
+            {/* Late Fine Settings Section */}
+            <div className="glass-card" style={{ padding: '2rem', marginTop: '2rem' }}>
+                <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid var(--border)' }}>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Clock size={20} style={{ color: '#f59e0b' }} />
+                        Late Fine Settings
+                    </h2>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                        Configure date-based late fine slabs. These apply automatically when collecting Late Fee.
+                    </p>
+                </div>
+
+                {/* Live Preview Banner */}
+                <div style={{
+                    background: previewLateFine > 0
+                        ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)'
+                        : 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                    border: `1px solid ${previewLateFine > 0 ? '#f59e0b' : '#86efac'}`,
+                    borderRadius: '12px',
+                    padding: '1rem 1.5rem',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem'
+                }}>
+                    <span style={{ fontSize: '1.5rem' }}>{previewLateFine > 0 ? '⚠️' : '✅'}</span>
+                    <div>
+                        <div style={{ fontWeight: 800, color: previewLateFine > 0 ? '#92400e' : '#166534', fontSize: '0.9375rem' }}>
+                            Today is Day {todayDay} of the month
+                        </div>
+                        <div style={{ fontSize: '0.8125rem', color: previewLateFine > 0 ? '#a16207' : '#15803d', marginTop: '2px' }}>
+                            {previewLateFine > 0
+                                ? `Auto Late Fine = ₹${previewLateFine} will be applied`
+                                : 'No late fine applies today (before slab 1 start day)'}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Slabs Configuration */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
+                    {/* Slab 1 */}
+                    <div style={{ background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '12px', padding: '1.25rem' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#d97706', textTransform: 'uppercase', marginBottom: '1rem', letterSpacing: '0.05em' }}>
+                            🟡 Slab 1
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>Start Day</label>
+                                <input type="number" min={1} max={31} className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 700, textAlign: 'center', border: '1px solid rgba(245, 158, 11, 0.4)' }}
+                                    value={lateFineSettings.slab1StartDay}
+                                    onChange={e => setLateFineSettings(prev => ({ ...prev, slab1StartDay: Number(e.target.value) }))}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>End Day (exclusive)</label>
+                                <input type="number" min={1} max={31} className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 700, textAlign: 'center', border: '1px solid rgba(245, 158, 11, 0.4)' }}
+                                    value={lateFineSettings.slab1EndDay}
+                                    onChange={e => setLateFineSettings(prev => ({ ...prev, slab1EndDay: Number(e.target.value) }))}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>Fine Amount (₹)</label>
+                                <input type="number" min={0} className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 800, textAlign: 'center', border: '2px solid #f59e0b', background: 'rgba(245, 158, 11, 0.05)', color: '#92400e' }}
+                                    value={lateFineSettings.slab1Amount}
+                                    onChange={e => setLateFineSettings(prev => ({ ...prev, slab1Amount: Number(e.target.value) }))}
+                                />
+                            </div>
+                        </div>
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: '#a16207', textAlign: 'center', fontWeight: 600 }}>
+                            Day {lateFineSettings.slab1StartDay} – {lateFineSettings.slab1EndDay - 1} → ₹{lateFineSettings.slab1Amount}
+                        </div>
+                    </div>
+
+                    {/* Slab 2 */}
+                    <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '12px', padding: '1.25rem' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#dc2626', textTransform: 'uppercase', marginBottom: '1rem', letterSpacing: '0.05em' }}>
+                            🟠 Slab 2
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>Start Day (= Slab 1 End)</label>
+                                <input type="number" disabled className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 700, textAlign: 'center', background: '#f8fafc', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#94a3b8' }}
+                                    value={lateFineSettings.slab1EndDay}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>End Day (exclusive)</label>
+                                <input type="number" min={1} max={31} className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 700, textAlign: 'center', border: '1px solid rgba(239, 68, 68, 0.4)' }}
+                                    value={lateFineSettings.slab2EndDay}
+                                    onChange={e => setLateFineSettings(prev => ({ ...prev, slab2EndDay: Number(e.target.value) }))}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>Fine Amount (₹)</label>
+                                <input type="number" min={0} className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 800, textAlign: 'center', border: '2px solid #ef4444', background: 'rgba(239, 68, 68, 0.05)', color: '#991b1b' }}
+                                    value={lateFineSettings.slab2Amount}
+                                    onChange={e => setLateFineSettings(prev => ({ ...prev, slab2Amount: Number(e.target.value) }))}
+                                />
+                            </div>
+                        </div>
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: '#b91c1c', textAlign: 'center', fontWeight: 600 }}>
+                            Day {lateFineSettings.slab1EndDay} – {lateFineSettings.slab2EndDay - 1} → ₹{lateFineSettings.slab2Amount}
+                        </div>
+                    </div>
+
+                    {/* Slab 3 */}
+                    <div style={{ background: 'rgba(139, 92, 246, 0.05)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '12px', padding: '1.25rem' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#7c3aed', textTransform: 'uppercase', marginBottom: '1rem', letterSpacing: '0.05em' }}>
+                            🔴 Slab 3
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>Start Day (= Slab 2 End)</label>
+                                <input type="number" disabled className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 700, textAlign: 'center', background: '#f8fafc', border: '1px solid rgba(139, 92, 246, 0.2)', color: '#94a3b8' }}
+                                    value={lateFineSettings.slab2EndDay}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>End Day</label>
+                                <input type="number" disabled className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 700, textAlign: 'center', background: '#f8fafc', border: '1px solid rgba(139, 92, 246, 0.2)', color: '#94a3b8' }}
+                                    value={31}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>Fine Amount (₹)</label>
+                                <input type="number" min={0} className="input-field"
+                                    style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', fontWeight: 800, textAlign: 'center', border: '2px solid #8b5cf6', background: 'rgba(139, 92, 246, 0.05)', color: '#5b21b6' }}
+                                    value={lateFineSettings.slab3Amount}
+                                    onChange={e => setLateFineSettings(prev => ({ ...prev, slab3Amount: Number(e.target.value) }))}
+                                />
+                            </div>
+                        </div>
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: '#5b21b6', textAlign: 'center', fontWeight: 600 }}>
+                            Day {lateFineSettings.slab2EndDay}+ → ₹{lateFineSettings.slab3Amount}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Save Button */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={handleSaveLateFine}
+                        disabled={savingLateFine}
+                        style={{
+                            background: savingLateFine ? '#94a3b8' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                            color: 'white',
+                            padding: '0.875rem 2rem',
+                            fontSize: '1rem',
+                            fontWeight: 700,
+                            borderRadius: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            cursor: savingLateFine ? 'not-allowed' : 'pointer',
+                            border: 'none',
+                            boxShadow: '0 4px 15px rgba(245, 158, 11, 0.3)',
+                        }}
+                    >
+                        <Save size={18} />
+                        {savingLateFine ? 'Saving...' : 'Save Late Fine Settings'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 };

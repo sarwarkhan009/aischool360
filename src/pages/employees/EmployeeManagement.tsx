@@ -21,6 +21,7 @@ interface Employee {
     loginPin?: string;
     baseSalary: number;
     joiningDate: string;
+    dob?: string;
     subjects?: string[];
     teachingClasses?: string[];
     fromClass?: string;
@@ -39,6 +40,7 @@ const EmployeeManagement: React.FC = () => {
     const [rawAcademicSubjects, setRawAcademicSubjects] = useState<any[]>([]);
     const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedBirthMonth, setSelectedBirthMonth] = useState('');
 
     const [formData, setFormData] = useState({
         name: '',
@@ -48,6 +50,7 @@ const EmployeeManagement: React.FC = () => {
         email: '',
         baseSalary: 0,
         joiningDate: new Date().toISOString().split('T')[0],
+        dob: '',
         subjects: [] as string[],
         teachingClasses: [] as string[],
         fromClass: '',
@@ -103,6 +106,7 @@ const EmployeeManagement: React.FC = () => {
                 email: employee.email || '',
                 baseSalary: employee.baseSalary || 0,
                 joiningDate: employee.joiningDate || new Date().toISOString().split('T')[0],
+                dob: employee.dob || '',
                 subjects: employee.subjects || [],
                 teachingClasses: employee.teachingClasses || (employee.fromClass ? [employee.fromClass, employee.toClass].filter(Boolean) as string[] : []),
                 fromClass: employee.fromClass || '',
@@ -118,6 +122,7 @@ const EmployeeManagement: React.FC = () => {
                 email: '',
                 baseSalary: 0,
                 joiningDate: new Date().toISOString().split('T')[0],
+                dob: '',
                 subjects: [],
                 teachingClasses: [],
                 fromClass: '',
@@ -263,7 +268,17 @@ Thank you!`;
             id.toLowerCase().includes(searchTerm.toLowerCase()) ||
             mobile.includes(searchTerm);
 
-        return matchesSearch;
+        let matchesBirthMonth = true;
+        if (selectedBirthMonth) {
+            if (emp.dob) {
+                const dobDate = new Date(emp.dob);
+                matchesBirthMonth = !isNaN(dobDate.getTime()) && (dobDate.getMonth() + 1) === parseInt(selectedBirthMonth);
+            } else {
+                matchesBirthMonth = false;
+            }
+        }
+
+        return matchesSearch && matchesBirthMonth;
     })
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
         .map(emp => {
@@ -305,6 +320,26 @@ Thank you!`;
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
+                    <select
+                        className="input-field"
+                        style={{ padding: '0.5rem', width: 'auto', background: 'white', border: '1px solid var(--border)' }}
+                        value={selectedBirthMonth}
+                        onChange={(e) => setSelectedBirthMonth(e.target.value)}
+                    >
+                        <option value="">Birthday Month</option>
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
                 </div>
 
                 <div style={{ overflowX: 'auto' }}>
@@ -516,6 +551,11 @@ Thank you!`;
                             <div className="input-group">
                                 <label className="field-label">Joining Date *</label>
                                 <input type="date" className="input-field" required value={formData.joiningDate} onChange={e => setFormData({ ...formData, joiningDate: e.target.value })} />
+                            </div>
+
+                            <div className="input-group">
+                                <label className="field-label">Date of Birth</label>
+                                <input type="date" className="input-field" value={formData.dob} onChange={e => setFormData({ ...formData, dob: e.target.value })} />
                             </div>
 
                             {formData.employeeType === 'Teacher' && (

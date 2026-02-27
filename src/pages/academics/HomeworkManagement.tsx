@@ -238,7 +238,13 @@ const HomeworkManagement: React.FC = () => {
             let q = query(studentsRef, where('schoolId', '==', currentSchool?.id), where('class', '==', hw.class));
             if (hw.section && hw.section !== 'All Sections') q = query(q, where('section', '==', hw.section));
             const snap = await getDocs(q);
-            const studentData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((s: any) => s.status !== 'INACTIVE');
+            const studentData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                .filter((s: any) => s.status !== 'INACTIVE')
+                .sort((a: any, b: any) => {
+                    const rollA = parseInt(a.classRollNo) || 0;
+                    const rollB = parseInt(b.classRollNo) || 0;
+                    return rollA - rollB;
+                });
             setStudentsForSubmission(studentData);
 
             // Fetch existing submissions
@@ -612,8 +618,8 @@ const HomeworkManagement: React.FC = () => {
             {
                 submissionModal?.open && (
                     <div className="submission-modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.75rem' }}>
-                        <div className="glass-card animate-scale-in submission-modal-container" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: 'white', borderRadius: 'var(--radius-lg)' }}>
-                            <div className="submission-modal-header" style={{ padding: '1rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                        <div className="glass-card animate-scale-in submission-modal-container" style={{ width: '100%', maxWidth: '650px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: 'white', borderRadius: 'var(--radius-lg)', padding: 0 }}>
+                            <div className="submission-modal-header" style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
                                 <div style={{ minWidth: 0, flex: 1 }}>
                                     <h2 style={{ fontWeight: 900, fontSize: '1.125rem', marginBottom: '0.25rem' }}>Mark Completion</h2>
                                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Class {submissionModal.className} {submissionModal.section ? `- ${submissionModal.section}` : ''}</p>
@@ -652,6 +658,7 @@ const HomeworkManagement: React.FC = () => {
                                                                         fontWeight: 900,
                                                                         cursor: 'pointer',
                                                                         transition: 'all 0.2s',
+                                                                        whiteSpace: 'nowrap',
                                                                         ...getStatusStyle(existingSubmissions[s.id] || 'PENDING', 'COMPLETED')
                                                                     }}
                                                                 >
@@ -666,6 +673,7 @@ const HomeworkManagement: React.FC = () => {
                                                                         fontWeight: 900,
                                                                         cursor: 'pointer',
                                                                         transition: 'all 0.2s',
+                                                                        whiteSpace: 'nowrap',
                                                                         ...getStatusStyle(existingSubmissions[s.id] || 'PENDING', 'PARTIAL')
                                                                     }}
                                                                 >
@@ -680,6 +688,7 @@ const HomeworkManagement: React.FC = () => {
                                                                         fontWeight: 900,
                                                                         cursor: 'pointer',
                                                                         transition: 'all 0.2s',
+                                                                        whiteSpace: 'nowrap',
                                                                         ...getStatusStyle(existingSubmissions[s.id] || 'PENDING', 'NOT_DONE')
                                                                     }}
                                                                 >

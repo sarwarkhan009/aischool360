@@ -81,7 +81,7 @@ const SyllabusManager: React.FC = () => {
 
     const schoolExams = exams?.filter((e: any) => e.schoolId === currentSchool?.id) || [];
     const selectedExam = schoolExams.find((e: any) => e.id === selectedExamId);
-    const availableClasses = selectedExam?.targetClasses || [];
+    const availableClasses = (selectedExam?.targetClasses || []).filter((c: string) => activeClasses.some((ac: any) => ac.id === c));
     const availableSubjects = selectedExam?.subjects || [];
 
     const existingSyllabus = syllabuses?.find(s =>

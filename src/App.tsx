@@ -15,6 +15,7 @@ import Transport from './pages/transport/Transport';
 import DriverTracking from './pages/transport/DriverTracking';
 import NoticeBoard from './pages/communication/NoticeBoard';
 import MessageCenter from './pages/communication/MessageCenter';
+import BirthdayManager from './pages/communication/BirthdayManager';
 import ReportsCenter from './pages/reports/ReportsCenter';
 import StudentReport from './pages/students/StudentReport';
 import ReRegReport from './pages/students/ReRegReport';
@@ -300,6 +301,7 @@ const AuthWrapper = () => {
             <Route path="library" element={<ProtectedRoute requiredPermission={Permission.MANAGE_LIBRARY}><LibraryManagement /></ProtectedRoute>} />
             <Route path="notices" element={<NoticeBoard />} />
             <Route path="messages" element={<ProtectedRoute requiredPermission={Permission.VIEW_MESSAGES}><MessageCenter /></ProtectedRoute>} />
+            <Route path="birthdays" element={<ProtectedRoute requiredPermission={Permission.VIEW_DASHBOARD}><BirthdayManager /></ProtectedRoute>} />
             <Route path="teaching-logs" element={<ProtectedRoute requiredPermission={Permission.VIEW_TEACHING_LOGS}><TeachingLogReports /></ProtectedRoute>} />
             <Route path="profile" element={<UserProfile />} />
 

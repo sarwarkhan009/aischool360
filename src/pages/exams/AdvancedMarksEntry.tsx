@@ -19,10 +19,11 @@ import {
     Book
 } from 'lucide-react';
 import { useFirestore } from '../../hooks/useFirestore';
-import { sortClasses } from '../../constants/app';
+import { sortClasses, getActiveClasses } from '../../constants/app';
 import { useSchool } from '../../context/SchoolContext';
 import { useAuth } from '../../context/AuthContext';
 import * as XLSX from 'xlsx';
+import { toProperCase, formatClassName, resolveClassName, subjectMatches } from '../../utils/formatters';
 
 interface StudentMarks {
     studentId: string;
@@ -81,11 +82,41 @@ const AdvancedMarksEntry: React.FC = () => {
     const { data: allSettings } = useFirestore<any>('settings');
     const { data: teachers } = useFirestore<any>('teachers');
 
+    // All active classes (no year filter) – used for resolving names
     const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || []);
 
     const [selectedExam, setSelectedExam] = useState<string>('');
     const [selectedClass, setSelectedClass] = useState<string>('');
     const [selectedSection, setSelectedSection] = useState<string>('');
+
+    // Classes with merged sections across ALL year-settings documents for each class name.
+    // This ensures sections don't go missing when exam.financialYear is absent or class
+    // settings are split across multiple Firestore documents (one per year).
+    const classesForSections = React.useMemo(() => {
+        const rawClasses = allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || [];
+        const examDetail = exams?.find((e: any) => e.id === selectedExam);
+
+        // Group by normalised class name and merge sections
+        const nameMap = new Map<string, { obj: any; sections: Set<string> }>();
+        for (const cls of rawClasses) {
+            // Filter out classes belonging to other financial years if the exam spans a specific year
+            if (examDetail?.academicYearName && cls.financialYear && cls.financialYear !== examDetail.academicYearName) {
+                continue;
+            }
+
+            const key = (cls.name || '').trim().toLowerCase();
+            if (!nameMap.has(key)) {
+                nameMap.set(key, { obj: cls, sections: new Set(cls.sections || []) });
+            } else {
+                (cls.sections || []).forEach((s: string) => nameMap.get(key)!.sections.add(s));
+            }
+        }
+        return sortClasses(Array.from(nameMap.values()).map(({ obj, sections }) => ({
+            ...obj,
+            sections: Array.from(sections).sort()
+        })));
+    }, [allSettings, exams, selectedExam]);
+
     const [importPreview, setImportPreview] = useState<{
         matches: any[];
         errors: string[];
@@ -120,12 +151,16 @@ const AdvancedMarksEntry: React.FC = () => {
     const defaultGrading = gradingSystems?.find((g: any) => g.schoolId === currentSchool?.id && g.isDefault);
 
     // Get selected exam details
-    const examDetails = schoolExams.find(e => e.id === selectedExam);
-    const availableClasses = examDetails?.targetClasses || [];
+    const examDetails = exams?.find((e: any) => e.id === selectedExam);
+    // Resolve a class ID to a human-readable name.
+    const resolveClass = (id: string) => resolveClassName(id, activeClasses);
 
-    // Prioritize class-specific routine subjects, fallback to global subjects
+    // All stored targetClass IDs for the selected exam — no filtering by activeClasses ID match.
+    // This preserves legacy-format IDs that resolve correctly via resolveClass.
+    const availableClasses: string[] = examDetails?.targetClasses || [];
+
     const classRoutine = examDetails?.classRoutines?.find((cr: any) =>
-        cr.classId === selectedClass || cr.className === getClassName(selectedClass)
+        cr.classId === selectedClass || cr.className === resolveClass(selectedClass)
     );
 
     const availableSubjects = (selectedClass && classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
@@ -137,13 +172,15 @@ const AdvancedMarksEntry: React.FC = () => {
 
     // Load students for selected class
     const selectedClassObj = activeClasses.find((c: any) => c.id === selectedClass);
-    const selectedClassName = selectedClassObj?.name;
+    // Use resolved class name (handles legacy IDs that don't have exact ID match)
+    const selectedClassName = selectedClassObj?.name || resolveClass(selectedClass);
 
     const classStudents = (students?.filter((s: any) =>
         s.schoolId === currentSchool?.id &&
         (s.class === selectedClass || (selectedClassName && s.class === selectedClassName)) &&
         s.status === 'ACTIVE' &&
-        (!selectedSection || s.section === selectedSection)
+        (!selectedSection || s.section === selectedSection) &&
+        (!examDetails?.academicYearName || s.session === examDetails.academicYearName)
     ) || []).sort((a: any, b: any) => {
         const rollA = a.classRollNo || a.rollNo || a.admissionNumber || '';
         const rollB = b.classRollNo || b.rollNo || b.admissionNumber || '';
@@ -156,13 +193,31 @@ const AdvancedMarksEntry: React.FC = () => {
         if (isSavingRef.current) return;
 
         if (selectedExam && selectedClass && selectedSubject) {
-            const existing = marksEntries?.find(entry =>
-                entry.examId === selectedExam &&
-                entry.classId === selectedClass &&
-                (!selectedSection || entry.sectionId === selectedSection || entry.sectionName === selectedSection) &&
-                entry.subjectId === selectedSubject &&
-                entry.schoolId === currentSchool?.id
-            );
+            const subjectDetailForMatch = availableSubjects.find((s: any) => s.subjectId === selectedSubject);
+            const subjectNameForMatch = (subjectDetailForMatch?.subjectName || '').toUpperCase().trim();
+            const cleanSubName = subjectNameForMatch.replace(/[\s./-]/g, '');
+
+            // Flexible match — handles legacy classIds and abbreviated subjectNames
+            const existing = marksEntries?.find((entry: any) => {
+                if (entry.examId !== selectedExam) return false;
+                if (entry.schoolId !== currentSchool?.id) return false;
+                if (selectedSection && entry.sectionId !== selectedSection && entry.sectionName !== selectedSection) return false;
+
+                // Class match: by stored ID or by resolved name
+                const classMatch =
+                    entry.classId === selectedClass ||
+                    entry.className === selectedClassName ||
+                    entry.classId === selectedClassName;
+                if (!classMatch) return false;
+
+                // Subject match: strict ID first, then fuzzy name fallback
+                if (entry.subjectId === selectedSubject) return true;
+                if (cleanSubName) {
+                    const entrySubName = entry.subjectName || '';
+                    return subjectMatches(entrySubName, subjectDetails?.subjectName || subjectDetails?.name || '', subjectDetails?.combinedSubjects);
+                }
+                return false;
+            });
 
             if (existing) {
                 setCurrentEntry(existing);
@@ -187,7 +242,7 @@ const AdvancedMarksEntry: React.FC = () => {
                 }
             }
         }
-    }, [selectedExam, selectedClass, selectedSubject, marksEntries]);
+    }, [selectedExam, selectedClass, selectedSubject, selectedSection, marksEntries]);
 
     // Reset isEditing when selection changes so fresh data loads properly
     useEffect(() => {
@@ -784,7 +839,7 @@ const AdvancedMarksEntry: React.FC = () => {
                         >
                             <option value="">Choose Class</option>
                             {availableClasses.map((clsId: string) => (
-                                <option key={clsId} value={clsId}>{getClassName(clsId)}</option>
+                                <option key={clsId} value={clsId}>{resolveClass(clsId)}</option>
                             ))}
                         </select>
                     </div>
@@ -798,7 +853,11 @@ const AdvancedMarksEntry: React.FC = () => {
                             disabled={!selectedClass}
                         >
                             <option value="">All Sections</option>
-                            {activeClasses.find((c: any) => c.id === selectedClass || c.name === selectedClass)?.sections?.map((sec: string) => (
+                            {classesForSections.find((c: any) =>
+                                c.id === selectedClass ||
+                                c.name === selectedClass ||
+                                c.name === selectedClassName
+                            )?.sections?.map((sec: string) => (
                                 <option key={sec} value={sec}>{sec}</option>
                             ))}
                         </select>
@@ -819,7 +878,7 @@ const AdvancedMarksEntry: React.FC = () => {
                                     : '';
                                 return (
                                     <option key={subject.subjectId} value={subject.subjectId}>
-                                        {subject.subjectName}{combinedNames} (Max: {subject.maxMarks})
+                                        {subject.subjectName}{combinedNames} {subject.assessmentType === 'GRADE' ? '(Grade Based)' : `(Max: ${subject.maxMarks})`}
                                     </option>
                                 );
                             })}
@@ -976,7 +1035,9 @@ const AdvancedMarksEntry: React.FC = () => {
                                     <tr style={{ background: 'var(--bg-main)', borderBottom: '2px solid var(--border)' }}>
                                         <th style={{ padding: '1rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 700 }}>Roll No.</th>
                                         <th style={{ padding: '1rem', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 700 }}>Student Name</th>
-                                        <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Total Marks</th>
+                                        {subjectDetails?.assessmentType !== 'GRADE' && (
+                                            <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Total Marks</th>
+                                        )}
                                         {subjectDetails?.theoryMarks > 0 ? (
                                             <>
                                                 <th style={{ padding: '1rem', textAlign: 'center', color: '#6366f1', fontWeight: 700 }}>Theory ({subjectDetails.theoryMarks})</th>
@@ -1003,100 +1064,119 @@ const AdvancedMarksEntry: React.FC = () => {
                                                 <td style={{ padding: '1rem' }}>
                                                     <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{student.studentName}</div>
                                                 </td>
-                                                <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 700, color: 'var(--text-muted)' }}>
-                                                    {student.totalMarks}
-                                                </td>
-                                                <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                                    {student.isAbsent ? (
-                                                        <span style={{ color: '#ef4444', fontWeight: 700 }}>AB</span>
-                                                    ) : student.isNA ? (
-                                                        <span style={{ color: '#6366f1', fontWeight: 700 }}>NA</span>
-                                                    ) : subjectDetails?.assessmentType === 'GRADE' ? (
-                                                        <select
-                                                            className="input-field"
-                                                            style={{
-                                                                width: '100px',
-                                                                textAlign: 'center',
-                                                                fontWeight: 700,
-                                                                border: '2px solid var(--primary)',
-                                                                borderRadius: '0.5rem',
-                                                                color: 'var(--primary)'
-                                                            }}
-                                                            value={student.grade === 'N/A' ? '' : student.grade}
-                                                            onChange={(e) => {
-                                                                const updated = [...marksData];
-                                                                updated[actualIndex].grade = e.target.value;
-                                                                updated[actualIndex].obtainedMarks = 0;
-                                                                updated[actualIndex].percentage = 0;
-                                                                setMarksData(updated);
-                                                            }}
-                                                            disabled={!canEdit}
-                                                        >
-                                                            <option value="">Grade</option>
-                                                            {['A+', 'A', 'B+', 'B', 'C', 'D', 'E', 'F'].map(g => (
-                                                                <option key={g} value={g}>{g}</option>
-                                                            ))}
-                                                        </select>
-                                                    ) : subjectDetails?.theoryMarks > 0 ? (
-                                                        // Split Theory + Practical inputs
-                                                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}>
+                                                {subjectDetails?.assessmentType !== 'GRADE' && (
+                                                    <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 700, color: 'var(--text-muted)' }}>
+                                                        {student.totalMarks}
+                                                    </td>
+                                                )}
+                                                {subjectDetails?.theoryMarks > 0 ? (
+                                                    <>
+                                                        <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                                            {student.isAbsent ? (
+                                                                <span style={{ color: '#ef4444', fontWeight: 700 }}>AB</span>
+                                                            ) : student.isNA ? (
+                                                                <span style={{ color: '#6366f1', fontWeight: 700 }}>NA</span>
+                                                            ) : (
+                                                                <input
+                                                                    type="number"
+                                                                    className="input-field"
+                                                                    style={{ width: '75px', textAlign: 'center', padding: '0.5rem', fontSize: '0.95rem', fontWeight: 700, border: '2px solid #6366f1', borderRadius: '0.5rem', color: '#6366f1' }}
+                                                                    min="0"
+                                                                    max={subjectDetails.theoryMarks}
+                                                                    placeholder="Thy"
+                                                                    value={student.theoryMarks || ''}
+                                                                    onChange={(e) => {
+                                                                        const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                                        handleMarksChange(actualIndex, 'theoryMarks', val);
+                                                                    }}
+                                                                    onFocus={(e) => e.target.select()}
+                                                                    disabled={!canEdit}
+                                                                />
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                                            {student.isAbsent ? (
+                                                                <span style={{ color: '#ef4444', fontWeight: 700 }}>AB</span>
+                                                            ) : student.isNA ? (
+                                                                <span style={{ color: '#6366f1', fontWeight: 700 }}>NA</span>
+                                                            ) : (
+                                                                <input
+                                                                    type="number"
+                                                                    className="input-field"
+                                                                    style={{ width: '75px', textAlign: 'center', padding: '0.5rem', fontSize: '0.95rem', fontWeight: 700, border: '2px solid #f59e0b', borderRadius: '0.5rem', color: '#b45309' }}
+                                                                    min="0"
+                                                                    max={subjectDetails.practicalMarks}
+                                                                    placeholder="Prc"
+                                                                    value={student.practicalMarks || ''}
+                                                                    onChange={(e) => {
+                                                                        const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                                        handleMarksChange(actualIndex, 'practicalMarks', val);
+                                                                    }}
+                                                                    onFocus={(e) => e.target.select()}
+                                                                    disabled={!canEdit}
+                                                                />
+                                                            )}
+                                                        </td>
+                                                    </>
+                                                ) : (
+                                                    <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                                        {student.isAbsent ? (
+                                                            <span style={{ color: '#ef4444', fontWeight: 700 }}>AB</span>
+                                                        ) : student.isNA ? (
+                                                            <span style={{ color: '#6366f1', fontWeight: 700 }}>NA</span>
+                                                        ) : subjectDetails?.assessmentType === 'GRADE' ? (
+                                                            <select
+                                                                className="input-field"
+                                                                style={{
+                                                                    width: '100px',
+                                                                    textAlign: 'center',
+                                                                    fontWeight: 700,
+                                                                    border: '2px solid var(--primary)',
+                                                                    borderRadius: '0.5rem',
+                                                                    color: 'var(--primary)'
+                                                                }}
+                                                                value={student.grade === 'N/A' ? '' : student.grade}
+                                                                onChange={(e) => {
+                                                                    const updated = [...marksData];
+                                                                    updated[actualIndex].grade = e.target.value;
+                                                                    updated[actualIndex].obtainedMarks = 0;
+                                                                    updated[actualIndex].percentage = 0;
+                                                                    setMarksData(updated);
+                                                                }}
+                                                                disabled={!canEdit}
+                                                            >
+                                                                <option value="">Grade</option>
+                                                                {['A+', 'A', 'B+', 'B', 'C', 'D', 'E', 'F'].map(g => (
+                                                                    <option key={g} value={g}>{g}</option>
+                                                                ))}
+                                                            </select>
+                                                        ) : (
                                                             <input
                                                                 type="number"
                                                                 className="input-field"
-                                                                style={{ width: '75px', textAlign: 'center', padding: '0.5rem', fontSize: '0.95rem', fontWeight: 700, border: '2px solid #6366f1', borderRadius: '0.5rem', color: '#6366f1' }}
+                                                                style={{
+                                                                    width: '85px',
+                                                                    textAlign: 'center',
+                                                                    padding: '0.5rem',
+                                                                    fontSize: '1rem',
+                                                                    fontWeight: 700,
+                                                                    border: '2px solid var(--primary)',
+                                                                    borderRadius: '0.5rem',
+                                                                    color: 'var(--primary)'
+                                                                }}
                                                                 min="0"
-                                                                max={subjectDetails.theoryMarks}
-                                                                placeholder="Thy"
-                                                                value={student.theoryMarks || ''}
+                                                                max={student.totalMarks}
+                                                                value={student.obtainedMarks}
                                                                 onChange={(e) => {
                                                                     const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                                                    handleMarksChange(actualIndex, 'theoryMarks', val);
+                                                                    handleMarksChange(actualIndex, 'obtainedMarks', val);
                                                                 }}
                                                                 onFocus={(e) => e.target.select()}
                                                                 disabled={!canEdit}
                                                             />
-                                                            <input
-                                                                type="number"
-                                                                className="input-field"
-                                                                style={{ width: '75px', textAlign: 'center', padding: '0.5rem', fontSize: '0.95rem', fontWeight: 700, border: '2px solid #f59e0b', borderRadius: '0.5rem', color: '#b45309' }}
-                                                                min="0"
-                                                                max={subjectDetails.practicalMarks}
-                                                                placeholder="Prc"
-                                                                value={student.practicalMarks || ''}
-                                                                onChange={(e) => {
-                                                                    const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                                                    handleMarksChange(actualIndex, 'practicalMarks', val);
-                                                                }}
-                                                                onFocus={(e) => e.target.select()}
-                                                                disabled={!canEdit}
-                                                            />
-                                                        </div>
-                                                    ) : (
-                                                        <input
-                                                            type="number"
-                                                            className="input-field"
-                                                            style={{
-                                                                width: '85px',
-                                                                textAlign: 'center',
-                                                                padding: '0.5rem',
-                                                                fontSize: '1rem',
-                                                                fontWeight: 700,
-                                                                border: '2px solid var(--primary)',
-                                                                borderRadius: '0.5rem',
-                                                                color: 'var(--primary)'
-                                                            }}
-                                                            min="0"
-                                                            max={student.totalMarks}
-                                                            value={student.obtainedMarks}
-                                                            onChange={(e) => {
-                                                                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                                                handleMarksChange(actualIndex, 'obtainedMarks', val);
-                                                            }}
-                                                            onFocus={(e) => e.target.select()}
-                                                            disabled={!canEdit}
-                                                        />
-                                                    )}
-                                                </td>
+                                                        )}
+                                                    </td>
+                                                )}
                                                 <td style={{ padding: '1rem', textAlign: 'center' }}>
                                                     <span style={{
                                                         fontWeight: 800,
@@ -1239,10 +1319,12 @@ const AdvancedMarksEntry: React.FC = () => {
                                                     {student.studentName}
                                                 </div>
                                             </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Total</span>
-                                                <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--primary)' }}>{student.totalMarks}</span>
-                                            </div>
+                                            {subjectDetails?.assessmentType !== 'GRADE' && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                                    <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Total</span>
+                                                    <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--primary)' }}>{student.totalMarks}</span>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Marks Input - Compact */}

@@ -50,6 +50,11 @@ export default function PersonalAttendanceChart({ present, late, absent }: Perso
 
     // Function to create filled pie slice
     const createPieSlice = (startAngle: number, endAngle: number) => {
+        // SVG paths fail with a 360 arc if start and end points perfectly align. Handle full circles by leaving a tiny gap.
+        if (endAngle - startAngle >= 360) {
+            endAngle = startAngle + 359.99;
+        }
+
         const size = 300;
         const radius = size / 2;
         const centerX = size / 2;
@@ -121,59 +126,61 @@ export default function PersonalAttendanceChart({ present, late, absent }: Perso
                         style={{
                             position: 'relative',
                             zIndex: 1,
-                            filter: 'drop-shadow(0 10px 30px rgba(0, 0, 0, 0.15))'
+                            filter: 'drop-shadow(0 15px 25px rgba(0, 0, 0, 0.2))'
                         }}
                     >
-                        {/* Background circle */}
-                        <circle
-                            cx={size / 2}
-                            cy={size / 2}
-                            r={size / 2}
-                            fill="#f1f5f9"
-                        />
+                        {/* 3D Sides / Extrusion Layers */}
+                        {[16, 12, 8, 4].map(offset => (
+                            <g key={offset} transform={`translate(0, ${offset})`}>
+                                <circle cx={size / 2} cy={size / 2} r={size / 2} fill="#cbd5e1" />
+                                {presentPath && <path d={presentPath} fill="#059669" />}
+                                {latePath && <path d={latePath} fill="#d97706" />}
+                                {absentPath && <path d={absentPath} fill="#dc2626" />}
 
-                        {/* Present slice (green) */}
-                        {presentPath && (
-                            <path
-                                d={presentPath}
-                                fill="#10b981"
-                                style={{ transition: 'all 0.3s ease' }}
-                            />
-                        )}
+                                {/* Side shading */}
+                                <circle cx={size / 2} cy={size / 2} r={size / 2} fill="url(#sideShadow)" style={{ pointerEvents: 'none' }} />
+                            </g>
+                        ))}
 
-                        {/* Late slice (yellow) */}
-                        {latePath && (
-                            <path
-                                d={latePath}
-                                fill="#fbbf24"
-                                style={{ transition: 'all 0.3s ease' }}
-                            />
-                        )}
+                        {/* Top Surface Layer */}
+                        <g>
+                            {/* Background circle */}
+                            <circle cx={size / 2} cy={size / 2} r={size / 2} fill="#f1f5f9" />
 
-                        {/* Absent slice (red) */}
-                        {absentPath && (
-                            <path
-                                d={absentPath}
-                                fill="#ef4444"
-                                style={{ transition: 'all 0.3s ease' }}
-                            />
-                        )}
+                            {/* Present slice (green) */}
+                            {presentPath && <path d={presentPath} fill="#10b981" />}
 
-                        {/* Semi-transparent radial gradient overlay for 3D effect */}
-                        <circle
-                            cx={size / 2}
-                            cy={size / 2}
-                            r={size / 2}
-                            fill="url(#radialOverlay)"
-                            style={{ pointerEvents: 'none' }}
-                        />
+                            {/* Late slice (yellow) */}
+                            {latePath && <path d={latePath} fill="#fbbf24" />}
+
+                            {/* Absent slice (red) */}
+                            {absentPath && <path d={absentPath} fill="#ef4444" />}
+
+                            {/* Lighting and Highlights for 3D effect */}
+                            <circle cx={size / 2} cy={size / 2} r={size / 2} fill="url(#topLight)" style={{ pointerEvents: 'none' }} />
+                            <circle cx={size / 2} cy={size / 2} r={size / 2} fill="url(#rimHighlight)" style={{ pointerEvents: 'none' }} />
+                        </g>
 
                         <defs>
-                            <radialGradient id="radialOverlay">
-                                <stop offset="0%" stopColor="rgba(255,255,255,0.4)" />
-                                <stop offset="30%" stopColor="rgba(255,255,255,0.2)" />
-                                <stop offset="60%" stopColor="rgba(255,255,255,0.05)" />
-                                <stop offset="100%" stopColor="rgba(0,0,0,0.05)" />
+                            {/* Side shadow to add depth */}
+                            <linearGradient id="sideShadow" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stopColor="rgba(0,0,0,0)" />
+                                <stop offset="100%" stopColor="rgba(0,0,0,0.3)" />
+                            </linearGradient>
+
+                            {/* Top surface lighting (shiny plastic/glass look) */}
+                            <radialGradient id="topLight" cx="35%" cy="30%" r="65%">
+                                <stop offset="0%" stopColor="rgba(255,255,255,0.5)" />
+                                <stop offset="40%" stopColor="rgba(255,255,255,0.05)" />
+                                <stop offset="70%" stopColor="rgba(0,0,0,0.05)" />
+                                <stop offset="100%" stopColor="rgba(0,0,0,0.25)" />
+                            </radialGradient>
+
+                            {/* Rim inner shadow and highlight */}
+                            <radialGradient id="rimHighlight">
+                                <stop offset="90%" stopColor="rgba(0,0,0,0)" />
+                                <stop offset="96%" stopColor="rgba(255,255,255,0.3)" />
+                                <stop offset="100%" stopColor="rgba(0,0,0,0.2)" />
                             </radialGradient>
                         </defs>
                     </svg>

@@ -24,6 +24,7 @@ const UploadHolidays: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
     const formatDate = (date: Date | string) => {
         const d = new Date(date);
@@ -90,7 +91,7 @@ const UploadHolidays: React.FC = () => {
                 type: holiday.type,
                 description: holiday.description,
                 color: holiday.color,
-                year: new Date(holiday.date).getFullYear()
+                year: selectedYear
             });
             setParsedHolidays(prev => prev.map(h => h.id === holiday.id ? { ...h, status: 'APPROVED' } : h));
         } catch (error) {
@@ -133,6 +134,33 @@ const UploadHolidays: React.FC = () => {
             <div style={{ marginBottom: '2rem' }}>
                 <h1 style={{ fontSize: '1.875rem', fontWeight: 800, marginBottom: '0.5rem' }}>Upload Master Holidays</h1>
                 <p style={{ color: 'var(--text-muted)' }}>Bulk import school holidays from a JSON file or by pasting raw JSON.</p>
+            </div>
+
+            {/* Year Selector */}
+            <div className="glass-card" style={{
+                padding: '1rem 1.5rem', marginBottom: '1.5rem',
+                display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap'
+            }}>
+                <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Select Year:</span>
+                {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1, new Date().getFullYear() + 2].map(yr => (
+                    <button
+                        key={yr}
+                        onClick={() => setSelectedYear(yr)}
+                        style={{
+                            padding: '0.4rem 1.25rem', borderRadius: '20px',
+                            border: selectedYear === yr ? '2px solid var(--primary)' : '1px solid var(--border)',
+                            background: selectedYear === yr ? 'var(--primary)' : 'white',
+                            color: selectedYear === yr ? 'white' : 'var(--text-main)',
+                            fontWeight: 700, fontSize: '0.875rem',
+                            cursor: 'pointer', transition: 'all 0.15s',
+                        }}
+                    >
+                        {yr}
+                    </button>
+                ))}
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Holidays uploaded will be tagged to year <strong>{selectedYear}</strong>
+                </span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '2rem' }}>
@@ -286,7 +314,10 @@ const UploadHolidays: React.FC = () => {
                 {/* Right Column: Preview of Master List */}
                 <div className="glass-card" style={{ padding: '2rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                        <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Global List Preview</h3>
+                        <div>
+                            <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Global List Preview</h3>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>Year: <strong>{selectedYear}</strong></p>
+                        </div>
                         {parsedHolidays.filter(h => h.status === 'PENDING').length > 0 && (
                             <button
                                 onClick={approveAll}

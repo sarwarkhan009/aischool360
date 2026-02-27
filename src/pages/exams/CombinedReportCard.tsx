@@ -25,7 +25,7 @@ import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
 import { sortClasses } from '../../constants/app';
 import { Link, useParams } from 'react-router-dom';
-import { formatClassName } from '../../utils/formatters';
+import { formatClassName, resolveClassName, subjectMatches } from '../../utils/formatters';
 
 type ReportMode = 'single' | 'combined';
 
@@ -253,30 +253,35 @@ const CombinedReportCard: React.FC = () => {
         const selectedClassObj = activeClasses.find((c: any) => c.id === selectedClass);
         const selectedClassName = selectedClassObj?.name;
 
+        // Resolve selected academic year name (e.g. "2025-2026") for session matching
+        const selectedYearName = selectedAcademicYear
+            ? schoolYears.find((y: any) => y.id === selectedAcademicYear)?.name
+            : null;
+
         const filtered = students.filter((s: any) =>
             s.schoolId === currentSchool?.id &&
             s.status === 'ACTIVE' &&
             (s.class === selectedClass || s.class === selectedClassName) &&
-            (!selectedSection || s.section === selectedSection)
+            (!selectedSection || s.section === selectedSection) &&
+            // Filter by academic year via student's 'session' field (same logic as StudentManagement)
+            (selectedYearName ? s.session === selectedYearName : true)
         );
 
         // Sort based on printSortMode
         if (printSortMode === 'percentage') {
-            // Sort by percentage descending - need to calculate for each student
             return [...filtered].sort((a, b) => {
                 const aRoll = parseInt(a.classRollNo || a.rollNo || '999');
                 const bRoll = parseInt(b.classRollNo || b.rollNo || '999');
-                return bRoll - aRoll; // Will be overridden by actual percentage later
+                return bRoll - aRoll;
             });
         } else {
-            // Sort by roll number ascending
             return [...filtered].sort((a, b) => {
                 const aRoll = parseInt(a.classRollNo || a.rollNo || '999');
                 const bRoll = parseInt(b.classRollNo || b.rollNo || '999');
-                return aRoll - bRoll; // Ascending
+                return aRoll - bRoll;
             });
         }
-    }, [students, currentSchool, selectedClass, selectedSection, activeClasses, printSortMode]);
+    }, [students, currentSchool, selectedClass, selectedSection, selectedAcademicYear, schoolYears, activeClasses, printSortMode]);
 
     // Add exam to combined selection
     const handleAddExam = () => {
@@ -335,25 +340,11 @@ const CombinedReportCard: React.FC = () => {
         // Iterate over exam definition to ensure all subjects are included even if marks are missing
         getExamSubjects(exam).forEach((sub: any) => {
             const subId = sub.subjectId;
-            const subName = (sub.subjectName || sub.name).toUpperCase().trim();
-            const cleanSubName = subName.replace(/[\s./-]/g, '');
-            const subCombined = (sub.combinedSubjects || []).map((c: string) => c.toUpperCase().trim().replace(/[\s./-]/g, ''));
-
             // Find ALL entries that match this subject (ID or Fuzzy Name)
             const subjectEntries = allPotentialMarks.filter(m => {
                 if (m.subjectId === subId) return true;
-                const mSubName = (m.subjectName || '').toUpperCase().trim();
-                const cleanMSubName = mSubName.replace(/[\s./-]/g, '');
-
-                if (cleanSubName === cleanMSubName) return true;
-                if (cleanSubName.includes(cleanMSubName) || cleanMSubName.includes(cleanSubName)) return true;
-                if (subCombined.some((c: string) => cleanMSubName.includes(c) || c.includes(cleanMSubName))) return true;
-
-                return (cleanMSubName.includes('URDU') && cleanSubName.includes('URDU')) ||
-                    (cleanMSubName.includes('SANS') && cleanSubName.includes('SANS')) ||
-                    (cleanMSubName.includes('DEEN') && cleanSubName.includes('DEEN')) ||
-                    (cleanMSubName.includes('CONV') && cleanSubName.includes('CONV')) ||
-                    (cleanMSubName.includes('COMP') && cleanSubName.includes('COMP'));
+                const mSubName = m.subjectName || '';
+                return subjectMatches(mSubName, sub.subjectName || sub.name || '', sub.combinedSubjects);
             });
 
             // Robust search: Find the best matching entry for this student
@@ -431,7 +422,7 @@ const CombinedReportCard: React.FC = () => {
             }
         });
 
-        const percentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
+        const percentage = totalMax > 0 ? (Number(totalObtained) / Number(totalMax)) * 100 : 0;
 
         return {
             subjects: subjectsResults,

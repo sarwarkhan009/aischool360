@@ -68,6 +68,7 @@ const FeeManagement: React.FC = () => {
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'admissionNo', direction: 'asc' });
     const [saleDiscount, setSaleDiscount] = useState(0);
     const [paymentSettings, setPaymentSettings] = useState<any>(null);
+    const [lateFineSettings, setLateFineSettings] = useState<any>(null);
 
     // Load payment settings
     useEffect(() => {
@@ -87,6 +88,20 @@ const FeeManagement: React.FC = () => {
                         setPaymentSettings(globalSnap.data());
                     }
                 }
+
+                // Also load Late Fine Settings
+                const lfRef = doc(db, 'schools', schoolIdToUse, 'settings', 'late_fine_settings');
+                const lfSnap = await getDoc(lfRef);
+                if (lfSnap.exists()) {
+                    setLateFineSettings(lfSnap.data());
+                } else {
+                    // Defaults if not configured yet
+                    setLateFineSettings({
+                        slab1StartDay: 15, slab1EndDay: 20, slab1Amount: 50,
+                        slab2EndDay: 27, slab2Amount: 100,
+                        slab3Amount: 150
+                    });
+                }
             } catch (error) {
                 console.error('Error fetching payment settings:', error);
             }
@@ -96,7 +111,21 @@ const FeeManagement: React.FC = () => {
 
     // Fee Form State
     const [selectedMonths, setSelectedMonths] = useState<Record<string, Record<string, number>>>({});
-    const [feeDetails, setFeeDetails] = useState({
+    const [feeDetails, setFeeDetails] = useState<{
+        admissionFee: number;
+        annualFee: number;
+        transportFee: number;
+        tuitionFee: number;
+        miscellaneousFee: number;
+        previousDues: number;
+        discount: number;
+        amountReceived: number;
+        paymentMode: string;
+        remarks: string;
+        sendSMS: boolean;
+        paymentDate: string;
+        splitAmountCash?: number;
+    }>({
         admissionFee: 0,
         annualFee: 0,
         transportFee: 0,
@@ -150,6 +179,7 @@ const FeeManagement: React.FC = () => {
                 discount: 0,
                 amountReceived: Number(data.formAmount),
                 paymentMode: 'Cash',
+                splitAmountCash: Number(data.formAmount),
                 remarks: 'Form Sale Payment',
                 sendSMS: false,
                 paymentDate: new Date().toISOString().split('T')[0]
@@ -593,11 +623,6 @@ const FeeManagement: React.FC = () => {
             return;
         }
 
-        if (!feeDetails.paymentMode) {
-            alert("Please select payment mode.");
-            return;
-        }
-
         setProcessing(true);
 
         // Calculate totals from selected months and fees
@@ -660,7 +685,15 @@ const FeeManagement: React.FC = () => {
                 total: totalAmount,
                 paid: paidAmount,
                 dues: currentDues,
-                paymentMode: feeDetails.paymentMode,
+                paymentMode: (() => {
+                    const cash = feeDetails.splitAmountCash === undefined ? paidAmount : feeDetails.splitAmountCash;
+                    const online = Math.max(0, paidAmount - cash);
+                    if (cash === paidAmount) return 'Cash';
+                    if (online === paidAmount) return 'Online';
+                    return 'Split';
+                })(),
+                splitAmountCash: feeDetails.splitAmountCash === undefined ? paidAmount : feeDetails.splitAmountCash,
+                splitAmountOnline: Math.max(0, paidAmount - (feeDetails.splitAmountCash === undefined ? paidAmount : feeDetails.splitAmountCash)),
                 remarks: feeDetails.remarks,
                 receiptNo,
                 schoolId: currentSchool?.id,
@@ -830,7 +863,15 @@ const FeeManagement: React.FC = () => {
                                 className="input-field"
                                 style={{ height: '3.5rem', borderRadius: '1.25rem', fontWeight: 600, padding: '0 2.5rem 0 1.25rem', lineHeight: 'normal' }}
                                 value={selectedClass}
-                                onChange={(e) => setSelectedClass(e.target.value)}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setSelectedClass(val);
+                                    if (val !== 'ALL') {
+                                        setSortConfig({ key: 'rollNo', direction: 'asc' });
+                                    } else {
+                                        setSortConfig({ key: 'admissionNo', direction: 'asc' });
+                                    }
+                                }}
                             >
                                 <option value="ALL">All Classes</option>
                                 {activeClasses.map((cls: any) => (
@@ -988,6 +1029,22 @@ const FeeManagement: React.FC = () => {
                 // 3. Fallback to display order
                 return Number(a.displayOrder || 0) - Number(b.displayOrder || 0);
             });
+
+        // Calculate auto late fine based on today's date + configured slabs (outside JSX)
+        const todayDay = new Date().getDate();
+        const lfs = lateFineSettings || { slab1StartDay: 15, slab1EndDay: 20, slab1Amount: 50, slab2EndDay: 27, slab2Amount: 100, slab3Amount: 150 };
+        let autoLateFineAmt = 0;
+        let lateSlabLabel = '';
+        if (todayDay >= lfs.slab1StartDay && todayDay < lfs.slab1EndDay) {
+            autoLateFineAmt = lfs.slab1Amount;
+            lateSlabLabel = `Day ${lfs.slab1StartDay}-${lfs.slab1EndDay - 1}`;
+        } else if (todayDay >= lfs.slab1EndDay && todayDay < lfs.slab2EndDay) {
+            autoLateFineAmt = lfs.slab2Amount;
+            lateSlabLabel = `Day ${lfs.slab1EndDay}-${lfs.slab2EndDay - 1}`;
+        } else if (todayDay >= lfs.slab2EndDay) {
+            autoLateFineAmt = lfs.slab3Amount;
+            lateSlabLabel = `Day ${lfs.slab2EndDay}+`;
+        }
 
         return (
             <div className="animate-fade-in" style={{ paddingBottom: '4rem' }}>
@@ -1177,14 +1234,17 @@ const FeeManagement: React.FC = () => {
                                 ) : (
                                     additionalFees.map((feeType: any) => {
                                         const headName = (feeType.feeHeadName || '').toLowerCase();
+                                        const isLateFee = headName.includes('late');
                                         const receiptNo = paidMonthsMap[feeType.feeHeadName];
                                         const isPaid = !!receiptNo;
 
                                         // Robust amount lookup
-                                        let amount = dynamicFees[feeType.feeHeadName] || 0;
+                                        let amount = isLateFee
+                                            ? autoLateFineAmt
+                                            : (dynamicFees[feeType.feeHeadName] || 0);
 
-                                        // Fallback to pre-calculated specific fees from feeDetails if direct match fails
-                                        if (amount === 0) {
+                                        // Fallback for non-late fees
+                                        if (!isLateFee && amount === 0) {
                                             if (headName.includes('admission')) amount = feeDetails.admissionFee;
                                             else if (headName.includes('annual')) amount = feeDetails.annualFee;
                                             else if (headName.includes('transport')) amount = feeDetails.transportFee;
@@ -1197,9 +1257,11 @@ const FeeManagement: React.FC = () => {
 
                                         if (amount === 0) return null;
 
-                                        return (
-                                            <div key={feeType.id} style={{ position: 'relative' }}>
-                                                {isPaid ? (
+                                        // One-time fees: show as paid/disabled if already paid
+                                        // Late Fee: always show as a clickable button (can be charged multiple times)
+                                        if (!isLateFee && isPaid) {
+                                            return (
+                                                <div key={feeType.id} style={{ position: 'relative' }}>
                                                     <div
                                                         style={{
                                                             width: '100%',
@@ -1255,56 +1317,79 @@ const FeeManagement: React.FC = () => {
                                                             {receiptNo}
                                                         </button>
                                                     </div>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => {
-                                                            const newMonths = { ...selectedMonths };
+                                                </div>
+                                            );
+                                        }
 
-                                                            if (isSelected) {
-                                                                // Remove from all months
-                                                                Object.keys(newMonths).forEach(month => {
-                                                                    if (newMonths[month][feeType.feeHeadName] !== undefined) {
-                                                                        delete newMonths[month][feeType.feeHeadName];
-                                                                        if (Object.keys(newMonths[month]).length === 0) {
-                                                                            delete newMonths[month];
-                                                                        }
+                                        // Clickable button (Late Fee always, other fees only if not paid)
+                                        return (
+                                            <div key={feeType.id} style={{ position: 'relative' }}>
+                                                <button
+                                                    onClick={() => {
+                                                        const newMonths = { ...selectedMonths };
+
+                                                        if (isSelected) {
+                                                            // Remove from all months
+                                                            Object.keys(newMonths).forEach(month => {
+                                                                if (newMonths[month][feeType.feeHeadName] !== undefined) {
+                                                                    delete newMonths[month][feeType.feeHeadName];
+                                                                    if (Object.keys(newMonths[month]).length === 0) {
+                                                                        delete newMonths[month];
                                                                     }
-                                                                });
-                                                            } else {
-                                                                // Add to a special "additional" key
-                                                                const targetMonth = 'Additional';
-                                                                if (!newMonths[targetMonth]) newMonths[targetMonth] = {};
-                                                                newMonths[targetMonth][feeType.feeHeadName] = amount;
-                                                            }
-                                                            setSelectedMonths(newMonths);
-                                                        }}
-                                                        style={{
-                                                            width: '100%',
-                                                            padding: '0.75rem 1rem',
-                                                            borderRadius: '8px',
-                                                            border: isSelected ? '2px solid #8b5cf6' : '1px solid var(--border)',
-                                                            background: isSelected ? 'rgba(139, 92, 246, 0.1)' : 'white',
-                                                            color: isSelected ? '#8b5cf6' : '#475569',
-                                                            fontWeight: isSelected ? 800 : 600,
-                                                            fontSize: '0.875rem',
-                                                            cursor: 'pointer',
-                                                            transition: 'all 0.2s',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'space-between',
-                                                            textAlign: 'left'
-                                                        }}
-                                                        title={`Click to add ₹${amount}`}
-                                                    >
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                            {isSelected && <Check size={16} />}
+                                                                }
+                                                            });
+                                                        } else {
+                                                            const targetMonth = 'Additional';
+                                                            if (!newMonths[targetMonth]) newMonths[targetMonth] = {};
+                                                            newMonths[targetMonth][feeType.feeHeadName] = amount;
+                                                        }
+                                                        setSelectedMonths(newMonths);
+                                                    }}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '0.75rem 1rem',
+                                                        borderRadius: '8px',
+                                                        border: isSelected
+                                                            ? `2px solid ${isLateFee ? '#f59e0b' : '#8b5cf6'}`
+                                                            : '1px solid var(--border)',
+                                                        background: isSelected
+                                                            ? (isLateFee ? 'rgba(245, 158, 11, 0.1)' : 'rgba(139, 92, 246, 0.1)')
+                                                            : 'white',
+                                                        color: isSelected
+                                                            ? (isLateFee ? '#92400e' : '#8b5cf6')
+                                                            : '#475569',
+                                                        fontWeight: isSelected ? 800 : 600,
+                                                        fontSize: '0.875rem',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'space-between',
+                                                        textAlign: 'left'
+                                                    }}
+                                                    title={isLateFee ? `Auto: ₹${amount} (${lateSlabLabel})` : `Click to add ₹${amount}`}
+                                                >
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flex: 1 }}>
+                                                        {isSelected && <Check size={16} />}
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
                                                             <span>{feeType.feeHeadName}</span>
+                                                            {isLateFee && lateSlabLabel && (
+                                                                <span style={{ fontSize: '0.65rem', color: '#a16207', fontWeight: 600 }}>
+                                                                    Auto • {lateSlabLabel}
+                                                                </span>
+                                                            )}
                                                         </div>
-                                                        <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: isSelected ? '#8b5cf6' : '#4338ca' }}>
-                                                            ₹{amount}
-                                                        </span>
-                                                    </button>
-                                                )}
+                                                    </div>
+                                                    <span style={{
+                                                        fontSize: '0.8125rem',
+                                                        fontWeight: 800,
+                                                        color: isSelected
+                                                            ? (isLateFee ? '#92400e' : '#8b5cf6')
+                                                            : (isLateFee ? '#d97706' : '#4338ca')
+                                                    }}>
+                                                        ₹{amount}
+                                                    </span>
+                                                </button>
                                             </div>
                                         );
                                     })
@@ -1422,21 +1507,42 @@ const FeeManagement: React.FC = () => {
                                         color: '#22c55e'
                                     }}
                                     value={feeDetails.amountReceived}
-                                    onChange={e => setFeeDetails({ ...feeDetails, amountReceived: Number(e.target.value) })}
+                                    onChange={e => {
+                                        const amt = Number(e.target.value);
+                                        setFeeDetails({ ...feeDetails, amountReceived: amt, splitAmountCash: amt });
+                                    }}
                                 />
                             </div>
 
-                            <div className="input-group" style={{ marginBottom: '1rem' }}>
-                                <label style={{ fontWeight: 700 }}>Payment Mode</label>
-                                <select
-                                    className="input-field"
-                                    value={feeDetails.paymentMode}
-                                    onChange={e => setFeeDetails({ ...feeDetails, paymentMode: e.target.value })}
-                                >
-                                    <option value="">Select</option>
-                                    <option value="Cash">Cash</option>
-                                    <option value="Online">Online</option>
-                                </select>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
+                                <div className="input-group" style={{ marginBottom: 0 }}>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#475569' }}>Cash</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        style={{ borderColor: '#cbd5e1' }}
+                                        value={feeDetails.splitAmountCash === undefined ? (feeDetails.amountReceived || 0) : feeDetails.splitAmountCash}
+                                        onChange={e => {
+                                            const cashAmt = Number(e.target.value);
+                                            setFeeDetails({
+                                                ...feeDetails,
+                                                splitAmountCash: Math.min(cashAmt, feeDetails.amountReceived || 0)
+                                            });
+                                        }}
+                                        placeholder="Cash amount"
+                                    />
+                                </div>
+                                <div className="input-group" style={{ marginBottom: 0 }}>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#475569' }}>Online (Auto)</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        style={{ backgroundColor: '#e2e8f0', borderColor: '#cbd5e1', color: '#64748b', cursor: 'not-allowed' }}
+                                        value={Math.max(0, (feeDetails.amountReceived || 0) - (feeDetails.splitAmountCash === undefined ? (feeDetails.amountReceived || 0) : feeDetails.splitAmountCash))}
+                                        readOnly
+                                        disabled
+                                    />
+                                </div>
                             </div>
 
                             <div className="input-group" style={{ marginBottom: '1rem' }}>

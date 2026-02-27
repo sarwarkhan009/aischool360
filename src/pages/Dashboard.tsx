@@ -14,7 +14,8 @@ import {
     Eye,
     EyeOff,
     Lock,
-    X
+    X,
+    Cake
 } from 'lucide-react';
 import TeacherDashboard from './portals/TeacherDashboard';
 import ParentDashboard from './portals/ParentDashboard';
@@ -90,6 +91,8 @@ const AdminDashboard: React.FC = () => {
     const [studentStats, setStudentStats] = useState({ present: 0, absent: 0, late: 0, total: 0 });
     const [teacherStats, setTeacherStats] = useState({ present: 0, absent: 0, late: 0, total: 0 });
     const [totalHomework, setTotalHomework] = useState(0);
+    const [studentBirthdayCount, setStudentBirthdayCount] = useState(0);
+    const [staffBirthdayCount, setStaffBirthdayCount] = useState(0);
     const [switchingYear, setSwitchingYear] = useState(false);
     const [showCollection, setShowCollection] = useState(false);
     const [showPinModal, setShowPinModal] = useState(false);
@@ -400,20 +403,51 @@ const AdminDashboard: React.FC = () => {
             setTeacherStats({ present: 0, absent: 0, late: 0, total: 0 });
         });
 
-        // Real-time listener for total homework assigned this month
+        // Real-time listener for today's homework assigned
         const homeworkQuery = query(
             collection(db, 'homework'),
-            where('schoolId', '==', filterSchoolId || 'NONE'),
-            where('session', '==', activeFY)
+            where('schoolId', '==', filterSchoolId || 'NONE')
         );
         const unsubscribeHomework = onSnapshot(homeworkQuery, (snapshot) => {
-            const thisMonthHomework = snapshot.docs.filter(doc => {
+            const todayHomework = snapshot.docs.filter(doc => {
                 const data = doc.data();
-                const assigned = new Date(data.assignedDate || data.createdAt);
-                return assigned >= startOfMonth && assigned <= endOfDay;
+                if (data.status === 'CANCELLED') return false;
+                return data.assignedDate === todayDateString;
             });
-            setTotalHomework(thisMonthHomework.length);
+            setTotalHomework(todayHomework.length);
         });
+
+        // Count today's birthdays (students in active session + all active staff)
+        const todayMonth = now.getMonth() + 1;
+        const todayDay = now.getDate();
+        const isTodayBirthday = (dob: string): boolean => {
+            if (!dob) return false;
+            try {
+                let month: number, day: number;
+                if (dob.includes('-')) {
+                    const parts = dob.split('-');
+                    if (parts.length === 3) { month = parseInt(parts[1]); day = parseInt(parts[2]); }
+                    else return false;
+                } else if (dob.includes('/')) {
+                    const parts = dob.split('/');
+                    if (parts.length === 3) { day = parseInt(parts[0]); month = parseInt(parts[1]); }
+                    else return false;
+                } else return false;
+                return month === todayMonth && day === todayDay;
+            } catch { return false; }
+        };
+        const fetchBirthdayCount = async () => {
+            try {
+                const studentBdayQuery = query(collection(db, 'students'), where('schoolId', '==', filterSchoolId || 'NONE'), where('session', '==', activeFY));
+                const staffBdayQuery = query(collection(db, 'teachers'), where('schoolId', '==', filterSchoolId || 'NONE'));
+                const [stuSnap, staffSnap] = await Promise.all([getDocs(studentBdayQuery), getDocs(staffBdayQuery)]);
+                const stuCount = stuSnap.docs.filter(d => { const data = d.data(); return data.status !== 'INACTIVE' && isTodayBirthday(data.dob); }).length;
+                const staffCount = staffSnap.docs.filter(d => { const data = d.data(); return data.status !== 'INACTIVE' && isTodayBirthday(data.dob); }).length;
+                setStudentBirthdayCount(stuCount);
+                setStaffBirthdayCount(staffCount);
+            } catch (err) { console.error('Birthday count error:', err); }
+        };
+        fetchBirthdayCount();
 
         return () => {
             unsubscribeFees();
@@ -662,16 +696,21 @@ const AdminDashboard: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Total Homework This Month */}
-                <div className="glass-card hover-lift animate-slide-up" style={{
-                    padding: '1.5rem',
-                    animationDelay: '0.35s',
-                    background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(67, 56, 202, 0.03))',
-                    border: '1px solid rgba(79, 70, 229, 0.15)'
-                }}>
+                {/* Today's Homework */}
+                <div
+                    className="glass-card hover-lift animate-slide-up"
+                    onClick={() => navigate(`/${filterSchoolId}/homework/report`)}
+                    style={{
+                        padding: '1.5rem',
+                        animationDelay: '0.35s',
+                        background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(67, 56, 202, 0.03))',
+                        border: '1px solid rgba(79, 70, 229, 0.15)',
+                        cursor: 'pointer'
+                    }}
+                >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Homework Assigned</p>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Today's Homework</p>
                             <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--primary)' }}>
                                 <CountUp value={totalHomework} />
                             </h3>
@@ -687,6 +726,61 @@ const AdminDashboard: React.FC = () => {
                             boxShadow: '0 8px 16px rgba(99, 102, 241, 0.3)'
                         }}>
                             <FileText size={24} color="white" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Today's Birthday */}
+                <div
+                    className="glass-card hover-lift animate-slide-up"
+                    onClick={() => navigate(`/${filterSchoolId}/birthdays`)}
+                    style={{
+                        padding: '1.5rem',
+                        animationDelay: '0.4s',
+                        background: 'linear-gradient(135deg, rgba(244, 63, 94, 0.08), rgba(251, 146, 60, 0.04))',
+                        border: '1px solid rgba(244, 63, 94, 0.15)',
+                        cursor: 'pointer',
+                        position: 'relative',
+                        overflow: 'hidden'
+                    }}
+                >
+                    {(studentBirthdayCount + staffBirthdayCount) > 0 && (
+                        <div style={{
+                            position: 'absolute',
+                            top: 0, right: 0,
+                            background: 'linear-gradient(135deg, #f43f5e, #fb923c)',
+                            color: 'white',
+                            fontSize: '0.625rem',
+                            fontWeight: 900,
+                            padding: '0.25rem 0.625rem',
+                            borderRadius: '0 1rem 0 0.75rem',
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase'
+                        }}>
+                            🎉 Today!
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>Today's Birthday</p>
+                            <h3 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#f43f5e' }}>
+                                <CountUp value={studentBirthdayCount + staffBirthdayCount} />
+                            </h3>
+                            <div style={{ fontSize: '0.75rem', color: '#f43f5e', fontWeight: 700, marginTop: '0.25rem' }}>
+                                S: {studentBirthdayCount} | T: {staffBirthdayCount}
+                            </div>
+                        </div>
+                        <div className="icon-float" style={{
+                            width: '52px',
+                            height: '52px',
+                            background: 'linear-gradient(135deg, #f43f5e, #fb923c)',
+                            borderRadius: '1.25rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 8px 16px rgba(244, 63, 94, 0.3)'
+                        }}>
+                            <Cake size={24} color="white" />
                         </div>
                     </div>
                 </div>

@@ -25,7 +25,7 @@ import {
 import { useFirestore } from '../../hooks/useFirestore';
 import { sortClasses } from '../../constants/app';
 import { useSchool } from '../../context/SchoolContext';
-import { formatClassName } from '../../utils/formatters';
+import { toProperCase, formatClassName, resolveClassName, subjectMatches } from '../../utils/formatters';
 import * as XLSX from 'xlsx';
 
 interface StudentResult {
@@ -50,6 +50,7 @@ const ExamResultsDashboard: React.FC = () => {
     const { data: studentList } = useFirestore<any>('students');
     const { data: gradingSystems } = useFirestore<any>('grading_systems');
     const { data: allSettings } = useFirestore<any>('settings');
+    const { data: academicYears } = useFirestore<any>('academic_years');
 
     const activeClasses = sortClasses(allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || []);
 
@@ -61,12 +62,24 @@ const ExamResultsDashboard: React.FC = () => {
 
     const printRef = useRef<HTMLDivElement>(null);
 
+    const schoolAcademicYears = (academicYears?.filter((y: any) => y.schoolId === currentSchool?.id && !y.isArchived) || [])
+        .sort((a: any, b: any) => (b.name || '').localeCompare(a.name || ''));
+    const activeYear = schoolAcademicYears.find((y: any) => y.isActive);
+
+    const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>('');
     const [selectedExamId, setSelectedExamId] = useState<string>('');
     const [selectedClass, setSelectedClass] = useState<string>('');
     const [selectedSection, setSelectedSection] = useState<string>('');
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
     const [showPrintConfig, setShowPrintConfig] = useState(false);
     const [showDeleteBtn, setShowDeleteBtn] = useState(false);
+
+    // Auto-select active academic year on first load
+    React.useEffect(() => {
+        if (!selectedAcademicYear && activeYear?.id) {
+            setSelectedAcademicYear(activeYear.id);
+        }
+    }, [activeYear?.id]);
 
     // Print header config – persisted per school in localStorage
     const printConfigKey = `printHeaderConfig_${currentSchool?.id || 'default'}`;
@@ -121,37 +134,32 @@ const ExamResultsDashboard: React.FC = () => {
 
         // Fallback: Try matching by subjectName if subjectId doesn't match
         if (!entry) {
-            const subName = (subject.subjectName || subject.name || '').toUpperCase().trim();
-            const cleanSubName = subName.replace(/[\s./-]/g, '');
-            const subCombined = (subject.combinedSubjects || []).map((c: string) => c.toUpperCase().trim().replace(/[\s./-]/g, ''));
-
+            const subCombined = subject.combinedSubjects || [];
             entry = allMarks.find(m => {
-                const mSubName = (m.subjectName || '').toUpperCase().trim();
-                const cleanMSubName = mSubName.replace(/[\s./-]/g, '');
-
+                const mSubName = m.subjectName || '';
                 // Must still match section/class
                 const sectionMatch = !m.sectionId || m.sectionId === studentSection || m.sectionName === studentSection;
                 if (!sectionMatch) return false;
 
-                if (cleanSubName === cleanMSubName) return true;
-                if (cleanSubName.includes(cleanMSubName) || cleanMSubName.includes(cleanSubName)) return true;
-                if (subCombined.some((c: string) => cleanMSubName.includes(c) || c.includes(cleanMSubName))) return true;
-
-                const isAbbrev = (cleanMSubName.includes('URDU') && cleanSubName.includes('URDU')) ||
-                    (cleanMSubName.includes('SANS') && cleanSubName.includes('SANS')) ||
-                    (cleanMSubName.includes('DEEN') && cleanSubName.includes('DEEN')) ||
-                    (cleanMSubName.includes('CONV') && cleanSubName.includes('CONV')) ||
-                    (cleanMSubName.includes('COMP') && cleanSubName.includes('COMP'));
-                return isAbbrev;
+                return subjectMatches(mSubName, subject.subjectName || subject.name || '', subCombined);
             });
         }
 
         return entry;
     };
 
-    const schoolExams = exams?.filter((e: any) => e.schoolId === currentSchool?.id) || [];
+    // Filter schoolExams by academic year
+    const schoolExams = exams?.filter((e: any) =>
+        e.schoolId === currentSchool?.id &&
+        (selectedAcademicYear ? e.academicYearId === selectedAcademicYear : true)
+    ) || [];
     const selectedExam = schoolExams.find((e: any) => e.id === selectedExamId);
-    const availableClasses = selectedExam?.targetClasses || [];
+
+    // Resolve a class ID to a human-readable name (handles legacy-format IDs).
+    const resolveClass = (id: string) => resolveClassName(id, activeClasses);
+
+    // All stored targetClass IDs — no filter by activeClasses ID match.
+    const availableClasses: string[] = selectedExam?.targetClasses || [];
     const defaultGrading = gradingSystems?.find((g: any) => g.schoolId === currentSchool?.id && g.isDefault);
 
     // Get subjects for the selected class (handling classRoutines)
@@ -159,7 +167,7 @@ const ExamResultsDashboard: React.FC = () => {
         if (!selectedExam || !selectedClass) return [];
 
         const classRoutine = selectedExam.classRoutines?.find((cr: any) =>
-            cr.classId === selectedClass || cr.className === getClassName(selectedClass)
+            cr.classId === selectedClass || cr.className === resolveClass(selectedClass)
         );
 
         return (classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
@@ -167,28 +175,36 @@ const ExamResultsDashboard: React.FC = () => {
             : (selectedExam.subjects || []);
     }, [selectedExam, selectedClass, activeClasses]);
 
-    // Calculate Results
-    const calculatedResults = useMemo(() => {
-        if (!selectedExamId || !selectedClass || !marksEntries || !studentList) return [];
+    const examMarks = useMemo(() => {
+        if (!selectedExamId || !selectedClass || !marksEntries) return [];
 
-        // Selected Class Name for matching (optional, some records might use name instead of ID)
-        const selectedClassObj = activeClasses.find((c: any) => c.id === selectedClass);
-        const selectedClassName = selectedClassObj?.name;
+        const selectedClassName = resolveClass(selectedClass);
 
-        // Marks are usually stored per class/subject. 
-        // We filter students by section if selected.
-        const examMarks = marksEntries.filter((m: any) =>
+        return marksEntries.filter((m: any) =>
             m.examId === selectedExamId &&
             (m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName) &&
             (m.status === 'APPROVED' || m.status === 'SUBMITTED') &&
             (!selectedSection || m.sectionId === selectedSection || m.sectionName === selectedSection)
         );
+    }, [selectedExamId, selectedClass, selectedSection, marksEntries, activeClasses]);
+
+    // Calculate Results
+    const calculatedResults = useMemo(() => {
+        if (!selectedExamId || !selectedClass || !examMarks || !studentList) return [];
+
+        // Selected Class Name for matching (handles legacy IDs via resolveClass)
+        const selectedClassName = resolveClass(selectedClass);
 
         const classStudents = studentList.filter((s: any) =>
             s.schoolId === currentSchool?.id &&
             (s.class === selectedClass || (selectedClassName && s.class === selectedClassName)) &&
             s.status === 'ACTIVE' &&
-            (!selectedSection || s.section === selectedSection)
+            (!selectedSection || s.section === selectedSection) &&
+            // Filter by academic year using student's 'session' field (year name like "2026-2027")
+            // This matches the same logic used in StudentManagement.tsx
+            (selectedAcademicYear
+                ? (s.session === (schoolAcademicYears.find((y: any) => y.id === selectedAcademicYear)?.name))
+                : true)
         );
 
         const results: StudentResult[] = classStudents.map((student: any) => {
@@ -379,12 +395,40 @@ const ExamResultsDashboard: React.FC = () => {
                 'Student Name': res.studentName,
             };
 
+            // Student object dhundhte hain taake entry lookup ho sake
+            const student = studentList?.find((s: any) => s.id === res.studentId);
+
             availableSubjects.forEach((sub: any) => {
                 const combinedNames = sub.combinedSubjects && sub.combinedSubjects.length > 0
                     ? ` / ${sub.combinedSubjects.join(' / ')}`
                     : '';
-                const headerName = `${sub.subjectName}${combinedNames}`;
-                row[headerName] = res.marks[sub.subjectId];
+                const baseName = `${sub.subjectName}${combinedNames}`;
+                const isGradeBased = sub.assessmentType === 'GRADE';
+                const hasSplit = !isGradeBased && (sub.theoryMarks > 0 && sub.practicalMarks > 0);
+
+                if (hasSplit) {
+                    // Theory aur Practical alag columns
+                    const entry = findMarksEntry(student, sub, examMarks);
+                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === res.studentId);
+                    const isAbsent = studentMark?.isAbsent || false;
+                    const isNA = studentMark?.isNA || false;
+
+                    if (isNA) {
+                        row[`${baseName} (Theory)`] = 'NA';
+                        row[`${baseName} (Practical)`] = 'NA';
+                    } else if (isAbsent) {
+                        row[`${baseName} (Theory)`] = 'AB';
+                        row[`${baseName} (Practical)`] = 'AB';
+                    } else {
+                        row[`${baseName} (Theory)`] = studentMark?.theoryMarks ?? studentMark?.obtainedMarks ?? 0;
+                        row[`${baseName} (Practical)`] = studentMark?.practicalMarks ?? 0;
+                    }
+                } else {
+                    // Normal single column
+                    row[baseName] = isGradeBased
+                        ? (res.marks[sub.subjectId] || 'N/A')
+                        : res.marks[sub.subjectId];
+                }
             });
 
             row['Total'] = `${res.totalObtained}/${res.totalMax}`;
@@ -397,8 +441,194 @@ const ExamResultsDashboard: React.FC = () => {
 
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Results");
-        XLSX.writeFile(wb, `${selectedExam.displayName || selectedExam.name}_${selectedClass}_Results.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, 'Results');
+        XLSX.writeFile(wb, `${selectedExam.displayName || selectedExam.name}_${resolveClass(selectedClass)}_Results.xlsx`);
+    };
+
+    // ─── Full Exam Export: har class ka alag sheet ───────────────────────────
+    const exportFullExamToExcel = () => {
+        if (!selectedExam || !selectedExamId) {
+            alert('Pehle koi exam select karein.');
+            return;
+        }
+
+        const wb = XLSX.utils.book_new();
+        const examClasses: string[] = selectedExam.targetClasses || [];
+
+        if (examClasses.length === 0) {
+            alert('Is exam mein koi class nahi mili.');
+            return;
+        }
+
+        let totalSheetsAdded = 0;
+
+        examClasses.forEach((clsId: string) => {
+            const resolvedClassName = resolveClassName(clsId, activeClasses);
+            const sheetLabel = resolvedClassName || clsId;
+
+            // Us class ke subjects nikalo
+            const classRoutine = selectedExam.classRoutines?.find((cr: any) =>
+                cr.classId === clsId || cr.className === resolvedClassName
+            );
+            const classSubjects: any[] = (classRoutine?.routine?.length > 0)
+                ? classRoutine.routine
+                : (selectedExam.subjects || []);
+
+            // Us class ke approved/submitted marks nikalo
+            const classMarks = (marksEntries || []).filter((m: any) =>
+                m.examId === selectedExamId &&
+                (m.classId === clsId || (resolvedClassName && (m.className === resolvedClassName || m.classId === resolvedClassName))) &&
+                (m.status === 'APPROVED' || m.status === 'SUBMITTED')
+            );
+
+            // Us class ke active students nikalo
+            const selectedYearName = schoolAcademicYears.find((y: any) => y.id === selectedAcademicYear)?.name;
+            const classStudents = (studentList || []).filter((s: any) =>
+                s.schoolId === currentSchool?.id &&
+                (s.class === clsId || (resolvedClassName && s.class === resolvedClassName)) &&
+                s.status === 'ACTIVE' &&
+                (selectedAcademicYear ? s.session === selectedYearName : true)
+            );
+
+            if (classStudents.length === 0) return; // koi student nahi, skip
+
+            // Grading system
+            let gradingSystem = defaultGrading;
+            if (selectedExam?.gradingSystemId) {
+                const eg = gradingSystems?.find((g: any) => g.id === selectedExam.gradingSystemId);
+                if (eg) gradingSystem = eg;
+            }
+            if (!gradingSystem?.ranges) {
+                gradingSystem = {
+                    type: 'LETTER', name: 'Fallback',
+                    ranges: [
+                        { grade: 'A+', min: 91, max: 100 }, { grade: 'A', min: 81, max: 90 },
+                        { grade: 'B+', min: 71, max: 80 }, { grade: 'B', min: 61, max: 70 },
+                        { grade: 'C', min: 51, max: 60 }, { grade: 'D', min: 41, max: 50 },
+                        { grade: 'E', min: 33, max: 40 }, { grade: 'F', min: 0, max: 32 }
+                    ]
+                };
+            }
+
+            // Har student ka result calculate karo
+            const results: any[] = classStudents.map((student: any) => {
+                let totalObtained = 0;
+                let totalMax = 0;
+                const failedSubjects: string[] = [];
+                const marksForRow: any = {};
+
+                classSubjects.forEach((sub: any) => {
+                    const entry = findMarksEntry(student, sub, classMarks);
+                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === student.id);
+                    const isAbsent = studentMark?.isAbsent || false;
+                    const isNA = studentMark?.isNA || false;
+                    const isGradeBased = sub.assessmentType === 'GRADE';
+                    const hasSplit = !isGradeBased && (sub.theoryMarks > 0 && sub.practicalMarks > 0);
+
+                    const obtained = isNA ? 'NA' : (isAbsent ? 'AB' : (studentMark?.obtainedMarks || 0));
+                    const combinedNames = sub.combinedSubjects?.length > 0 ? ` / ${sub.combinedSubjects.join(' / ')}` : '';
+                    const baseName = `${sub.subjectName}${combinedNames}`;
+
+                    if (isGradeBased) {
+                        marksForRow[baseName] = studentMark?.grade || 'N/A';
+                    } else if (hasSplit) {
+                        // Theory aur Practical alag columns
+                        if (isNA) {
+                            marksForRow[`${baseName} (Theory)`] = 'NA';
+                            marksForRow[`${baseName} (Practical)`] = 'NA';
+                        } else if (isAbsent) {
+                            marksForRow[`${baseName} (Theory)`] = 'AB';
+                            marksForRow[`${baseName} (Practical)`] = 'AB';
+                        } else {
+                            marksForRow[`${baseName} (Theory)`] = studentMark?.theoryMarks ?? studentMark?.obtainedMarks ?? 0;
+                            marksForRow[`${baseName} (Practical)`] = studentMark?.practicalMarks ?? 0;
+                        }
+                    } else {
+                        marksForRow[baseName] = obtained;
+                    }
+
+                    if (!isGradeBased && !isNA) {
+                        totalObtained += (typeof obtained === 'number' ? obtained : 0);
+                        totalMax += (sub.maxMarks || 0);
+                    }
+
+                    const passThreshold = (sub.maxMarks * (sub.passingMarks || 0)) / 100;
+                    if (!isGradeBased && !isNA && (isAbsent || (typeof obtained === 'number' && obtained < passThreshold))) {
+                        failedSubjects.push(sub.subjectName);
+                    }
+                });
+
+                const percentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
+                const isFullyAbsent = totalObtained === 0 && totalMax > 0;
+
+                const sortedRanges = [...(gradingSystem?.ranges || [])].sort((a: any, b: any) =>
+                    (typeof b.max === 'string' ? parseFloat(b.max) : b.max) -
+                    (typeof a.max === 'string' ? parseFloat(a.max) : a.max)
+                );
+                const range = sortedRanges.find((r: any) => percentage >= ((typeof r.min === 'string' ? parseFloat(r.min) : r.min) - 0.01));
+                const grade = range?.grade || 'F';
+                const status = (failedSubjects.length === 0 && percentage >= 33 && !isFullyAbsent) ? 'PASS'
+                    : (failedSubjects.length > 1 || percentage < 33 || isFullyAbsent) ? 'FAIL' : 'COMPARTMENT';
+
+                return {
+                    student,
+                    rollNumber: student.classRollNo || student.rollNo || student.admissionNumber || '-',
+                    totalObtained, totalMax, percentage, grade, status, marksForRow
+                };
+            });
+
+            // Dense ranking
+            const sorted = [...results].sort((a, b) => b.percentage - a.percentage);
+            const ranks: number[] = [];
+            let denseRank = 0;
+            sorted.forEach((res, idx) => {
+                if (idx > 0 && res.totalObtained === sorted[idx - 1].totalObtained && res.totalMax === sorted[idx - 1].totalMax) {
+                    ranks.push(ranks[idx - 1]);
+                } else {
+                    denseRank++;
+                    ranks.push(denseRank);
+                }
+            });
+
+            // Sort by roll number for sheet
+            const finalRows = sorted
+                .map((res, idx) => ({ ...res, rank: ranks[idx] }))
+                .sort((a, b) => {
+                    const an = parseFloat(a.rollNumber), bn = parseFloat(b.rollNumber);
+                    return (!isNaN(an) && !isNaN(bn)) ? an - bn : (a.rollNumber || '').localeCompare(b.rollNumber || '');
+                });
+
+            // Build sheet rows
+            const sheetData = finalRows.map(res => {
+                const row: any = {
+                    'Rank': res.rank,
+                    'Roll No': res.rollNumber,
+                    'Student Name': res.student.name,
+                    'Section': res.student.section || '-',
+                };
+                Object.assign(row, res.marksForRow);
+                row['Total'] = `${res.totalObtained}/${res.totalMax}`;
+                row['%'] = res.percentage.toFixed(2) + '%';
+                row['Grade'] = res.grade;
+                row['Status'] = res.status;
+                return row;
+            });
+
+            const ws = XLSX.utils.json_to_sheet(sheetData);
+
+            // Safe sheet name (max 31 chars, no special chars)
+            const safeName = sheetLabel.replace(/[:\\/?*\[\]]/g, '').slice(0, 31);
+            XLSX.utils.book_append_sheet(wb, ws, safeName);
+            totalSheetsAdded++;
+        });
+
+        if (totalSheetsAdded === 0) {
+            alert('Koi bhi class ka data nahi mila export ke liye.');
+            return;
+        }
+
+        const examName = selectedExam.displayName || selectedExam.name || 'Exam';
+        XLSX.writeFile(wb, `${examName}_Full_Results.xlsx`);
     };
 
     const publishResults = async () => {
@@ -438,8 +668,7 @@ const ExamResultsDashboard: React.FC = () => {
     const handleDeleteMarks = async () => {
         if (!selectedExamId || !selectedClass) return;
 
-        const selectedClassObj = activeClasses.find((c: any) => c.id === selectedClass);
-        const selectedClassName = selectedClassObj?.name;
+        const selectedClassName = resolveClass(selectedClass);
 
         const marksToDelete = marksEntries?.filter((m: any) =>
             m.examId === selectedExamId &&
@@ -633,6 +862,7 @@ const ExamResultsDashboard: React.FC = () => {
                         onClick={exportToExcel}
                         className="btn"
                         disabled={!filteredResults.length}
+                        title="Sirf current class ka data export karo"
                         style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -648,6 +878,30 @@ const ExamResultsDashboard: React.FC = () => {
                     >
                         <Download size={18} />
                         Export to Excel
+                    </button>
+                    {/* Full Exam Export — puri exam ka sara data, har class alag sheet */}
+                    <button
+                        onClick={exportFullExamToExcel}
+                        className="btn"
+                        disabled={!selectedExamId}
+                        title="Is exam ki sari classes ka data ek Excel file mein export karo (har class = alag sheet)"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            background: !selectedExamId ? '#f1f5f9' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                            color: !selectedExamId ? '#94a3b8' : 'white',
+                            border: 'none',
+                            borderRadius: '0.5rem',
+                            padding: '0.6rem 1rem',
+                            fontWeight: 700,
+                            cursor: !selectedExamId ? 'not-allowed' : 'pointer',
+                            boxShadow: selectedExamId ? '0 2px 8px -1px rgba(5,150,105,0.4)' : 'none',
+                            whiteSpace: 'nowrap'
+                        }}
+                    >
+                        <FileText size={18} />
+                        Export Full Exam
                     </button>
                     <button
                         onClick={publishResults}
@@ -688,7 +942,27 @@ const ExamResultsDashboard: React.FC = () => {
 
             {/* Filters */}
             <div className="card" style={{ padding: '1.5rem', marginBottom: '2.5rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+                    <div className="form-group">
+                        <label>Academic Year</label>
+                        <select
+                            className="input-field"
+                            value={selectedAcademicYear}
+                            onChange={(e) => {
+                                setSelectedAcademicYear(e.target.value);
+                                setSelectedExamId('');
+                                setSelectedClass('');
+                                setSelectedSection('');
+                            }}
+                        >
+                            <option value="">All Years</option>
+                            {schoolAcademicYears.map((yr: any) => (
+                                <option key={yr.id} value={yr.id}>
+                                    {yr.name}{yr.isActive ? ' (Current)' : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="form-group">
                         <label>Select Exam</label>
                         <select
@@ -701,7 +975,7 @@ const ExamResultsDashboard: React.FC = () => {
                             }}
                         >
                             <option value="">Choose Exam</option>
-                            {schoolExams.map(exam => (
+                            {schoolExams.map((exam: any) => (
                                 <option key={exam.id} value={exam.id}>
                                     {exam.name}{exam.displayName && exam.displayName !== exam.name ? ` (Print: ${exam.displayName})` : ''}
                                 </option>
@@ -721,7 +995,7 @@ const ExamResultsDashboard: React.FC = () => {
                         >
                             <option value="">Choose Class</option>
                             {availableClasses.map((clsId: string) => (
-                                <option key={clsId} value={clsId}>{getClassName(clsId)}</option>
+                                <option key={clsId} value={clsId}>{resolveClass(clsId)}</option>
                             ))}
                         </select>
                     </div>
@@ -734,7 +1008,12 @@ const ExamResultsDashboard: React.FC = () => {
                             disabled={!selectedClass}
                         >
                             <option value="">All Sections</option>
-                            {activeClasses.find((c: any) => c.id === selectedClass || c.name === selectedClass)?.sections?.map((sec: string) => (
+                            {activeClasses.find((c: any) =>
+                                (c.id === selectedClass ||
+                                    c.name === selectedClass ||
+                                    c.name === resolveClass(selectedClass)) &&
+                                (!selectedExam?.academicYearName || !c.financialYear || c.financialYear === selectedExam.academicYearName)
+                            )?.sections?.map((sec: string) => (
                                 <option key={sec} value={sec}>{sec}</option>
                             ))}
                         </select>
@@ -953,7 +1232,7 @@ const ExamResultsDashboard: React.FC = () => {
 
                                                     // Find the student to get their section
                                                     const currentStudent = studentList?.find((s: any) => s.id === res.studentId);
-                                                    const entry = findMarksEntry(currentStudent, sub, marksEntries);
+                                                    const entry = findMarksEntry(currentStudent, sub, examMarks);
                                                     const studentMark = entry?.marks?.find((sm: any) => sm.studentId === res.studentId);
                                                     const isAbsent = studentMark?.isAbsent || false;
                                                     const theoryVal = isAbsent ? 'AB' : (studentMark?.theoryMarks || 0);

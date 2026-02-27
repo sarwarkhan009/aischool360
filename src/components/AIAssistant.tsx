@@ -525,7 +525,7 @@ const AIAssistant: React.FC = () => {
                 .ai-report-modal-container {
                     width: 95vw; max-width: 1000px; height: 85vh; display: flex; flex-direction: column;
                     background: white; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-                    border-radius: 1.5rem; border: 1px solid var(--border);
+                    border-radius: 1.5rem; border: 1px solid var(--border); padding: 0 !important;
                 }
                 .ai-report-modal-header {
                     padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);

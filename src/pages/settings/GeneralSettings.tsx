@@ -582,18 +582,24 @@ export function ClassMaster() {
         .sort();
     const [selectedSession, setSelectedSession] = useState(activeFY);
 
-    // Sync selectedSession when activeFY loads
+    // Sync selectedSession when activeFY or schoolYears load
+    // Falls back to latest schoolYear if activeFinancialYear not set on school doc
     useEffect(() => {
-        if (activeFY && !selectedSession) {
+        if (selectedSession) return; // already set, don't override
+        if (activeFY) {
             setSelectedSession(activeFY);
+        } else if (schoolYears.length > 0) {
+            // TDS or any school where activeFinancialYear is not configured —
+            // default to the latest available academic year
+            setSelectedSession(schoolYears[schoolYears.length - 1]);
         }
-    }, [activeFY]);
+    }, [activeFY, schoolYears.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const PRESET_CLASSES = CLASS_ORDER;
     const PRESET_SECTIONS = ['A', 'B', 'C', 'D'];
 
-    // Get class settings for the selected session
-    const allClassSettings = allSettings?.filter((d: any) => d.type === 'class') || [];
+    // Get class settings for the selected session (always filter by current schoolId for safety)
+    const allClassSettings = (allSettings || []).filter((d: any) => d.type === 'class' && d.schoolId === currentSchool?.id);
     const classSettings = allClassSettings.filter((c: any) => c.financialYear === selectedSession);
 
     // Check if there are any untagged (legacy) class settings
@@ -624,7 +630,9 @@ export function ClassMaster() {
             if (matchingDocs.length > 0) {
                 const batch = writeBatch(db);
                 for (const cls of matchingDocs) {
-                    batch.update(doc(db, 'settings', cls.id), {
+                    // Always use uid (actual Firestore doc ID), not id (which may be a stored field)
+                    const firestoreId = cls.uid || cls.id;
+                    batch.update(doc(db, 'settings', firestoreId), {
                         active: !isCurrentlyActive,
                         updatedAt: new Date().toISOString()
                     });
@@ -670,7 +678,9 @@ export function ClassMaster() {
                 } else {
                     updatedSections.push(section);
                 }
-                batch.update(doc(db, 'settings', existingClass.id), {
+                // Always use uid (actual Firestore doc ID), not id (which may be a stored field)
+                const firestoreId = existingClass.uid || existingClass.id;
+                batch.update(doc(db, 'settings', firestoreId), {
                     sections: Array.from(new Set(updatedSections)).sort(),
                     updatedAt: new Date().toISOString()
                 });
@@ -692,23 +702,40 @@ export function ClassMaster() {
 
         setIsSaving('migrating');
         try {
+            // Find existing tagged docs for this session (already properly configured)
+            const existingTaggedIds = new Set(
+                classSettings.map((c: any) => getDedupKey(c.name))
+            );
+
             const batch = writeBatch(db);
+            let migratedCount = 0;
             for (const cls of untaggedClasses) {
-                const newDocId = getDocId(cls.name, targetSession);
-                batch.set(doc(db, 'settings', newDocId), {
-                    name: cls.name,
-                    sections: cls.sections || [],
-                    active: cls.active !== false,
-                    type: 'class',
-                    schoolId: currentSchool.id,
-                    financialYear: targetSession,
-                    createdAt: new Date().toISOString()
-                });
-                // Delete old untagged doc using its actual Firestore ID
-                batch.delete(doc(db, 'settings', cls.id));
+                const clsDedup = getDedupKey(cls.name);
+                const oldFirestoreId = cls.uid || cls.id;
+
+                if (existingTaggedIds.has(clsDedup)) {
+                    // A tagged doc already exists for this class — just delete the old untagged one
+                    // Do NOT overwrite the existing configured doc!
+                    batch.delete(doc(db, 'settings', oldFirestoreId));
+                } else {
+                    // No tagged doc exists — create one from the untagged data
+                    const newDocId = getDocId(cls.name, targetSession);
+                    batch.set(doc(db, 'settings', newDocId), {
+                        name: cls.name,
+                        sections: cls.sections || [],
+                        active: cls.active !== false,
+                        type: 'class',
+                        schoolId: currentSchool.id,
+                        financialYear: targetSession,
+                        createdAt: new Date().toISOString()
+                    });
+                    batch.delete(doc(db, 'settings', oldFirestoreId));
+                    migratedCount++;
+                }
             }
             await batch.commit();
-            alert(`✅ Successfully migrated ${untaggedClasses.length} classes to session ${targetSession}`);
+            const skipped = untaggedClasses.length - migratedCount;
+            alert(`✅ Cleaned up ${untaggedClasses.length} untagged records. ${migratedCount > 0 ? `Created ${migratedCount} new tagged configs.` : ''} ${skipped > 0 ? `${skipped} classes already had proper configs (preserved).` : ''}`);
         } catch (err) {
             alert('Migration failed: ' + (err as Error).message);
         } finally {
@@ -901,6 +928,31 @@ export function ClassMaster() {
                     </button>
                 </div>
             </div>
+
+            {/* Warning: No active academic year configured */}
+            {!activeFY && (
+                <div style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fca5a5',
+                    borderRadius: '12px',
+                    padding: '1rem 1.5rem',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem'
+                }}>
+                    <span style={{ fontSize: '1.25rem' }}>🚫</span>
+                    <div>
+                        <p style={{ fontWeight: 700, color: '#991b1b', margin: 0, fontSize: '0.9rem' }}>
+                            No Active Academic Year / Session set for this school
+                        </p>
+                        <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '0.25rem 0 0' }}>
+                            Class toggles will not work until an active session is configured.
+                            Go to <strong>Exam Management → Academic Year & Terms</strong> and mark a year as <strong>Active</strong>.
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* Migration banner for untagged classes */}
             {untaggedClasses.length > 0 && (

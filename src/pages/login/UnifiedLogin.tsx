@@ -203,7 +203,7 @@ const UnifiedLogin: React.FC = () => {
                             displayRole: customRole?.label || 'Teacher',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
-                            id: doc.id,
+                            id: docData.id || doc.id,
                             schoolId: docData.schoolId || filterSchoolId
                         });
                     } else {
@@ -224,7 +224,7 @@ const UnifiedLogin: React.FC = () => {
                             displayRole: customRole?.label || 'Bus Driver',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
-                            id: doc.id,
+                            id: docData.id || doc.id,
                             schoolId: docData.schoolId || filterSchoolId
                         });
                     } else {
@@ -253,7 +253,7 @@ const UnifiedLogin: React.FC = () => {
                             displayRole: matchedRole?.label || empType,
                             permissions: matchedRole?.permissions || defaultRole?.permissions || [],
                             mobile,
-                            id: doc.id,
+                            id: docData.id || doc.id,
                             schoolId: docData.schoolId || filterSchoolId
                         });
                     } else {
@@ -304,8 +304,8 @@ const UnifiedLogin: React.FC = () => {
                             displayRole: customRole?.label || 'Parent',
                             permissions: customRole?.permissions || defaultRole?.permissions || [],
                             mobile,
-                            id: student.id,
-                            admissionNo: sData.admissionNo || student.id,
+                            id: sData.id || student.id,
+                            admissionNo: sData.admissionNo || sData.id || student.id,
                             schoolId: sData.schoolId || filterSchoolId,
                             class: sData.class,
                             section: sData.section,

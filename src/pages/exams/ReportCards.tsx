@@ -103,9 +103,15 @@ const ReportCards: React.FC = () => {
         return students.filter((s: any) =>
             s.schoolId === currentSchool?.id &&
             s.status === 'ACTIVE' &&
-            (!selectedClass || s.class === selectedClass || s.class === selectedClassName)
-        );
-    }, [students, currentSchool, selectedClass, activeClasses]);
+            (!selectedClass || s.class === selectedClass || s.class === selectedClassName) &&
+            (selectedExam?.academicYearName ? s.session === selectedExam.academicYearName : true)
+        ).sort((a: any, b: any) => {
+            const rollA = parseInt(a.classRollNo || a.rollNo || a.admissionNumber || '999');
+            const rollB = parseInt(b.classRollNo || b.rollNo || b.admissionNumber || '999');
+            if (!isNaN(rollA) && !isNaN(rollB)) return rollA - rollB;
+            return (a.classRollNo || a.rollNo || '').localeCompare(b.classRollNo || b.rollNo || '', undefined, { numeric: true });
+        });
+    }, [students, currentSchool, selectedClass, activeClasses, selectedExam]);
 
     const getStudentResult = (studentId: string) => {
         if (!selectedExamId) return null;

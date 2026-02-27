@@ -42,6 +42,7 @@ const StudentManagement: React.FC = () => {
     const sectionsList = selectedClass ? (activeClasses.find((c: any) => c.name === selectedClass)?.sections || []) : [];
     const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
     const [selectedGenders, setSelectedGenders] = useState<string[]>(['Male', 'Female']);
+    const [selectedBirthMonth, setSelectedBirthMonth] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [entriesToShow, setEntriesToShow] = useState(10);
     const [showCleanButton, setShowCleanButton] = useState(false);
@@ -284,9 +285,26 @@ const StudentManagement: React.FC = () => {
 
         const matchesGender = selectedGenders.length === 0 || (s.gender && selectedGenders.includes(s.gender)) || (!s.gender && selectedGenders.includes('Male')); // Default to Male if not specified? Or handle empty.
 
-        return matchesSession && matchesClass && matchesSection && matchesStatus && matchesSearch && matchesGender;
+        let matchesBirthMonth = true;
+        if (selectedBirthMonth) {
+            if (s.dob) {
+                const dobDate = new Date(s.dob);
+                matchesBirthMonth = !isNaN(dobDate.getTime()) && (dobDate.getMonth() + 1) === parseInt(selectedBirthMonth);
+            } else {
+                matchesBirthMonth = false;
+            }
+        }
+
+        return matchesSession && matchesClass && matchesSection && matchesStatus && matchesSearch && matchesGender && matchesBirthMonth;
     }).sort((a, b) => {
-        // Sort by Class Roll No / Roll No if available, else by name
+        // If birthday month filter is active → sort by day of month
+        if (selectedBirthMonth) {
+            const dayA = a.dob ? new Date(a.dob).getDate() : 999;
+            const dayB = b.dob ? new Date(b.dob).getDate() : 999;
+            return dayA - dayB;
+        }
+
+        // Default: Sort by Class Roll No / Roll No if available, else by name
         const rollA = parseInt(a.classRollNo || a.rollNo);
         const rollB = parseInt(b.classRollNo || b.rollNo);
 
@@ -763,6 +781,26 @@ const StudentManagement: React.FC = () => {
                                     </button>
                                 ))}
                             </div>
+                            <select
+                                className="input-field"
+                                style={{ padding: '0.5rem', width: 'auto', background: 'white' }}
+                                value={selectedBirthMonth}
+                                onChange={(e) => setSelectedBirthMonth(e.target.value)}
+                            >
+                                <option value="">Birthday Month</option>
+                                <option value="1">January</option>
+                                <option value="2">February</option>
+                                <option value="3">March</option>
+                                <option value="4">April</option>
+                                <option value="5">May</option>
+                                <option value="6">June</option>
+                                <option value="7">July</option>
+                                <option value="8">August</option>
+                                <option value="9">September</option>
+                                <option value="10">October</option>
+                                <option value="11">November</option>
+                                <option value="12">December</option>
+                            </select>
                         </div>
                     </div>
 
@@ -805,6 +843,7 @@ const StudentManagement: React.FC = () => {
                                         <th style={{ padding: '1.25rem 1rem' }}>Roll No</th>
                                         <th style={{ padding: '1.25rem 1rem' }}>Student Details</th>
                                         <th style={{ padding: '1.25rem 1rem' }}>Parent Info</th>
+                                        <th style={{ padding: '1.25rem 1rem' }}>Date of Birth</th>
                                         <th style={{ padding: '1.25rem 1rem' }}>Contact</th>
                                         <th style={{ padding: '1.25rem 1rem' }}>PIN</th>
                                         <th style={{ padding: '1.25rem 1rem' }}>Status</th>
@@ -836,6 +875,15 @@ const StudentManagement: React.FC = () => {
                                             <td style={{ padding: '1.25rem 1rem' }}>
                                                 <div style={{ fontWeight: 500 }}>{toProperCase(stu.parentName || stu.fatherName)}</div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {stu.admissionNo || stu.id}</div>
+                                            </td>
+                                            <td style={{ padding: '1.25rem 1rem', fontSize: '0.875rem' }}>
+                                                {stu.dob ? (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                        <div style={{ fontWeight: 600 }}>{formatDate(stu.dob)}</div>
+                                                    </div>
+                                                ) : (
+                                                    <span style={{ color: 'var(--text-muted)' }}>-</span>
+                                                )}
                                             </td>
                                             <td style={{ padding: '1.25rem 1rem', fontSize: '0.875rem' }}>
                                                 <div>{stu.fatherContactNo || stu.fatherMobile || stu.mobileNo || stu.phone || '-'}</div>

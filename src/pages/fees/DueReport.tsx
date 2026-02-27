@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useFirestore } from '../../hooks/useFirestore';
 import { useSchool } from '../../context/SchoolContext';
-import { DollarSign, Calendar, User, Search, Download, AlertCircle, RefreshCw, Layers, ChevronDown, ChevronUp, Clock, CreditCard, Hash, MessageCircle, Table2, LayoutGrid, X } from 'lucide-react';
+import { DollarSign, Calendar, User, Search, Download, AlertCircle, RefreshCw, Layers, ChevronDown, ChevronUp, Clock, CreditCard, Hash, MessageCircle, Table2, LayoutGrid, X, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useParams } from 'react-router-dom';
 import { db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -431,6 +432,24 @@ const DueReport: React.FC = () => {
         }, 500);
     };
 
+    const handleExportExcel = () => {
+        const data = filteredResults.map((s: any) => ({
+            'Roll No': s.rollNo || '',
+            'Student Name': s.name,
+            'Admission No': s.admissionNo,
+            'Class': `${formatClassName(s.class, currentSchool?.useRomanNumerals)} - ${s.section}`,
+            'Phone': s.phone,
+            'Total Payable': s.totalPayable,
+            'Total Paid': s.totalPaid,
+            'Remaining Dues': s.dues
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Due Report");
+        XLSX.writeFile(wb, `Due_Report_${activeFY}_${filterClass}_${filterSection}.xlsx`);
+    };
+
     const sendWhatsApp = (s: any) => {
         const phone = s.phone.replace(/\D/g, '');
         if (!phone || phone === 'N/A') {
@@ -649,6 +668,28 @@ const DueReport: React.FC = () => {
                             }}
                         >
                             <Download size={18} /> PRINT REPORT
+                        </button>
+                        <button
+                            onClick={handleExportExcel}
+                            className="btn no-print hover-lift"
+                            style={{
+                                background: '#10b981',
+                                border: 'none',
+                                padding: '0.875rem 1.25rem',
+                                borderRadius: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                fontWeight: 700,
+                                color: 'white',
+                                fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                                cursor: 'pointer',
+                                transition: 'all 0.3s ease'
+                            }}
+                        >
+                            <FileSpreadsheet size={18} /> EXPORT EXCEL
                         </button>
                         <button
                             onClick={() => setViewMode(viewMode === 'detailed' ? 'ledger' : 'detailed')}

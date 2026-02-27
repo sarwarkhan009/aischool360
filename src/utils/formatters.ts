@@ -113,3 +113,76 @@ export const formatClassName = (className: string, useRoman: boolean = false): s
 
     return className;
 };
+
+/**
+ * Resolves a class ID (especially legacy ones) to a human-readable name.
+ * Priority: (1) exact ID match in activeClasses, (2) exact name match,
+ * (3) derive name from the ID pattern "class_<name>_<schoolId>_<fy>"
+ */
+export const resolveClassName = (classId: string, activeClasses: any[]): string => {
+    if (!classId) return '';
+
+    // First try standard match by ID or Name
+    const found = activeClasses.find((c: any) => c.id === classId || c.name === classId);
+    if (found) return found.name;
+
+    // Fallback logic for legacy/mismatched IDs
+    // Example: "class_pre_nursery_gmschool_2025_2026"
+    if (classId.startsWith('class_')) {
+        const parts = classId.split('_');
+        if (parts.length >= 3) {
+            let classNamePart = '';
+            for (let i = 1; i < parts.length; i++) {
+                if (parts[i] === 'gmschool' || parts[i].match(/^\d{4}$/) || activeClasses[0]?.schoolId === parts[i]) {
+                    break;
+                }
+                classNamePart += (classNamePart ? ' ' : '') + parts[i];
+            }
+
+            if (classNamePart) {
+                const formattedName = toProperCase(classNamePart.replace(/_/g, ' '));
+                const tryNameMatch = activeClasses.find((c: any) => c.name.toLowerCase() === formattedName.toLowerCase());
+                if (tryNameMatch) return tryNameMatch.name;
+                return formattedName;
+            }
+        }
+    }
+    return classId; // Return raw ID if nothing works
+};
+
+/**
+ * Checks if two subject names match based on fuzzy logic rules.
+ * Useful for mapping entry subjects to exam subjects, where short/alternative names are used.
+ */
+export const subjectMatches = (entrySubNameStr: string, subjectNameStr: string, combinedSubjectsList?: string[]): boolean => {
+    const entrySubName = (entrySubNameStr || '').toUpperCase().trim();
+    const subName = (subjectNameStr || '').toUpperCase().trim();
+
+    const cleanEntrySub = entrySubName.replace(/[\s./-]/g, '');
+    const cleanSub = subName.replace(/[\s./-]/g, '');
+
+    if (cleanEntrySub === cleanSub) return true;
+
+    // Substring match only when names are very similar in length (≥75%) to prevent "Science" matching "Social Science"
+    const shorter = Math.min(cleanEntrySub.length, cleanSub.length);
+    const longer = Math.max(cleanEntrySub.length, cleanSub.length);
+    if (longer > 0 && shorter / longer >= 0.75 &&
+        (cleanEntrySub.includes(cleanSub) || cleanSub.includes(cleanEntrySub))) return true;
+
+    if (combinedSubjectsList) {
+        const subCombined = combinedSubjectsList.map((c: string) => c.toUpperCase().trim().replace(/[\s./-]/g, ''));
+        if (subCombined.some((c: string) => cleanEntrySub.includes(c) || c.includes(cleanEntrySub))) return true;
+    }
+
+    // Specific domain mapping abbreviations
+    const isAbbrev = (cleanEntrySub.includes('URDU') && cleanSub.includes('URDU')) ||
+        (cleanEntrySub.includes('SANS') && cleanSub.includes('SANS')) ||
+        (cleanEntrySub.includes('DEEN') && cleanSub.includes('DEEN')) ||
+        (cleanEntrySub.includes('CONV') && cleanSub.includes('CONV')) ||
+        (cleanEntrySub.includes('COMP') && cleanSub.includes('COMP')) ||
+        (cleanEntrySub.includes('DRAW') && cleanSub.includes('DRAW')) ||
+        (cleanEntrySub.includes('GK') && cleanSub.includes('GK')) ||
+        (cleanEntrySub.includes('KNOW') && cleanSub.includes('KNOW'));
+
+    return isAbbrev;
+};

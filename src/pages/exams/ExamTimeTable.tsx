@@ -419,7 +419,7 @@ const ExamTimeTable: React.FC = () => {
                             onClick={async () => {
                                 if (!confirm(`Generate timetable slots from exam data?`)) return;
                                 try {
-                                    const targetClasses = selectedExam.targetClasses || selectedExam.classes || [];
+                                    const targetClasses = (selectedExam.targetClasses || selectedExam.classes || []).filter((c: string) => activeClasses.some((ac: any) => ac.id === c));
                                     let syncCount = 0;
 
                                     if (selectedExam.classRoutines && selectedExam.classRoutines.length > 0) {

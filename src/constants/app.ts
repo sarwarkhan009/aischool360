@@ -25,15 +25,31 @@ export const sortClasses = (classes: any[]) => {
 
     const getDedupKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    // Deduplicate by name first (aggressive normalization)
+    // Deduplicate by name (aggressive normalization)
+    // Where two entries resolve to the same class name, prefer the one
+    // whose original name was already clean (not a legacy-format name).
     const uniqueMap = new Map();
     classes.forEach(item => {
-        const name = typeof item === 'string' ? item : (item.name || '');
+        let name = typeof item === 'string' ? item : (item.name || '');
+
+        // Auto-fix corrupted class names that look like legacy admin IDs.
+        // e.g. 'class_class_6_admin_' or 'class_class6_admin' -> 'Class 6'
+        // This handles cases where the real Class 6 document has a corrupted name.
+        const legacyNameMatch = name.match(/class[_\s]*class[_\s]*(\d+)[_\s]*admin/i);
+        const isLegacyName = !!legacyNameMatch;
+        if (legacyNameMatch) {
+            name = `Class ${legacyNameMatch[1]}`;
+        }
+
         const norm = normalize(name);
         if (!norm) return;
 
         const dedupKey = getDedupKey(norm);
         if (!uniqueMap.has(dedupKey)) {
+            const processedItem = typeof item === 'string' ? norm : { ...item, name: norm };
+            uniqueMap.set(dedupKey, processedItem);
+        } else if (isLegacyName === false) {
+            // Prefer clean-named entry over legacy-named entry — overwrite
             const processedItem = typeof item === 'string' ? norm : { ...item, name: norm };
             uniqueMap.set(dedupKey, processedItem);
         }

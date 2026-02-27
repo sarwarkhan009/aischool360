@@ -82,7 +82,7 @@ const AdmitCards: React.FC = () => {
             }
             // Show students from exam's target classes if exam is selected
             if (selectedExam?.targetClasses && studentClassId) {
-                return selectedExam.targetClasses.includes(studentClassId) && matchesSearch;
+                return selectedExam.targetClasses.includes(studentClassId) && matchesSearch && s.session === selectedExam.academicYearName;
             }
             return matchesSearch;
         }
@@ -94,7 +94,7 @@ const AdmitCards: React.FC = () => {
             // Then check if student's class is in exam's targetClasses
             if (selectedExam?.targetClasses && studentClassId) {
                 const isInExamClasses = selectedExam.targetClasses.includes(studentClassId);
-                return matchesClass && isInExamClasses && matchesSearch;
+                return matchesClass && isInExamClasses && matchesSearch && s.session === selectedExam.academicYearName;
             }
 
             // If no exam selected, just use class filter
@@ -104,7 +104,7 @@ const AdmitCards: React.FC = () => {
         if (generationMode === 'exam') {
             // Match using class ID, not class name
             if (selectedExam?.targetClasses && studentClassId) {
-                return selectedExam.targetClasses.includes(studentClassId) && matchesSearch;
+                return selectedExam.targetClasses.includes(studentClassId) && matchesSearch && s.session === selectedExam.academicYearName;
             }
             return false;
         }

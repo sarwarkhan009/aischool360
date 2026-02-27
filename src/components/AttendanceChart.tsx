@@ -79,7 +79,6 @@ export default function AttendanceChart({ data }: AttendanceChartProps) {
                             strokeWidth="20"
                             strokeDasharray={`${(animatedData.present / 100) * 2 * Math.PI * 95} ${2 * Math.PI * 95}`}
                             strokeLinecap="round"
-                            style={{ transition: 'stroke-dasharray 0.3s ease' }}
                         />
 
                         {/* Late arc (yellow/orange) */}
@@ -93,7 +92,6 @@ export default function AttendanceChart({ data }: AttendanceChartProps) {
                             strokeDasharray={`${(animatedData.late / 100) * 2 * Math.PI * 95} ${2 * Math.PI * 95}`}
                             strokeDashoffset={-((animatedData.present / 100) * 2 * Math.PI * 95)}
                             strokeLinecap="round"
-                            style={{ transition: 'stroke-dasharray 0.3s ease, stroke-dashoffset 0.3s ease' }}
                         />
 
                         {/* Absent arc (red) */}
@@ -107,7 +105,6 @@ export default function AttendanceChart({ data }: AttendanceChartProps) {
                             strokeDasharray={`${(animatedData.absent / 100) * 2 * Math.PI * 95} ${2 * Math.PI * 95}`}
                             strokeDashoffset={-(((animatedData.present + animatedData.late) / 100) * 2 * Math.PI * 95)}
                             strokeLinecap="round"
-                            style={{ transition: 'stroke-dasharray 0.3s ease, stroke-dashoffset 0.3s ease' }}
                         />
                     </svg>
 

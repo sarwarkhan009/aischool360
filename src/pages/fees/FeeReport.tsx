@@ -36,6 +36,16 @@ const getLocalDateStr = (record: any): string => {
     return '';
 };
 
+const getPaidAmount = (record: any): number => {
+    if (record.paid !== undefined && record.paid !== null && record.paid !== '') {
+        return parseFloat(record.paid) || 0;
+    }
+    if (record.amount !== undefined && record.amount !== null && record.amount !== '') {
+        return parseFloat(record.amount) || 0;
+    }
+    return 0;
+};
+
 const FeeReport: React.FC = () => {
     const { currentSchool } = useSchool();
     const { user } = useAuth();
@@ -166,7 +176,7 @@ const FeeReport: React.FC = () => {
             const breakdown = record.feeBreakdown || {};
 
             if (Object.keys(breakdown).length === 0) {
-                const amount = parseFloat(record.paid || record.amount) || 0;
+                const amount = getPaidAmount(record);
                 let head = record.paidFor || 'Unknown';
 
                 if (EXAM_FEE_TITLES.some(t => head.includes(t))) {
@@ -201,7 +211,7 @@ const FeeReport: React.FC = () => {
                     allDynamicHeads.add('Prev. Dues');
                 }
 
-                const actualPaid = parseFloat(record.paid || record.amount) || 0;
+                const actualPaid = getPaidAmount(record);
                 g.total += actualPaid;
             }
         });
@@ -237,7 +247,7 @@ const FeeReport: React.FC = () => {
         return matchesDate && matchesCategory && matchesClass && matchesSearch;
     }).sort((a: any, b: any) => getRecordTimestamp(b) - getRecordTimestamp(a));
 
-    const cancelledTotalAmount = cancelledRecords.reduce((sum: number, r: any) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
+    const cancelledTotalAmount = cancelledRecords.reduce((sum: number, r: any) => sum + getPaidAmount(r), 0);
 
     const displayRecords = recordTab === 'ACTIVE' ? filteredRecords : cancelledRecords;
 
@@ -264,10 +274,16 @@ const FeeReport: React.FC = () => {
         document.body.removeChild(link);
     };
 
-    const totalAmount = filteredRecords.reduce((sum: number, r: any) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
-    const cashAmount = filteredRecords
-        .filter((r: any) => !r.paymentMode || r.paymentMode === 'Cash')
-        .reduce((sum: number, r: any) => sum + (parseFloat(r.paid || r.amount) || 0), 0);
+    const totalAmount = filteredRecords.reduce((sum: number, r: any) => sum + getPaidAmount(r), 0);
+    const cashAmount = filteredRecords.reduce((sum: number, r: any) => {
+        if (r.paymentMode === 'Split') {
+            return sum + (parseFloat(r.splitAmountCash) || 0);
+        }
+        if (!r.paymentMode || r.paymentMode === 'Cash') {
+            return sum + getPaidAmount(r);
+        }
+        return sum;
+    }, 0);
     const onlineAmount = totalAmount - cashAmount;
 
     const handleExport = () => {
@@ -282,7 +298,7 @@ const FeeReport: React.FC = () => {
             'Student Name': r.studentName,
             'Class': `${r.class || ''}${r.section ? ` - ${r.section}` : ''}`,
             'Fee Type': r.paidFor || 'Monthly Fee',
-            'Amount': r.paid || r.amount,
+            'Amount': getPaidAmount(r),
             'Status': r.status,
             'Payment Mode': r.paymentMode || 'Cash',
             'Cancel Reason': r.cancellationReason || ''
@@ -832,7 +848,7 @@ const FeeReport: React.FC = () => {
                                                     {record.section && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{record.section}</div>}
                                                 </td>
                                                 <td style={{ padding: '1rem' }}>{record.paidFor || 'Monthly Fee'}</td>
-                                                <td style={{ padding: '1rem', fontWeight: 600 }}>₹{parseFloat(record.paid || record.amount || 0).toFixed(2)}</td>
+                                                <td style={{ padding: '1rem', fontWeight: 600 }}>₹{getPaidAmount(record).toFixed(2)}</td>
                                                 <td style={{ padding: '1rem' }}>
                                                     <span className={`badge ${record.status === 'PAID' ? 'badge-success' :
                                                         record.status === 'CANCELLED' ? 'badge-danger' :

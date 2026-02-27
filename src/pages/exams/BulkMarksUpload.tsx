@@ -75,7 +75,10 @@ const BulkMarksUpload: React.FC = () => {
     const [uploadComplete, setUploadComplete] = useState(false);
 
     const selectedExamData = schoolExams.find(e => e.id === selectedExam);
-    const selectedClassObj = activeClasses.find((c: any) => c.id === selectedClass || c.name === selectedClass);
+    const selectedClassObj = activeClasses.find((c: any) =>
+        (c.id === selectedClass || c.name === selectedClass) &&
+        (!selectedExamData?.academicYearName || !c.financialYear || c.financialYear === selectedExamData.academicYearName)
+    );
     const sectionsList = selectedClassObj?.sections || [];
 
     // Enhanced student matching to support both "Class 3" and "STD III" formats
@@ -95,6 +98,9 @@ const BulkMarksUpload: React.FC = () => {
 
         // Match section if selected
         if (selectedSection && s.section !== selectedSection) return false;
+
+        // Match session
+        if (selectedExamData?.academicYearName && s.session !== selectedExamData.academicYearName) return false;
 
         return true;
     }) || [];

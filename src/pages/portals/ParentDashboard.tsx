@@ -678,7 +678,7 @@ const ParentDashboard: React.FC = () => {
         const totalMarked = totalCompleted + totalPartial + totalNotDone;
         const totalPending = totalAssigned - totalMarked;
         const effectiveCompleted = totalCompleted + (totalPartial * 0.5);
-        const rate = totalMarked > 0 ? (effectiveCompleted / totalMarked) * 100 : 0;
+        const rate = totalAssigned > 0 ? (effectiveCompleted / totalAssigned) * 100 : 0;
 
         return {
             attPercent,
