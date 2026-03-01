@@ -145,7 +145,16 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
         lines.push('Name: ' + (receipt.studentName || '').toUpperCase());
         lines.push('ID: ' + (receipt.admissionNo || 'N/A'));
         lines.push('Class: ' + (receipt.class || '') + (receipt.section ? '-' + receipt.section : '') + '  Roll: ' + rollNo);
-        lines.push('Mode: ' + (receipt.paymentMode || 'CASH'));
+        const mode = receipt.paymentMode || 'Cash';
+        if (mode === 'Split') {
+            lines.push('Mode: Cash + Online');
+            const cashAmt = receipt.splitAmountCash ?? totalPaid;
+            const onlineAmt = receipt.splitAmountOnline ?? 0;
+            lines.push(pad('  Cash:', cashAmt.toFixed(2)));
+            lines.push(pad('  Online:', onlineAmt.toFixed(2)));
+        } else {
+            lines.push('Mode: ' + mode);
+        }
         if (receipt.paidFor) {
             lines.push('For: ' + receipt.paidFor);
         }
@@ -374,9 +383,9 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                     <button onClick={handleWhatsAppReceipt} className="btn" style={{ background: '#25D366', color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
                         <MessageCircle size={16} /> WhatsApp
                     </button>
-                    <button onClick={handleWhatsAppPDF} className="btn" style={{ background: '#075E54', color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+                    {/* <button onClick={handleWhatsAppPDF} className="btn" style={{ background: '#075E54', color: 'white', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
                         <FileText size={16} /> WhatsApp PDF
-                    </button>
+                    </button> */}
                     <button onClick={handlePrint} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Printer size={18} /> Print
                     </button>
@@ -480,6 +489,19 @@ const FeeReceipt: React.FC<FeeReceiptProps> = ({ receipt, studentData, schoolInf
                                 <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Class</strong></td>
                                 <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
                                     {receipt.class}{receipt.section ? `-${receipt.section}` : ''} <span style={{ float: 'right' }}><strong>Roll No:</strong> {receipt.rollNo || studentData?.classRollNo || studentData?.rollNo || 'N/A'}</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style={{ border: '1px solid #000', padding: '3px 6px' }}><strong>Payment Mode</strong></td>
+                                <td style={{ border: '1px solid #000', padding: '3px 6px' }}>
+                                    {receipt.paymentMode === 'Split' ? (
+                                        <>
+                                            Cash + Online
+                                            <span style={{ fontSize: '9px', fontWeight: 'normal', display: 'inline-block', marginLeft: '6px' }}>
+                                                (Cash: ₹{(receipt.splitAmountCash ?? totalPaid).toFixed(2)} | Online: ₹{(receipt.splitAmountOnline ?? 0).toFixed(2)})
+                                            </span>
+                                        </>
+                                    ) : (receipt.paymentMode || 'Cash')}
                                 </td>
                             </tr>
                         </tbody>

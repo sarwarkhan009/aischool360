@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Image as ImageIcon, Loader2, Calendar, ZoomIn } from 'lucide-react';
 
@@ -7,22 +7,18 @@ const ParentGallery: React.FC = () => {
     const [images, setImages] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
+    // Real-time listener for gallery
     useEffect(() => {
-        fetchImages();
-    }, []);
-
-    const fetchImages = async () => {
-        setLoading(true);
-        try {
-            const q = query(collection(db, 'gallery'), orderBy('eventDate', 'desc'));
-            const snap = await getDocs(q);
+        const q = query(collection(db, 'gallery'), orderBy('eventDate', 'desc'));
+        const unsub = onSnapshot(q, (snap) => {
             setImages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-        } catch (e) {
-            console.error(e);
-        } finally {
             setLoading(false);
-        }
-    };
+        }, (err) => {
+            console.error('Gallery listener error:', err);
+            setLoading(false);
+        });
+        return () => unsub();
+    }, []);
 
     return (
         <div className="gallery-container animate-fade-in">

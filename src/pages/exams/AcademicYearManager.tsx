@@ -37,6 +37,16 @@ interface AcademicYear {
     updatedAt: string;
 }
 
+const formatDate = (dateString: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    const day = date.getDate().toString().padStart(2, '0');
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+};
+
 const AcademicYearManager: React.FC = () => {
     const { currentSchool, updateSchoolData } = useSchool();
     const { data: academicYears, add: addDocument, update: updateDocument, remove: deleteDocument } = useFirestore<AcademicYear>('academic_years');
@@ -391,7 +401,7 @@ const AcademicYearManager: React.FC = () => {
                             <div style={{ fontSize: '0.875rem', fontWeight: 600, opacity: 0.9 }}>CURRENT ACADEMIC YEAR</div>
                             <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{activeYear.name}</div>
                             <div style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
-                                {new Date(activeYear.startDate).toLocaleDateString()} - {new Date(activeYear.endDate).toLocaleDateString()}
+                                {formatDate(activeYear.startDate)} - {formatDate(activeYear.endDate)}
                                 {activeYear.terms.length > 0 && ` • ${activeYear.terms.length} Terms`}
                             </div>
                         </div>
@@ -473,7 +483,7 @@ const AcademicYearManager: React.FC = () => {
                                         )}
                                     </div>
                                     <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                                        {new Date(year.startDate).toLocaleDateString()} - {new Date(year.endDate).toLocaleDateString()}
+                                        {formatDate(year.startDate)} - {formatDate(year.endDate)}
                                     </p>
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -666,7 +676,7 @@ const AcademicYearManager: React.FC = () => {
                                                             )}
                                                         </div>
                                                         <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                                                            {new Date(term.startDate).toLocaleDateString()} - {new Date(term.endDate).toLocaleDateString()}
+                                                            {formatDate(term.startDate)} - {formatDate(term.endDate)}
                                                         </div>
                                                     </div>
                                                     <div style={{ display: 'flex', gap: '0.5rem' }}>

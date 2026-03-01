@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Receipt, History, Info, Wallet, Loader2 } from 'lucide-react';
 import { formatDate } from '../../utils/dateUtils';
@@ -18,46 +18,43 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
     const [feeTypes, setFeeTypes] = useState<any[]>([]);
     const [feeAmounts, setFeeAmounts] = useState<any[]>([]);
 
+    // Real-time listener for fee metadata (fee_types + fee_amounts)
     useEffect(() => {
-        if (admissionNo) {
-            fetchHistory();
-            fetchMetadata();
-        } else {
-            setLoading(false);
-        }
-    }, [admissionNo]);
+        const schoolId = studentData?.schoolId || currentSchool?.id;
+        if (!schoolId) return;
+        const unsubs: (() => void)[] = [];
 
-    const fetchMetadata = async () => {
-        try {
-            const schoolId = studentData?.schoolId || currentSchool?.id;
-            if (!schoolId) return;
+        const typesUnsub = onSnapshot(
+            query(collection(db, 'fee_types'), where('schoolId', '==', schoolId)),
+            (snap) => setFeeTypes(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+            (err) => console.error('Fee types listener error:', err)
+        );
+        unsubs.push(typesUnsub);
 
-            const [typesSnap, amountsSnap] = await Promise.all([
-                getDocs(query(collection(db, 'fee_types'), where('schoolId', '==', schoolId))),
-                getDocs(query(collection(db, 'fee_amounts'), where('schoolId', '==', schoolId)))
-            ]);
+        const amountsUnsub = onSnapshot(
+            query(collection(db, 'fee_amounts'), where('schoolId', '==', schoolId)),
+            (snap) => setFeeAmounts(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+            (err) => console.error('Fee amounts listener error:', err)
+        );
+        unsubs.push(amountsUnsub);
 
-            setFeeTypes(typesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-            setFeeAmounts(amountsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        } catch (e) {
-            console.error('Metadata fetch failed:', e);
-        }
-    };
+        return () => unsubs.forEach(u => u());
+    }, [studentData?.schoolId, currentSchool?.id]);
 
-    const fetchHistory = async () => {
+    // Real-time listener for fee collections (payment history)
+    useEffect(() => {
         const schoolId = studentData?.schoolId || currentSchool?.id;
         if (!admissionNo || !schoolId) {
             setLoading(false);
             return;
         }
         setLoading(true);
-        try {
-            const q = query(
-                collection(db, 'fee_collections'),
-                where('admissionNo', '==', admissionNo),
-                where('schoolId', '==', schoolId)
-            );
-            const snap = await getDocs(q);
+        const q = query(
+            collection(db, 'fee_collections'),
+            where('admissionNo', '==', admissionNo),
+            where('schoolId', '==', schoolId)
+        );
+        const unsub = onSnapshot(q, (snap) => {
             const collections = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
             // Sort in memory to avoid index requirement
             collections.sort((a, b) => {
@@ -66,12 +63,13 @@ const ParentFeeLedger: React.FC<Props> = ({ admissionNo, studentData }) => {
                 return dateB - dateA;
             });
             setHistory(collections);
-        } catch (e) {
-            console.error(e);
-        } finally {
             setLoading(false);
-        }
-    };
+        }, (err) => {
+            console.error('Fee collections listener error:', err);
+            setLoading(false);
+        });
+        return () => unsub();
+    }, [admissionNo, studentData?.schoolId, currentSchool?.id]);
 
     const MONTH_MAP = getMonthIndexMap();
     const academicStartMonthIdx = MONTH_MAP[currentSchool?.academicYearStartMonth || 'April'];

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { BookOpen, Calendar, User, Loader2, Clock, ClipboardList } from 'lucide-react';
 
@@ -16,29 +16,26 @@ const ParentHomework: React.FC<Props> = ({ studentId, studentClass, section, sch
     const [loading, setLoading] = useState(true);
     const [timeRange, setTimeRange] = useState<'THIS_MONTH' | 'LAST_MONTH' | 'LIFETIME'>('THIS_MONTH');
 
+    // Real-time listener for homework submissions
     useEffect(() => {
-        if (studentClass && schoolId) {
-            fetchHomework();
-        }
-    }, [studentClass, section, schoolId, timeRange]);
+        if (!studentId) return;
+        const subQ = query(collection(db, 'homeworkSubmissions'), where('studentId', '==', studentId));
+        const unsub = onSnapshot(subQ, (snap) => {
+            setSubmissions(snap.docs.map(d => d.data()));
+        }, (err) => console.error('Submissions listener error:', err));
+        return () => unsub();
+    }, [studentId]);
 
-    const fetchHomework = async () => {
+    // Real-time listener for class homework
+    useEffect(() => {
+        if (!studentClass || !schoolId) return;
         setLoading(true);
-        try {
-            // Fetch Submission Statuses
-            const subRef = collection(db, 'homeworkSubmissions');
-            const subQ = query(subRef, where('studentId', '==', studentId));
-            const subSnap = await getDocs(subQ);
-            const subs = subSnap.docs.map(d => d.data());
-            setSubmissions(subs);
-
-            const hRef = collection(db, 'homework');
-            const q = query(
-                hRef,
-                where('schoolId', '==', schoolId),
-                where('class', '==', studentClass)
-            );
-            const snap = await getDocs(q);
+        const q = query(
+            collection(db, 'homework'),
+            where('schoolId', '==', schoolId),
+            where('class', '==', studentClass)
+        );
+        const unsub = onSnapshot(q, (snap) => {
             const allTasks = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
             // Filter by Range & Section
@@ -58,7 +55,7 @@ const ParentHomework: React.FC<Props> = ({ studentId, studentClass, section, sch
                 return true;
             });
 
-            // Sort by createdAt timestamp (newest first) - more accurate than assignedDate
+            // Sort by createdAt timestamp (newest first)
             filteredTasks.sort((a, b) => {
                 const aTime = new Date(a.createdAt || a.assignedDate || 0).getTime();
                 const bTime = new Date(b.createdAt || b.assignedDate || 0).getTime();
@@ -66,12 +63,13 @@ const ParentHomework: React.FC<Props> = ({ studentId, studentClass, section, sch
             });
 
             setTasks(filteredTasks);
-        } catch (e) {
-            console.error(e);
-        } finally {
             setLoading(false);
-        }
-    };
+        }, (err) => {
+            console.error('Homework listener error:', err);
+            setLoading(false);
+        });
+        return () => unsub();
+    }, [studentClass, section, schoolId, timeRange]);
 
     return (
         <div className="animate-fade-in no-scrollbar">

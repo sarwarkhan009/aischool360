@@ -75,6 +75,7 @@ import TemplateEditor from './pages/exams/TemplateEditor';
 import PaymentSettings from './pages/settings/PaymentSettings';
 import AdmitCards from './pages/exams/AdmitCards';
 import CombinedReportCard from './pages/exams/CombinedReportCard';
+import PrintReportCard2 from './pages/exams/PrintReportCard2';
 import TemplateManagement from './pages/exams/TemplateManagement';
 import ReportCards from './pages/exams/ReportCards';
 import AccountsDashboard from './pages/accounts/AccountsDashboard';
@@ -276,6 +277,7 @@ const AuthWrapper = () => {
             <Route path="exams/template-management" element={<ProtectedRoute requiredPermission={Permission.MANAGE_EXAMS}><TemplateManagement /></ProtectedRoute>} />
             <Route path="exams/report-cards" element={<ProtectedRoute requiredPermission={Permission.PRINT_REPORT_CARDS}><ReportCards /></ProtectedRoute>} />
             <Route path="report-cards" element={<ProtectedRoute requiredPermission={Permission.PRINT_REPORT_CARDS}><CombinedReportCard /></ProtectedRoute>} />
+            <Route path="report-cards-2" element={<ProtectedRoute requiredPermission={Permission.PRINT_REPORT_CARDS}><PrintReportCard2 /></ProtectedRoute>} />
             <Route path="homework" element={<ProtectedRoute requiredPermission={Permission.MANAGE_HOMEWORK}><HomeworkManagement /></ProtectedRoute>} />
             <Route path="homework/report" element={<ProtectedRoute requiredPermission={Permission.VIEW_HOMEWORK_REPORTS}><HomeworkReport /></ProtectedRoute>} />
             <Route path="calendar" element={<AcademicCalendar />} />

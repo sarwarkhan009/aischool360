@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Trophy, BookOpen, Download, Loader2, Award, Star } from 'lucide-react';
 
@@ -11,41 +11,33 @@ const ParentAcademicHistory: React.FC<Props> = ({ studentId }) => {
     const [marks, setMarks] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
+    // Real-time listener for exam marks
     useEffect(() => {
-        if (studentId) {
-            fetchMarks();
-        }
-    }, [studentId]);
-
-    const fetchMarks = async () => {
+        if (!studentId) return;
         setLoading(true);
-        try {
-            const hRef = collection(db, 'exam_marks');
-            // Support both primary ID and potential variants
-            const q = query(
-                hRef,
-                where('studentId', '==', studentId)
-            );
-            const snap = await getDocs(q);
+
+        const idsToCheck = [studentId];
+        // If studentId contains underscore, also check the part before it
+        if (studentId.includes('_')) {
+            idsToCheck.push(studentId.split('_')[0]);
+        }
+
+        const q = query(
+            collection(db, 'exam_marks'),
+            where('studentId', 'in', idsToCheck)
+        );
+        const unsub = onSnapshot(q, (snap) => {
             let marksList = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-
-            // If empty, try checking by Auth UID if we passed the internal ID
-            if (marksList.length === 0 && studentId.includes('_')) {
-                const altId = studentId.split('_')[0];
-                const qAlt = query(hRef, where('studentId', '==', altId));
-                const snapAlt = await getDocs(qAlt);
-                marksList = snapAlt.docs.map(d => ({ id: d.id, ...d.data() } as any));
-            }
-
             // Sort in memory
             marksList.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
             setMarks(marksList);
-        } catch (e) {
-            console.error(e);
-        } finally {
             setLoading(false);
-        }
-    };
+        }, (err) => {
+            console.error('Exam marks listener error:', err);
+            setLoading(false);
+        });
+        return () => unsub();
+    }, [studentId]);
 
     const groupedMarks = marks.reduce((acc: any, mark: any) => {
         const examName = mark.examName || 'Internal Assessment';

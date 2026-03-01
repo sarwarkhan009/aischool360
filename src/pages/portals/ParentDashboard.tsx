@@ -297,50 +297,8 @@ const ParentDashboard: React.FC = () => {
                     }
                 }
 
-                // Fetch All Attendance
-                try {
-                    const attQuery = query(collection(db, 'attendance'), where('schoolId', '==', currentStudentData?.schoolId || user?.schoolId));
-                    const attSnap = await getDocs(attQuery);
-                    const filteredAttendance = attSnap.docs
-                        .map(d => {
-                            const data = d.data();
-                            const dateStr = data.date.split('T')[0];
-                            return {
-                                ...data,
-                                studentId: data.studentId,
-                                dateObject: new Date(dateStr)
-                            };
-                        })
-                        .filter(att => att.studentId === user.id || att.studentId === studentIdField);
-                    setRawAttendance(filteredAttendance);
-                } catch (error) {
-                    console.error('Error fetching attendance:', error);
-                    setRawAttendance([]);
-                }
-
-                // Fetch All Homework Submissions & Class Homework
-                try {
-                    // Fetch submissions for both the Auth UID and the internal Student ID field just in case
-                    const idToSearch = studentIdField || user.id;
-                    const subsQuery = query(collection(db, 'homeworkSubmissions'), where('studentId', 'in', [user.id, idToSearch].filter(Boolean)));
-                    const subsSnap = await getDocs(subsQuery);
-                    const subs = subsSnap.docs.map(d => ({ ...d.data(), dateObject: d.data().updatedAt ? new Date(d.data().updatedAt) : new Date() }));
-                    setRawSubmissions(subs);
-
-                    if (currentStudentData?.class) {
-                        const hwQuery = query(
-                            collection(db, 'homework'),
-                            where('schoolId', '==', (currentStudentData.schoolId || user.schoolId)),
-                            where('class', '==', currentStudentData.class)
-                        );
-                        const hwSnap = await getDocs(hwQuery);
-                        const classHw = hwSnap.docs.map(d => ({ id: d.id, ...d.data(), section: d.data().section }))
-                            .filter(h => !h.section || h.section === 'All Sections' || h.section === currentStudentData.section);
-                        setAllClassHw(classHw);
-                    }
-                } catch (e) {
-                    console.warn('⚠️ Homework failed:', e);
-                }
+                // Attendance & Homework are now handled by real-time onSnapshot listeners below
+                // (separate useEffect hooks for auto-update without refresh)
 
                 try {
                     const idToSearch = studentIdField || user.id;
@@ -634,8 +592,74 @@ const ParentDashboard: React.FC = () => {
         };
     }, [user?.id, studentData]);
 
-    // Note: Real-time homework and notices are now handled by useRealtimeUpdates hook
-    // No need for separate listeners here
+    // Real-time Attendance Listener
+    useEffect(() => {
+        if (!user?.id || !studentData) return;
+        const schoolId = studentData?.schoolId || user?.schoolId;
+        const studentIdField = studentData?.id;
+
+        const attQuery = query(collection(db, 'attendance'), where('schoolId', '==', schoolId));
+        const unsub = onSnapshot(attQuery, (snap) => {
+            try {
+                const filteredAttendance = snap.docs
+                    .map(d => {
+                        const data = d.data();
+                        const dateStr = data.date.split('T')[0];
+                        return {
+                            ...data,
+                            studentId: data.studentId,
+                            dateObject: new Date(dateStr)
+                        };
+                    })
+                    .filter(att => att.studentId === user.id || att.studentId === studentIdField);
+                setRawAttendance(filteredAttendance);
+            } catch (error) {
+                console.error('Error processing attendance snapshot:', error);
+            }
+        }, (error) => {
+            console.error('Attendance listener error:', error);
+        });
+
+        return () => unsub();
+    }, [user?.id, studentData]);
+
+    // Real-time Homework Submissions & Class Homework Listener
+    useEffect(() => {
+        if (!user?.id || !studentData) return;
+        const schoolId = studentData?.schoolId || user?.schoolId;
+        const studentIdField = studentData?.id;
+        const unsubs: (() => void)[] = [];
+
+        // Listen to homework submissions
+        const idToSearch = studentIdField || user.id;
+        const subsQuery = query(collection(db, 'homeworkSubmissions'), where('studentId', 'in', [user.id, idToSearch].filter(Boolean)));
+        const subsUnsub = onSnapshot(subsQuery, (snap) => {
+            const subs = snap.docs.map(d => ({ ...d.data(), dateObject: d.data().updatedAt ? new Date(d.data().updatedAt) : new Date() }));
+            setRawSubmissions(subs);
+        }, (error) => {
+            console.warn('⚠️ Homework submissions listener error:', error);
+        });
+        unsubs.push(subsUnsub);
+
+        // Listen to class homework
+        if (studentData?.class) {
+            const hwQuery = query(
+                collection(db, 'homework'),
+                where('schoolId', '==', schoolId),
+                where('class', '==', studentData.class)
+            );
+            const hwUnsub = onSnapshot(hwQuery, (snap) => {
+                const classHw = snap.docs.map(d => ({ id: d.id, ...d.data(), section: d.data().section }))
+                    .filter(h => !h.section || h.section === 'All Sections' || h.section === studentData.section);
+                setAllClassHw(classHw);
+            }, (error) => {
+                console.warn('⚠️ Class homework listener error:', error);
+            });
+            unsubs.push(hwUnsub);
+        }
+
+        return () => unsubs.forEach(u => u());
+    }, [user?.id, studentData]);
 
     if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><Loader2 className="animate-spin" size={40} color="var(--primary)" /></div>;
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Library, Book, Loader2, Calendar, Bookmark, BookOpen } from 'lucide-react';
 
@@ -11,17 +11,18 @@ const ParentLibrary: React.FC<Props> = ({ studentId }) => {
     const [books, setBooks] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
+    // Real-time listener for library issues
     useEffect(() => {
-        const fetchBooks = async () => {
-            setLoading(true);
-            try {
-                const q = query(collection(db, 'library_issues'), where('studentId', '==', studentId || ''), where('status', '==', 'ISSUED'));
-                const snap = await getDocs(q);
-                setBooks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-            } catch (e) { console.error(e); }
-            finally { setLoading(false); }
-        };
-        fetchBooks();
+        if (!studentId) return;
+        const q = query(collection(db, 'library_issues'), where('studentId', '==', studentId || ''), where('status', '==', 'ISSUED'));
+        const unsub = onSnapshot(q, (snap) => {
+            setBooks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoading(false);
+        }, (err) => {
+            console.error('Library listener error:', err);
+            setLoading(false);
+        });
+        return () => unsub();
     }, [studentId]);
 
     return (

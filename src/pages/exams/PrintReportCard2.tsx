@@ -37,7 +37,7 @@ interface SelectedExam {
     order: number;
 }
 
-const CombinedReportCard: React.FC = () => {
+const PrintReportCard2: React.FC = () => {
     const { schoolId } = useParams<{ schoolId: string }>();
     const { currentSchool } = useSchool();
     const { data: exams } = useFirestore<any>('exams');
@@ -95,6 +95,7 @@ const CombinedReportCard: React.FC = () => {
     const [subjectOrdering, setSubjectOrdering] = useState<Record<string, string[]>>({}); // examId -> ordered subject names
     const [managingSubjectsForExam, setManagingSubjectsForExam] = useState<string | null>(null);
     const [printSortMode, setPrintSortMode] = useState<'percentage' | 'roll'>('roll'); // Print sorting order
+    const [examWeightages, setExamWeightages] = useState<Record<string, number>>({}); // examId -> weightage %
 
     // Student fields visibility
     const [studentFields, setStudentFields] = useState({
@@ -123,6 +124,7 @@ const CombinedReportCard: React.FC = () => {
             setPrincipalSignatureUrl(reportConfig.principalSignatureUrl || currentSchool?.principalSignatureUrl || '');
             setSignatureHeight(reportConfig.signatureHeight || 40);
             setSubjectOrdering(reportConfig.subjectOrdering || {});
+            if (reportConfig.examWeightages) setExamWeightages(reportConfig.examWeightages);
 
             // New options to persist
             if (reportConfig.includeGraphs !== undefined) setIncludeGraphs(reportConfig.includeGraphs);
@@ -161,6 +163,7 @@ const CombinedReportCard: React.FC = () => {
                 principalSignatureUrl,
                 signatureHeight,
                 subjectOrdering,
+                examWeightages,
                 includeGraphs,
                 includeRemarks,
                 showGrandTotal,
@@ -511,6 +514,10 @@ const CombinedReportCard: React.FC = () => {
         return [...marksBased, ...gradeBased];
     };
 
+    // Check if weightages are enabled (total > 0)
+    const isWeightageEnabled = Object.values(examWeightages).reduce((sum, w) => sum + (w || 0), 0) > 0;
+    const totalWeightageSum = Object.values(examWeightages).reduce((sum, w) => sum + (w || 0), 0);
+
     // Calculate combined student result
     const getCombinedStudentResult = (studentId: string) => {
         const results = selectedExams.map(se => ({
@@ -529,7 +536,23 @@ const CombinedReportCard: React.FC = () => {
             }
         });
 
-        const grandPercentage = grandTotalMax > 0 ? (grandTotalObtained / grandTotalMax) * 100 : 0;
+        // Weighted percentage calculation
+        let grandPercentage = 0;
+        if (isWeightageEnabled && totalWeightageSum > 0) {
+            // Calculate weighted percentage per exam
+            let weightedSum = 0;
+            results.forEach(r => {
+                if (r.result && r.result.totalMax > 0) {
+                    const examPct = (r.result.totalObtained / r.result.totalMax) * 100;
+                    const weight = examWeightages[r.examId] || 0;
+                    weightedSum += (examPct * weight) / 100;
+                }
+            });
+            // Scale to 100 if total weightage is 100, otherwise proportional
+            grandPercentage = weightedSum;
+        } else {
+            grandPercentage = grandTotalMax > 0 ? (grandTotalObtained / grandTotalMax) * 100 : 0;
+        }
 
         return {
             examResults: results,
@@ -1038,10 +1061,33 @@ const CombinedReportCard: React.FC = () => {
 
                                     {showGrandTotal && (
                                         <td colSpan={2} style={{ padding: '0.3rem', textAlign: 'center', background: '#1e293b', color: '#fbbf24', fontWeight: 900, fontSize: '0.85rem' }}>
-                                            {combinedResult.grandPercentage}%
+                                            {isWeightageEnabled ? `${combinedResult.grandPercentage}%` : `${combinedResult.grandPercentage}%`}
                                         </td>
                                     )}
                                 </tr>
+
+                                {/* PROMOTIONAL MARKS Row (Weighted) */}
+                                {isWeightageEnabled && (
+                                    <tr style={{ background: '#1e293b', color: 'white', fontWeight: 900 }}>
+                                        <td style={{ padding: '0.4rem 0.3rem', borderRight: '2px solid rgba(255,255,255,0.3)', fontSize: '0.7rem' }}>PROMOTIONAL<br />MARKS</td>
+                                        <td colSpan={3} style={{ padding: '0.3rem', textAlign: 'center', borderRight: '2px solid rgba(255,255,255,0.3)', fontSize: '0.75rem' }}>—</td>
+
+                                        {selectedExams.map((exam, idx) => {
+                                            const weight = examWeightages[exam.id] || 0;
+                                            return (
+                                                <td key={exam.id} colSpan={3} style={{ padding: '0.3rem', textAlign: 'center', borderRight: idx < selectedExams.length - 1 ? '2px solid rgba(255,255,255,0.3)' : '2px solid rgba(255,255,255,0.3)', fontSize: '0.75rem', color: '#94a3b8' }}>
+                                                    {weight > 0 ? `${weight}%` : '—'}
+                                                </td>
+                                            );
+                                        })}
+
+                                        {showGrandTotal && (
+                                            <td colSpan={2} style={{ padding: '0.3rem', textAlign: 'center', background: '#dc2626', color: 'white', fontWeight: 900, fontSize: '1rem' }}>
+                                                {combinedResult.grandPercentage}%
+                                            </td>
+                                        )}
+                                    </tr>
+                                )}
                             </tfoot>
                         </table>
                     </div>
@@ -1727,13 +1773,36 @@ const CombinedReportCard: React.FC = () => {
                                                 <span style={{ fontWeight: 600 }}>{exam.displayName}</span>
                                                 {exam.termName && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>({exam.termName})</span>}
                                             </div>
-                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                                                    Wt%:
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        max={100}
+                                                        value={examWeightages[exam.id] || 0}
+                                                        onChange={e => setExamWeightages(prev => ({ ...prev, [exam.id]: Math.max(0, Math.min(100, parseInt(e.target.value) || 0)) }))}
+                                                        style={{ width: '50px', padding: '0.25rem 0.375rem', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 700, textAlign: 'center' }}
+                                                    />
+                                                </label>
                                                 <button onClick={() => moveExam(idx, 'up')} disabled={idx === 0} style={{ background: '#f1f5f9', border: 'none', padding: '0.25rem', borderRadius: '4px', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.5 : 1 }}>↑</button>
                                                 <button onClick={() => moveExam(idx, 'down')} disabled={idx === selectedExams.length - 1} style={{ background: '#f1f5f9', border: 'none', padding: '0.25rem', borderRadius: '4px', cursor: idx === selectedExams.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === selectedExams.length - 1 ? 0.5 : 1 }}>↓</button>
                                                 <button onClick={() => handleRemoveExam(exam.id)} style={{ background: '#fef2f2', color: '#ef4444', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer' }}><Trash2 size={14} /></button>
                                             </div>
                                         </div>
                                     ))}
+                                    {/* Weightage Total Indicator */}
+                                    {selectedExams.length > 0 && (
+                                        <div style={{ padding: '0.5rem 1rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem' }}>
+                                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>Total Weightage:</span>
+                                            <span style={{ fontSize: '0.85rem', fontWeight: 800, color: totalWeightageSum === 100 ? '#10b981' : totalWeightageSum > 0 ? '#f59e0b' : '#94a3b8' }}>
+                                                {totalWeightageSum}%
+                                                {totalWeightageSum === 100 && ' ✅'}
+                                                {totalWeightageSum > 0 && totalWeightageSum !== 100 && ' ⚠️'}
+                                            </span>
+                                            {totalWeightageSum === 0 && <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>(raw marks mode)</span>}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -2315,4 +2384,4 @@ const CombinedReportCard: React.FC = () => {
     );
 };
 
-export default CombinedReportCard;
+export default PrintReportCard2;

@@ -78,7 +78,8 @@ const MODULE_STRUCTURE = [
             { id: '/exams/analytics', label: 'Performance Analytics' },
             { id: '/exams/syllabus', label: 'Manage Syllabus' },
             { id: '/exams/templates', label: 'Customize Templates' },
-            { id: '/report-cards', label: 'Print Report Card' },
+            { id: '/report-cards', label: 'Print Report Card - 1' },
+            { id: '/report-cards-2', label: 'Print Report Card - 2' },
             { id: '/question-generator', label: 'Question Generator' },
         ]
     },

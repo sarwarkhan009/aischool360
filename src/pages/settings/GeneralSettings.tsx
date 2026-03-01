@@ -583,14 +583,11 @@ export function ClassMaster() {
     const [selectedSession, setSelectedSession] = useState(activeFY);
 
     // Sync selectedSession when activeFY or schoolYears load
-    // Falls back to latest schoolYear if activeFinancialYear not set on school doc
     useEffect(() => {
-        if (selectedSession) return; // already set, don't override
-        if (activeFY) {
+        // Only set if not already manually set, OR if we had a fallback but activeFY just became available
+        if (activeFY && (selectedSession !== activeFY)) {
             setSelectedSession(activeFY);
-        } else if (schoolYears.length > 0) {
-            // TDS or any school where activeFinancialYear is not configured —
-            // default to the latest available academic year
+        } else if (!selectedSession && schoolYears.length > 0) {
             setSelectedSession(schoolYears[schoolYears.length - 1]);
         }
     }, [activeFY, schoolYears.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps

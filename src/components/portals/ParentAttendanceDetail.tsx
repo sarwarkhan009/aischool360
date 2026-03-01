@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { ChevronLeft, ChevronRight, Loader2, Calendar as CalendarIcon } from 'lucide-react';
+
+// Helper: format date as YYYY-MM-DD using local timezone (avoids UTC shift from toISOString)
+const toLocalDateStr = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
 
 interface Props {
     studentId: string;
@@ -31,25 +39,20 @@ const ParentAttendanceDetail: React.FC<Props> = ({ studentId }) => {
         fetchStudentData();
     }, [studentId]);
 
+    // Real-time attendance listener
     useEffect(() => {
-        if (schoolId) {
-            fetchAttendance();
-        }
-    }, [currentDate, studentId, studentIdField, schoolId]);
+        if (!schoolId) return;
 
-    const fetchAttendance = async () => {
         setLoading(true);
-        try {
-            const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString().split('T')[0];
-            const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).toISOString().split('T')[0];
+        const startOfMonth = toLocalDateStr(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+        const endOfMonth = toLocalDateStr(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0));
 
-            // Simple query by schoolId only to avoid composite index requirement
-            const q = query(
-                collection(db, 'attendance'),
-                where('schoolId', '==', schoolId)
-            );
+        const q = query(
+            collection(db, 'attendance'),
+            where('schoolId', '==', schoolId)
+        );
 
-            const snap = await getDocs(q);
+        const unsub = onSnapshot(q, (snap) => {
             const data: Record<string, string> = {};
             snap.docs.forEach(d => {
                 const record = d.data();
@@ -63,12 +66,14 @@ const ParentAttendanceDetail: React.FC<Props> = ({ studentId }) => {
                 }
             });
             setAttendance(data);
-        } catch (e) {
-            console.error('Error fetching attendance:', e);
-        } finally {
             setLoading(false);
-        }
-    };
+        }, (error) => {
+            console.error('Error listening to attendance:', error);
+            setLoading(false);
+        });
+
+        return () => unsub();
+    }, [currentDate, studentId, studentIdField, schoolId]);
 
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
     const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
@@ -79,19 +84,19 @@ const ParentAttendanceDetail: React.FC<Props> = ({ studentId }) => {
 
     return (
         <div className="glass-card animate-fade-in" style={{ padding: '0', overflow: 'hidden' }}>
-            <div style={{ padding: '2rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }} className="mobile-p-15">
+            <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid #f1f5f9', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', background: '#f8fafc' }} className="mobile-p-15">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <CalendarIcon size={20} />
                     </div>
                     <h3 style={{ fontWeight: 900, color: '#1e293b', fontSize: '1.1rem' }}>Attendance</h3>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: 'white', padding: '0.4rem', borderRadius: '1rem', border: '1px solid #e2e8f0' }}>
-                    <button onClick={() => changeMonth(-1)} className="btn-icon-s"><ChevronLeft size={18} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'white', padding: '0.4rem 0.6rem', borderRadius: '1rem', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+                    <button onClick={() => changeMonth(-1)} className="btn-icon-s" style={{ minWidth: '30px', minHeight: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ChevronLeft size={18} /></button>
                     <span style={{ fontWeight: 800, fontSize: '0.875rem', minWidth: '100px', textAlign: 'center', color: '#1e293b' }}>
                         {currentDate.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
                     </span>
-                    <button onClick={() => changeMonth(1)} className="btn-icon-s"><ChevronRight size={18} /></button>
+                    <button onClick={() => changeMonth(1)} className="btn-icon-s" style={{ minWidth: '30px', minHeight: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ChevronRight size={18} /></button>
                 </div>
             </div>
 

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { where } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import {
     Trophy,
@@ -48,7 +49,6 @@ const ExamResultsDashboard: React.FC = () => {
     const normalizeClass = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const { currentSchool } = useSchool();
     const { data: exams, update: updateExam } = useFirestore<any>('exams');
-    const { data: marksEntries } = useFirestore<any>('marks_entries');
     const { data: studentList } = useFirestore<any>('students');
     const { data: gradingSystems } = useFirestore<any>('grading_systems');
     const { data: allSettings } = useFirestore<any>('settings');
@@ -76,6 +76,14 @@ const ExamResultsDashboard: React.FC = () => {
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
     const [showPrintConfig, setShowPrintConfig] = useState(false);
     const [showDeleteBtn, setShowDeleteBtn] = useState(false);
+
+    // marks_entries: filtered per selected exam — NOT the whole collection
+    // null constraint = useFirestore skips listener entirely (no data loaded)
+    const examMarksConstraints = useMemo(
+        () => selectedExamId ? [where('examId', '==', selectedExamId)] : null,
+        [selectedExamId]
+    );
+    const { data: marksEntries } = useFirestore<any>('marks_entries', examMarksConstraints);
 
     // Auto-select active academic year on first load
     React.useEffect(() => {
@@ -131,8 +139,8 @@ const ExamResultsDashboard: React.FC = () => {
 
         // Exact subjectId match first
         let entry = allMarks.find(m =>
-            m.subjectId === subject.subjectId &&
-            (!m.sectionId || m.sectionId === studentSection || m.sectionName === studentSection)
+            (m.subjectId === subject.subjectId || normalizeClass(m.subjectId || '') === normalizeClass(subject.subjectId || '')) &&
+            (!m.sectionId || m.sectionId === 'ALL' || m.sectionId === studentSection || m.sectionName === studentSection || normalizeClass(m.sectionId || '') === normalizeClass(studentSection || ''))
         );
 
         // Fallback: Try matching by subjectName if subjectId doesn't match
@@ -141,7 +149,7 @@ const ExamResultsDashboard: React.FC = () => {
             entry = allMarks.find(m => {
                 const mSubName = m.subjectName || '';
                 // Must still match section/class
-                const sectionMatch = !m.sectionId || m.sectionId === studentSection || m.sectionName === studentSection;
+                const sectionMatch = !m.sectionId || m.sectionId === 'ALL' || m.sectionId === studentSection || m.sectionName === studentSection || normalizeClass(m.sectionId) === normalizeClass(studentSection);
                 if (!sectionMatch) return false;
 
                 return subjectMatches(mSubName, subject.subjectName || subject.name || '', subCombined);
@@ -169,9 +177,21 @@ const ExamResultsDashboard: React.FC = () => {
     const availableSubjects = useMemo(() => {
         if (!selectedExam || !selectedClass) return [];
 
-        const classRoutine = selectedExam.classRoutines?.find((cr: any) =>
-            cr.classId === selectedClass || cr.className === resolveClass(selectedClass) || resolveClass(cr.classId) === resolveClass(selectedClass)
-        );
+        const resolvedSelClass = resolveClass(selectedClass);
+        const normSelClass = normalizeClass(resolvedSelClass);
+        const normSelId = normalizeClass(selectedClass);
+
+        const classRoutine = selectedExam.classRoutines?.find((cr: any) => {
+            const crResolvedId = resolveClass(cr.classId);
+            return cr.classId === selectedClass ||
+                cr.className === resolvedSelClass ||
+                crResolvedId === resolvedSelClass ||
+                normalizeClass(cr.className || '') === normSelClass ||
+                normalizeClass(cr.className || '') === normSelId ||
+                normalizeClass(cr.classId || '') === normSelClass ||
+                normalizeClass(cr.classId || '') === normSelId ||
+                normalizeClass(crResolvedId) === normSelClass;
+        });
 
         return (classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
             ? classRoutine.routine
@@ -184,12 +204,23 @@ const ExamResultsDashboard: React.FC = () => {
         const selectedClassName = resolveClass(selectedClass);
         const normalizedSelected = normalizeClass(selectedClassName);
 
-        return marksEntries.filter((m: any) =>
-            m.examId === selectedExamId &&
-            (m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName || resolveClass(m.classId) === selectedClassName || normalizeClass(m.className || '') === normalizedSelected || normalizeClass(m.classId || '') === normalizedSelected) &&
-            (m.status === 'APPROVED' || m.status === 'SUBMITTED') &&
-            (!selectedSection || m.sectionId === selectedSection || m.sectionName === selectedSection)
-        );
+        return marksEntries.filter((m: any) => {
+            const statusMatch = !m.status || ['APPROVED', 'SUBMITTED', 'DRAFT', 'PUBLISHED', 'FINALIZED'].includes(String(m.status).toUpperCase());
+            const sectionMatch = !selectedSection || m.sectionId === 'ALL' || m.sectionId === selectedSection || m.sectionName === selectedSection || normalizeClass(m.sectionId || '') === normalizeClass(selectedSection || '');
+
+            const rootClassMatch = m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName || resolveClass(m.classId) === selectedClassName || normalizeClass(m.className || '') === normalizedSelected || normalizeClass(m.classId || '') === normalizedSelected;
+
+            const legacyClassMatch = !!(m.marks && m.marks.length > 0 && (
+                m.marks[0].class === selectedClass ||
+                (selectedClassName && m.marks[0].class === selectedClassName) ||
+                normalizeClass(m.marks[0].class || '') === normalizedSelected ||
+                resolveClass(m.marks[0].class || '') === selectedClassName
+            ));
+
+            const classMatch = rootClassMatch || legacyClassMatch;
+
+            return m.examId === selectedExamId && classMatch && statusMatch && sectionMatch;
+        });
     }, [selectedExamId, selectedClass, selectedSection, marksEntries, activeClasses]);
 
     // Calculate Results
@@ -226,7 +257,7 @@ const ExamResultsDashboard: React.FC = () => {
 
             availableSubjects.forEach((sub: any) => {
                 const entry = findMarksEntry(student, sub, examMarks);
-                const studentMark = entry?.marks?.find((sm: any) => sm.studentId === student.id);
+                const studentMark = entry?.marks?.find((sm: any) => sm.studentId === student.id || (!sm.studentId && sm.admissionNo && (sm.admissionNo === student.admissionNumber || sm.admissionNo === student.admissionNo)));
                 const isAbsent = studentMark?.isAbsent || false;
                 const isNA = studentMark?.isNA || false;
 
@@ -418,7 +449,7 @@ const ExamResultsDashboard: React.FC = () => {
                 if (hasSplit) {
                     // Theory aur Practical alag columns
                     const entry = findMarksEntry(student, sub, examMarks);
-                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === res.studentId);
+                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === res.studentId || (!sm.studentId && sm.admissionNo && (sm.admissionNo === student?.admissionNumber || sm.admissionNo === student?.admissionNo)));
                     const isAbsent = studentMark?.isAbsent || false;
                     const isNA = studentMark?.isNA || false;
 
@@ -529,7 +560,7 @@ const ExamResultsDashboard: React.FC = () => {
 
                 classSubjects.forEach((sub: any) => {
                     const entry = findMarksEntry(student, sub, classMarks);
-                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === student.id);
+                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === student.id || (!sm.studentId && sm.admissionNo && (sm.admissionNo === student.admissionNumber || sm.admissionNo === student.admissionNo)));
                     const isAbsent = studentMark?.isAbsent || false;
                     const isNA = studentMark?.isNA || false;
                     const isGradeBased = sub.assessmentType === 'GRADE';
@@ -1281,7 +1312,7 @@ const ExamResultsDashboard: React.FC = () => {
                                                     // Find the student to get their section
                                                     const currentStudent = studentList?.find((s: any) => s.id === res.studentId);
                                                     const entry = findMarksEntry(currentStudent, sub, examMarks);
-                                                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === res.studentId);
+                                                    const studentMark = entry?.marks?.find((sm: any) => sm.studentId === res.studentId || (!sm.studentId && sm.admissionNo && (sm.admissionNo === currentStudent?.admissionNumber || sm.admissionNo === currentStudent?.admissionNo)));
                                                     const isAbsent = studentMark?.isAbsent || false;
                                                     const theoryVal = isAbsent ? 'AB' : (studentMark?.theoryMarks || 0);
                                                     const practicalVal = isAbsent ? 'AB' : (studentMark?.practicalMarks || 0);

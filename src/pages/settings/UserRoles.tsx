@@ -137,7 +137,8 @@ const MENU_STRUCTURE: MenuItem[] = [
             { id: 'exams_analytics', label: 'Performance Analytics', permissions: [Permission.VIEW_EXAMS], moduleId: '/exams/analytics' },
             { id: 'exams_syllabus', label: 'Manage Syllabus', permissions: [Permission.MANAGE_EXAM_TIMETABLE], moduleId: '/exams/syllabus' },
             { id: 'exams_templates', label: 'Customize Templates', permissions: [Permission.MANAGE_EXAMS], moduleId: '/exams/templates' },
-            { id: 'exams_report_cards', label: 'Print Report Card', permissions: [Permission.PRINT_REPORT_CARDS], moduleId: '/report-cards' },
+            { id: 'exams_report_cards', label: 'Print Report Card - 1', permissions: [Permission.PRINT_REPORT_CARDS], moduleId: '/report-cards' },
+            { id: 'exams_report_cards_2', label: 'Print Report Card - 2', permissions: [Permission.PRINT_REPORT_CARDS], moduleId: '/report-cards-2' },
             { id: 'exams_question_gen', label: 'Question Generator', permissions: [Permission.GENERATE_QUESTIONS], moduleId: '/question-generator' },
         ]
     },

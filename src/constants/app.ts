@@ -12,7 +12,7 @@ export const SESSIONS = [
 ];
 
 export const CLASS_ORDER = [
-    'Pre-Nursery', 'Nursery', 'KG', 'Prep', 'LKG', 'UKG',
+    'Pre-Nursery', 'Nursery', 'LKG', 'UKG', 'KG', 'Prep',
     ...Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`)
 ];
 

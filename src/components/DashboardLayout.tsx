@@ -284,7 +284,8 @@ const menuItems = [
             { to: '/exam-analytics', label: 'Performance Analytics', permission: Permission.VIEW_EXAMS, moduleId: '/exams/analytics' },
             { to: '/exam-syllabus', label: 'Manage Syllabus', permission: Permission.MANAGE_EXAM_TIMETABLE, moduleId: '/exams/syllabus' },
             { to: '/exam-templates', label: 'Customize Templates', permission: Permission.MANAGE_EXAMS, moduleId: '/exams/templates' },
-            { to: '/report-cards', label: 'Print Report Card', permission: Permission.PRINT_REPORT_CARDS, moduleId: '/report-cards' },
+            { to: '/report-cards', label: 'Print Report Card - 1', permission: Permission.PRINT_REPORT_CARDS, moduleId: '/report-cards' },
+            { to: '/report-cards-2', label: 'Print Report Card - 2', permission: Permission.PRINT_REPORT_CARDS, moduleId: '/report-cards-2' },
             { to: '/question-generator', label: 'Question Generator', permission: Permission.GENERATE_QUESTIONS, moduleId: '/question-generator' }
         ]
     },

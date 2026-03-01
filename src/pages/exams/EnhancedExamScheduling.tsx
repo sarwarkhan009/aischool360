@@ -115,7 +115,8 @@ const EnhancedExamScheduling: React.FC = () => {
     const { data: academicYears } = useFirestore<any>('academic_years');
     const { data: assessmentTypes } = useFirestore<any>('assessment_types');
     const { data: settings } = useFirestore<any>('settings');
-    const { data: marksEntries } = useFirestore<any>('marks_entries');
+    // NOTE: marks_entries is NOT loaded globally — it's a huge collection.
+    // It is fetched lazily inside handleRecoverLostClasses only when user clicks Recover.
 
     const [showModal, setShowModal] = useState(false);
     const [editingExam, setEditingExam] = useState<Exam | null>(null);
@@ -276,7 +277,14 @@ const EnhancedExamScheduling: React.FC = () => {
             const thisAssessment = schoolAssessments.find(a => a.id === exam.assessmentTypeId);
             const defMax = thisAssessment?.maxMarks || 100;
 
-            const examMarks = marksEntries?.filter((m: any) => m.examId === examId) || [];
+            // ─── Lazy load marks_entries for this exam only ───────────────────
+            // We do NOT load the entire marks_entries collection globally.
+            // Instead, query only the records for this examId.
+            const { collection: fbCol, query: fbQuery, where, getDocs } = await import('firebase/firestore');
+            const { db } = await import('../../lib/firebase');
+            const q = fbQuery(fbCol(db, 'marks_entries'), where('examId', '==', examId));
+            const snap = await getDocs(q);
+            const examMarks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             if (examMarks.length === 0) { alert('No marks entries found.'); return; }
 
             const crMap = new Map<string, { classId: string, className: string, routine: ClassRoutineEntry[] }>();

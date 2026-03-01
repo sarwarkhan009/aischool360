@@ -34,13 +34,20 @@ const getCanWriteFromStorage = (): boolean => {
 
 const WRITE_DENIED_MSG = '🔒 Access Denied: Your role has View-Only permissions. Contact the Administrator to enable write access.';
 
-export function useFirestore<T = DocumentData>(collectionName: string, constraints: QueryConstraint[] = [], options: { skipSchoolFilter?: boolean } = {}) {
+export function useFirestore<T = DocumentData>(collectionName: string, constraints: QueryConstraint[] | null = [], options: { skipSchoolFilter?: boolean } = {}) {
     const [data, setData] = useState<T[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     const { currentSchool } = useSchool();
 
     useEffect(() => {
+        // ─── If constraints is null, skip listener entirely (lazy/conditional loading) ─
+        if (constraints === null) {
+            setData([]);
+            setLoading(false);
+            return;
+        }
+
         // Skip listener setup if waiting for school context (unless it's a school-independent collection)
         const needsSchool = !options.skipSchoolFilter && collectionName !== 'schools';
         if (needsSchool && !currentSchool?.id) {
@@ -74,7 +81,7 @@ export function useFirestore<T = DocumentData>(collectionName: string, constrain
         });
 
         return () => unsubscribe();
-    }, [collectionName, currentSchool?.id, options.skipSchoolFilter, constraints.length]);
+    }, [collectionName, currentSchool?.id, options.skipSchoolFilter, constraints === null ? 'null' : constraints.length]);
 
     // ─── Settings / role collections are exempt from write guard ─────────────
     // These are used internally by the app (role save, module control, etc.)

@@ -838,7 +838,7 @@ const AdvancedMarksEntry: React.FC = () => {
                             disabled={!selectedExam}
                         >
                             <option value="">Choose Class</option>
-                            {availableClasses.map((clsId: string) => (
+                            {sortClasses(availableClasses.map((id: string) => ({ id, name: resolveClass(id) }))).map((c: any) => c.id).map((clsId: string) => (
                                 <option key={clsId} value={clsId}>{resolveClass(clsId)}</option>
                             ))}
                         </select>
@@ -1046,8 +1046,12 @@ const AdvancedMarksEntry: React.FC = () => {
                                         ) : (
                                             <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Obtained</th>
                                         )}
-                                        <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>%</th>
-                                        <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Grade</th>
+                                        {subjectDetails?.assessmentType !== 'GRADE' && (
+                                            <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>%</th>
+                                        )}
+                                        {subjectDetails?.assessmentType !== 'GRADE' && (
+                                            <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Grade</th>
+                                        )}
                                         <th style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Status</th>
                                     </tr>
                                 </thead>
@@ -1177,40 +1181,44 @@ const AdvancedMarksEntry: React.FC = () => {
                                                         )}
                                                     </td>
                                                 )}
-                                                <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                                    <span style={{
-                                                        fontWeight: 800,
-                                                        fontSize: '0.9rem',
-                                                        color: student.isAbsent || student.isNA ? '#9ca3af' :
-                                                            student.percentage >= 90 ? '#10b981' :
-                                                                student.percentage >= 75 ? '#3b82f6' :
-                                                                    student.percentage >= 60 ? '#f59e0b' :
-                                                                        student.percentage >= 40 ? '#ef4444' : '#6b7280'
-                                                    }}>
-                                                        {student.isAbsent || student.isNA ? '—' : `${student.percentage.toFixed(1)}%`}
-                                                    </span>
-                                                </td>
-                                                <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                                    <span style={{
-                                                        padding: '0.4rem 0.8rem',
-                                                        borderRadius: '0.5rem',
-                                                        background: student.grade === 'AB' ? '#ef444415' :
-                                                            student.grade === 'NA' ? '#6366f115' :
-                                                                student.grade === 'A+' || student.grade === 'A' ? '#10b98115' :
-                                                                    student.grade === 'B+' || student.grade === 'B' ? '#3b82f615' :
-                                                                        student.grade === 'C' ? '#f59e0b15' : '#ef444415',
-                                                        color: student.grade === 'AB' ? '#ef4444' :
-                                                            student.grade === 'NA' ? '#6366f1' :
-                                                                student.grade === 'A+' || student.grade === 'A' ? '#10b981' :
-                                                                    student.grade === 'B+' || student.grade === 'B' ? '#3b82f6' :
-                                                                        student.grade === 'C' ? '#f59e0b' : '#ef4444',
-                                                        fontWeight: 800,
-                                                        fontSize: '0.85rem',
-                                                        border: `1px solid currentColor`
-                                                    }}>
-                                                        {student.grade}
-                                                    </span>
-                                                </td>
+                                                {subjectDetails?.assessmentType !== 'GRADE' && (
+                                                    <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                                        <span style={{
+                                                            fontWeight: 800,
+                                                            fontSize: '0.9rem',
+                                                            color: student.isAbsent || student.isNA ? '#9ca3af' :
+                                                                student.percentage >= 90 ? '#10b981' :
+                                                                    student.percentage >= 75 ? '#3b82f6' :
+                                                                        student.percentage >= 60 ? '#f59e0b' :
+                                                                            student.percentage >= 40 ? '#ef4444' : '#6b7280'
+                                                        }}>
+                                                            {student.isAbsent || student.isNA ? '—' : `${student.percentage.toFixed(1)}%`}
+                                                        </span>
+                                                    </td>
+                                                )}
+                                                {subjectDetails?.assessmentType !== 'GRADE' && (
+                                                    <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                                        <span style={{
+                                                            padding: '0.4rem 0.8rem',
+                                                            borderRadius: '0.5rem',
+                                                            background: student.grade === 'AB' ? '#ef444415' :
+                                                                student.grade === 'NA' ? '#6366f115' :
+                                                                    student.grade === 'A+' || student.grade === 'A' ? '#10b98115' :
+                                                                        student.grade === 'B+' || student.grade === 'B' ? '#3b82f615' :
+                                                                            student.grade === 'C' ? '#f59e0b15' : '#ef444415',
+                                                            color: student.grade === 'AB' ? '#ef4444' :
+                                                                student.grade === 'NA' ? '#6366f1' :
+                                                                    student.grade === 'A+' || student.grade === 'A' ? '#10b981' :
+                                                                        student.grade === 'B+' || student.grade === 'B' ? '#3b82f6' :
+                                                                            student.grade === 'C' ? '#f59e0b' : '#ef4444',
+                                                            fontWeight: 800,
+                                                            fontSize: '0.85rem',
+                                                            border: `1px solid currentColor`
+                                                        }}>
+                                                            {student.grade}
+                                                        </span>
+                                                    </td>
+                                                )}
                                                 <td style={{
                                                     padding: '1rem',
                                                     textAlign: 'center',
@@ -1458,53 +1466,55 @@ const AdvancedMarksEntry: React.FC = () => {
                                             )}
                                         </div>
 
-                                        {/* Stats Row - Compact */}
-                                        <div style={{
-                                            display: 'flex',
-                                            gap: '0.5rem',
-                                            marginBottom: '0.5rem'
-                                        }}>
+                                        {/* Stats Row - Compact (hidden for grade-based subjects) */}
+                                        {subjectDetails?.assessmentType !== 'GRADE' && (
                                             <div style={{
-                                                flex: 1,
-                                                background: 'var(--bg-main)',
-                                                padding: '0.4rem',
-                                                borderRadius: '0.4rem',
-                                                textAlign: 'center'
+                                                display: 'flex',
+                                                gap: '0.5rem',
+                                                marginBottom: '0.5rem'
                                             }}>
-                                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>%: </span>
-                                                <span style={{
-                                                    fontWeight: 800,
-                                                    fontSize: '0.85rem',
-                                                    color: student.isAbsent || student.isNA ? '#9ca3af' :
-                                                        student.percentage >= 90 ? '#10b981' :
-                                                            student.percentage >= 75 ? '#3b82f6' :
-                                                                student.percentage >= 60 ? '#f59e0b' :
-                                                                    student.percentage >= 40 ? '#ef4444' : '#6b7280'
+                                                <div style={{
+                                                    flex: 1,
+                                                    background: 'var(--bg-main)',
+                                                    padding: '0.4rem',
+                                                    borderRadius: '0.4rem',
+                                                    textAlign: 'center'
                                                 }}>
-                                                    {student.isAbsent || student.isNA ? '—' : `${student.percentage.toFixed(1)}%`}
-                                                </span>
-                                            </div>
-                                            <div style={{
-                                                flex: 1,
-                                                background: 'var(--bg-main)',
-                                                padding: '0.4rem',
-                                                borderRadius: '0.4rem',
-                                                textAlign: 'center'
-                                            }}>
-                                                <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Grade: </span>
-                                                <span style={{
-                                                    fontWeight: 800,
-                                                    fontSize: '0.85rem',
-                                                    color: student.grade === 'AB' ? '#ef4444' :
-                                                        student.grade === 'NA' ? '#6366f1' :
-                                                            student.grade === 'A+' || student.grade === 'A' ? '#10b981' :
-                                                                student.grade === 'B+' || student.grade === 'B' ? '#3b82f6' :
-                                                                    student.grade === 'C' ? '#f59e0b' : '#ef4444'
+                                                    <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>%: </span>
+                                                    <span style={{
+                                                        fontWeight: 800,
+                                                        fontSize: '0.85rem',
+                                                        color: student.isAbsent || student.isNA ? '#9ca3af' :
+                                                            student.percentage >= 90 ? '#10b981' :
+                                                                student.percentage >= 75 ? '#3b82f6' :
+                                                                    student.percentage >= 60 ? '#f59e0b' :
+                                                                        student.percentage >= 40 ? '#ef4444' : '#6b7280'
+                                                    }}>
+                                                        {student.isAbsent || student.isNA ? '—' : `${student.percentage.toFixed(1)}%`}
+                                                    </span>
+                                                </div>
+                                                <div style={{
+                                                    flex: 1,
+                                                    background: 'var(--bg-main)',
+                                                    padding: '0.4rem',
+                                                    borderRadius: '0.4rem',
+                                                    textAlign: 'center'
                                                 }}>
-                                                    {student.grade}
-                                                </span>
+                                                    <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Grade: </span>
+                                                    <span style={{
+                                                        fontWeight: 800,
+                                                        fontSize: '0.85rem',
+                                                        color: student.grade === 'AB' ? '#ef4444' :
+                                                            student.grade === 'NA' ? '#6366f1' :
+                                                                student.grade === 'A+' || student.grade === 'A' ? '#10b981' :
+                                                                    student.grade === 'B+' || student.grade === 'B' ? '#3b82f6' :
+                                                                        student.grade === 'C' ? '#f59e0b' : '#ef4444'
+                                                    }}>
+                                                        {student.grade}
+                                                    </span>
+                                                </div>
                                             </div>
-                                        </div>
+                                        )}
 
                                         {/* Status Buttons - Compact */}
                                         <div style={{
