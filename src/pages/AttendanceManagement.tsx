@@ -232,7 +232,7 @@ const AttendanceManagement: React.FC = () => {
             setSelectedSession(activeFY);
         }
     }, [activeFY]);
-    const [activeTab, setActiveTab] = useState<'mark' | 'summary' | 'student' | 'report' | 'entry'>('mark');
+    const [activeTab, setActiveTab] = useState<'mark' | 'summary' | 'student' | 'report' | 'entry' | 'show'>('mark');
 
     // Attendance Entry Tab States
     const ACADEMIC_MONTHS = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
@@ -249,6 +249,13 @@ const AttendanceManagement: React.FC = () => {
     const [monthlyRecords, setMonthlyRecords] = useState<any[]>([]);
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryType, setSummaryType] = useState<'student'>('student');
+
+    // Show Attendance Tab States
+    const [showClass, setShowClass] = useState('');
+    const [showSection, setShowSection] = useState('');
+    const [showData, setShowData] = useState<any[]>([]);
+    const [showWorkingDays, setShowWorkingDays] = useState<Record<string, string>>({});
+    const [showLoading, setShowLoading] = useState(false);
 
     // Report Tab States
     const [reportClass, setReportClass] = useState('');
@@ -370,6 +377,47 @@ const AttendanceManagement: React.FC = () => {
         setAttendance({});
     }, [filterClass, filterSection, currentDate]);
 
+    // 6. Fetch data for 'Show' tab
+    useEffect(() => {
+        if (activeTab === 'show' && showClass && currentSchool?.id && activeFY) {
+            const fetchShowData = async () => {
+                setShowLoading(true);
+                try {
+                    // Fetch working days
+                    const wdRef = doc(db, 'attendance_working_days', `${currentSchool.id}_${activeFY}`);
+                    const wdSnap = await getDoc(wdRef);
+                    if (wdSnap.exists()) {
+                        setShowWorkingDays(wdSnap.data().workingDays || {});
+                    } else {
+                        setShowWorkingDays({});
+                    }
+
+                    // Fetch attendance manual entries
+                    const q = query(
+                        collection(db, 'attendance_manual_entry'),
+                        where('schoolId', '==', currentSchool.id),
+                        where('financialYear', '==', activeFY),
+                        where('class', '==', showClass)
+                    );
+                    const snap = await getDocs(q);
+                    let records = snap.docs.map(d => d.data());
+                    if (showSection) {
+                        records = records.filter(r => r.section === showSection);
+                    }
+                    setShowData(records);
+                } catch (error) {
+                    console.error("Error fetching show attendance data:", error);
+                } finally {
+                    setShowLoading(false);
+                }
+            };
+            fetchShowData();
+        } else if (activeTab === 'show' && !showClass) {
+            setShowData([]);
+            setShowWorkingDays({});
+        }
+    }, [activeTab, showClass, showSection, currentSchool?.id, activeFY]);
+
     const handleExportReport = () => {
         const csvContent = "data:text/csv;charset=utf-8,"
             + ["Name,Admission No,Class,Section,Total Days,Present,Late,Absent,Percentage"]
@@ -411,6 +459,18 @@ const AttendanceManagement: React.FC = () => {
 
         return filtered;
     }, [students, filterClass, filterSection, activeTab, studentSearch, user?.role]);
+
+    const showStudentsList = useMemo(() => {
+        if (!showClass) return [];
+        return students
+            .filter(s => s.class === showClass && (showSection ? s.section === showSection : true))
+            .sort((a, b) => {
+                const rollA = parseInt(a.classRollNo) || 0;
+                const rollB = parseInt(b.classRollNo) || 0;
+                if (rollA !== rollB) return rollA - rollB;
+                return (a.fullName || '').localeCompare(b.fullName || '');
+            });
+    }, [students, showClass, showSection]);
 
     const fetchStudents = async () => {
         setLoading(true);
@@ -643,7 +703,7 @@ const AttendanceManagement: React.FC = () => {
                     width: '100%',
                     maxWidth: '100%'
                 }}>
-                    {(['mark', 'summary', 'student', 'report', 'entry'] as const).map(tab => (
+                    {(['mark', 'summary', 'student', 'report', 'entry', 'show'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -657,7 +717,7 @@ const AttendanceManagement: React.FC = () => {
                                 minWidth: 'fit-content'
                             }}
                         >
-                            {tab === 'entry' ? 'Attendance Entry' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                            {tab === 'entry' ? 'Attendance Entry' : tab === 'show' ? 'Show Attendance' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                         </button>
                     ))}
                 </div>
@@ -1912,6 +1972,95 @@ const AttendanceManagement: React.FC = () => {
                                         >
                                             <Save size={14} /> {savingEntry ? 'Saving...' : 'Save Entry'}
                                         </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ===================== SHOW ATTENDANCE TAB ===================== */}
+                {activeTab === 'show' && (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                        <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                                <div className="input-group" style={{ marginBottom: 0 }}>
+                                    <label className="field-label">SELECT CLASS</label>
+                                    <select
+                                        className="input-field"
+                                        value={showClass}
+                                        onChange={e => {
+                                            setShowClass(e.target.value);
+                                            setShowSection('');
+                                        }}
+                                    >
+                                        <option value="">-- Choose Class --</option>
+                                        {classesList.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                {showClass && (
+                                    <div className="input-group" style={{ marginBottom: 0 }}>
+                                        <label className="field-label">SELECT SECTION</label>
+                                        <select
+                                            className="input-field"
+                                            value={showSection}
+                                            onChange={e => setShowSection(e.target.value)}
+                                        >
+                                            <option value="">All Sections</option>
+                                            {Array.from(new Set(students.filter(s => s.class === showClass && s.section).map(s => s.section))).sort().map(sec => (
+                                                <option key={String(sec)} value={String(sec)}>Section {sec}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {showClass && (
+                            <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                                {showLoading ? (
+                                    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading attendance data...</div>
+                                ) : showStudentsList.length === 0 ? (
+                                    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No students found in this class/section.</div>
+                                ) : (
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
+                                            <thead>
+                                                <tr style={{ background: 'rgba(248, 250, 252, 0.5)', borderBottom: '1px solid var(--border)' }}>
+                                                    <th style={{ padding: '1.25rem 1rem', textAlign: 'left', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', minWidth: '200px', position: 'sticky', left: 0, background: 'rgba(248, 250, 252, 0.95)', zIndex: 10 }}>Student Name</th>
+                                                    {ACADEMIC_MONTHS.map(month => (
+                                                        <th key={month} style={{ padding: '1.25rem 1rem', textAlign: 'center', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                                                            {month} <br />
+                                                            <span style={{ fontSize: '0.65rem' }}>({showWorkingDays[month] || 0} days)</span>
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {showStudentsList.map((student, idx) => {
+                                                    const studentRecord = showData.find(r => r.studentId === student.uid || r.studentId === student.id);
+                                                    const presentDays = studentRecord?.presentDays || {};
+                                                    return (
+                                                        <tr key={student.uid || student.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                            <td style={{ padding: '1rem', position: 'sticky', left: 0, background: 'white', zIndex: 5, borderRight: '1px solid var(--border)' }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '2rem' }}>{idx + 1}.</span>
+                                                                    <div>
+                                                                        <div style={{ fontWeight: 700 }}>{student.fullName}</div>
+                                                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Roll: {student.classRollNo} • {student.admissionNo}</div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            {ACADEMIC_MONTHS.map(month => (
+                                                                <td key={month} style={{ padding: '1rem', textAlign: 'center', fontWeight: 600, color: presentDays[month] ? 'var(--text-main)' : 'var(--text-muted)' }}>
+                                                                    {presentDays[month] || '-'}
+                                                                </td>
+                                                            ))}
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 )}
                             </div>
