@@ -141,8 +141,14 @@ export const resolveClassName = (classId: string, activeClasses: any[]): string 
 
             if (classNamePart) {
                 const formattedName = toProperCase(classNamePart.replace(/_/g, ' '));
+                // Exact match first
                 const tryNameMatch = activeClasses.find((c: any) => c.name.toLowerCase() === formattedName.toLowerCase());
                 if (tryNameMatch) return tryNameMatch.name;
+                // Normalized match: strip hyphens/spaces/punctuation so "Pre Nursery" matches "Pre-Nursery"
+                const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const normalizedFormatted = normalize(formattedName);
+                const tryFuzzyMatch = activeClasses.find((c: any) => normalize(c.name) === normalizedFormatted);
+                if (tryFuzzyMatch) return tryFuzzyMatch.name;
                 return formattedName;
             }
         }

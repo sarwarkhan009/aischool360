@@ -44,6 +44,8 @@ interface StudentResult {
 
 const ExamResultsDashboard: React.FC = () => {
     const navigate = useNavigate();
+    // Normalize for fuzzy class name comparisons ("Pre-Nursery" == "Pre Nursery")
+    const normalizeClass = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const { currentSchool } = useSchool();
     const { data: exams, update: updateExam } = useFirestore<any>('exams');
     const { data: marksEntries } = useFirestore<any>('marks_entries');
@@ -70,6 +72,7 @@ const ExamResultsDashboard: React.FC = () => {
     const [selectedExamId, setSelectedExamId] = useState<string>('');
     const [selectedClass, setSelectedClass] = useState<string>('');
     const [selectedSection, setSelectedSection] = useState<string>('');
+    const [nameCase, setNameCase] = useState<'UPPER' | 'PROPER'>('UPPER');
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
     const [showPrintConfig, setShowPrintConfig] = useState(false);
     const [showDeleteBtn, setShowDeleteBtn] = useState(false);
@@ -167,7 +170,7 @@ const ExamResultsDashboard: React.FC = () => {
         if (!selectedExam || !selectedClass) return [];
 
         const classRoutine = selectedExam.classRoutines?.find((cr: any) =>
-            cr.classId === selectedClass || cr.className === resolveClass(selectedClass)
+            cr.classId === selectedClass || cr.className === resolveClass(selectedClass) || resolveClass(cr.classId) === resolveClass(selectedClass)
         );
 
         return (classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
@@ -179,10 +182,11 @@ const ExamResultsDashboard: React.FC = () => {
         if (!selectedExamId || !selectedClass || !marksEntries) return [];
 
         const selectedClassName = resolveClass(selectedClass);
+        const normalizedSelected = normalizeClass(selectedClassName);
 
         return marksEntries.filter((m: any) =>
             m.examId === selectedExamId &&
-            (m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName) &&
+            (m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName || resolveClass(m.classId) === selectedClassName || normalizeClass(m.className || '') === normalizedSelected || normalizeClass(m.classId || '') === normalizedSelected) &&
             (m.status === 'APPROVED' || m.status === 'SUBMITTED') &&
             (!selectedSection || m.sectionId === selectedSection || m.sectionName === selectedSection)
         );
@@ -194,10 +198,11 @@ const ExamResultsDashboard: React.FC = () => {
 
         // Selected Class Name for matching (handles legacy IDs via resolveClass)
         const selectedClassName = resolveClass(selectedClass);
+        const normalizedSelected = normalizeClass(selectedClassName);
 
         const classStudents = studentList.filter((s: any) =>
             s.schoolId === currentSchool?.id &&
-            (s.class === selectedClass || (selectedClassName && s.class === selectedClassName)) &&
+            (s.class === selectedClass || (selectedClassName && s.class === selectedClassName) || normalizeClass(s.class || '') === normalizedSelected) &&
             s.status === 'ACTIVE' &&
             (!selectedSection || s.section === selectedSection) &&
             // Filter by academic year using student's 'session' field (year name like "2026-2027")
@@ -389,10 +394,14 @@ const ExamResultsDashboard: React.FC = () => {
         if (!selectedExam || !filteredResults.length) return;
 
         const data = filteredResults.map(res => {
+            const displayStudentName = nameCase === 'UPPER'
+                ? (res.studentName || '').toUpperCase()
+                : toProperCase(res.studentName || '');
+
             const row: any = {
                 'Rank': res.rank,
                 'Roll No': res.rollNumber,
-                'Student Name': res.studentName,
+                'Student Name': displayStudentName,
             };
 
             // Student object dhundhte hain taake entry lookup ho sake
@@ -475,9 +484,10 @@ const ExamResultsDashboard: React.FC = () => {
                 : (selectedExam.subjects || []);
 
             // Us class ke approved/submitted marks nikalo
+            const normalizedResolved = normalizeClass(resolvedClassName);
             const classMarks = (marksEntries || []).filter((m: any) =>
                 m.examId === selectedExamId &&
-                (m.classId === clsId || (resolvedClassName && (m.className === resolvedClassName || m.classId === resolvedClassName))) &&
+                (m.classId === clsId || (resolvedClassName && (m.className === resolvedClassName || m.classId === resolvedClassName)) || normalizeClass(m.className || '') === normalizedResolved || normalizeClass(m.classId || '') === normalizedResolved) &&
                 (m.status === 'APPROVED' || m.status === 'SUBMITTED')
             );
 
@@ -485,7 +495,7 @@ const ExamResultsDashboard: React.FC = () => {
             const selectedYearName = schoolAcademicYears.find((y: any) => y.id === selectedAcademicYear)?.name;
             const classStudents = (studentList || []).filter((s: any) =>
                 s.schoolId === currentSchool?.id &&
-                (s.class === clsId || (resolvedClassName && s.class === resolvedClassName)) &&
+                (s.class === clsId || (resolvedClassName && s.class === resolvedClassName) || normalizeClass(s.class || '') === normalizedResolved) &&
                 s.status === 'ACTIVE' &&
                 (selectedAcademicYear ? s.session === selectedYearName : true)
             );
@@ -600,10 +610,14 @@ const ExamResultsDashboard: React.FC = () => {
 
             // Build sheet rows
             const sheetData = finalRows.map(res => {
+                const displayStudentName = nameCase === 'UPPER'
+                    ? (res.student.name || '').toUpperCase()
+                    : toProperCase(res.student.name || '');
+
                 const row: any = {
                     'Rank': res.rank,
                     'Roll No': res.rollNumber,
-                    'Student Name': res.student.name,
+                    'Student Name': displayStudentName,
                     'Section': res.student.section || '-',
                 };
                 Object.assign(row, res.marksForRow);
@@ -669,10 +683,11 @@ const ExamResultsDashboard: React.FC = () => {
         if (!selectedExamId || !selectedClass) return;
 
         const selectedClassName = resolveClass(selectedClass);
+        const normalizedSelected = normalizeClass(selectedClassName);
 
         const marksToDelete = marksEntries?.filter((m: any) =>
             m.examId === selectedExamId &&
-            (m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName)
+            (m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName || normalizeClass(m.className || '') === normalizedSelected)
         ) || [];
 
         if (marksToDelete.length === 0) {
@@ -818,6 +833,25 @@ const ExamResultsDashboard: React.FC = () => {
                             Delete Marks
                         </button>
                     )}
+                    <button
+                        onClick={() => setNameCase(prev => prev === 'UPPER' ? 'PROPER' : 'UPPER')}
+                        className="btn"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            background: 'white',
+                            color: '#6366f1',
+                            border: '1px solid #6366f1',
+                            borderRadius: '0.5rem',
+                            padding: '0.6rem 1rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                        }}
+                    >
+                        <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>Aa</span>
+                        {nameCase === 'UPPER' ? 'Upper Case' : 'Proper Case'}
+                    </button>
                     <button
                         onClick={handlePrintResults}
                         className="btn"
@@ -994,7 +1028,7 @@ const ExamResultsDashboard: React.FC = () => {
                             disabled={!selectedExamId}
                         >
                             <option value="">Choose Class</option>
-                            {availableClasses.map((clsId: string) => (
+                            {sortClasses(availableClasses.map((id: string) => ({ id, name: resolveClass(id) }))).map((c: any) => c.id).map((clsId: string) => (
                                 <option key={clsId} value={clsId}>{resolveClass(clsId)}</option>
                             ))}
                         </select>
@@ -1008,14 +1042,26 @@ const ExamResultsDashboard: React.FC = () => {
                             disabled={!selectedClass}
                         >
                             <option value="">All Sections</option>
-                            {activeClasses.find((c: any) =>
-                                (c.id === selectedClass ||
-                                    c.name === selectedClass ||
-                                    c.name === resolveClass(selectedClass)) &&
-                                (!selectedExam?.academicYearName || !c.financialYear || c.financialYear === selectedExam.academicYearName)
-                            )?.sections?.map((sec: string) => (
-                                <option key={sec} value={sec}>{sec}</option>
-                            ))}
+                            {(() => {
+                                // Merge sections from ALL class settings documents for the resolved class name.
+                                // This matches the approach in AdvancedMarksEntry to avoid missing sections
+                                // when class config is split across multiple financial-year documents.
+                                const resolvedName = resolveClass(selectedClass);
+                                const normalizedResolved = normalizeClass(resolvedName);
+                                const rawClasses = allSettings?.filter((d: any) => d.type === 'class' && d.active !== false) || [];
+                                const mergedSections = new Set<string>();
+                                for (const cls of rawClasses) {
+                                    const clsNorm = normalizeClass(cls.name || '');
+                                    if (cls.id === selectedClass || clsNorm === normalizedResolved) {
+                                        // Optionally filter by exam's academic year
+                                        if (selectedExam?.academicYearName && cls.financialYear && cls.financialYear !== selectedExam.academicYearName) continue;
+                                        (cls.sections || []).forEach((s: string) => mergedSections.add(s));
+                                    }
+                                }
+                                return Array.from(mergedSections).sort().map((sec: string) => (
+                                    <option key={sec} value={sec}>{sec}</option>
+                                ));
+                            })()}
                         </select>
                     </div>
                     <div className="form-group">
@@ -1219,7 +1265,9 @@ const ExamResultsDashboard: React.FC = () => {
                                                 {res.rollNumber}
                                             </td>
                                             <td style={{ padding: '1rem' }}>
-                                                <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{res.studentName}</div>
+                                                <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                                                    {nameCase === 'UPPER' ? (res.studentName || '').toUpperCase() : toProperCase(res.studentName || '')}
+                                                </div>
                                             </td>
                                             {availableSubjects.map((sub: any) => {
                                                 const isGradeBased = sub.assessmentType === 'GRADE';
