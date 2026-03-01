@@ -261,11 +261,27 @@ const AttendanceManagement: React.FC = () => {
     const [reportClass, setReportClass] = useState('');
     const [reportSection, setReportSection] = useState('');
     const [reportSearch, setReportSearch] = useState('');
+    const [reportTimeRange, setReportTimeRange] = useState<'thisMonth' | 'lastMonth' | 'lifeTime'>('thisMonth');
     const [startDateReport, setStartDateReport] = useState(() => {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
     });
     const [endDateReport, setEndDateReport] = useState(new Date().toISOString().split('T')[0]);
+
+    useEffect(() => {
+        const now = new Date();
+        if (reportTimeRange === 'thisMonth') {
+            setStartDateReport(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`);
+            setEndDateReport(now.toISOString().split('T')[0]);
+        } else if (reportTimeRange === 'lastMonth') {
+            const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            setStartDateReport(`${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-01`);
+            setEndDateReport(formatDate(endOfMonth(last), 'yyyy-MM-dd'));
+        } else if (reportTimeRange === 'lifeTime') {
+            setStartDateReport('2000-01-01'); // effectively lifetime early date
+            setEndDateReport(now.toISOString().split('T')[0]);
+        }
+    }, [reportTimeRange]);
 
     // Student-wise states
     const [selectedStudent, setSelectedStudent] = useState<any>(null);
@@ -278,7 +294,7 @@ const AttendanceManagement: React.FC = () => {
 
     // Process Report Data
     const reportData = useMemo(() => {
-        if (!students.length || activeTab !== 'report') return [];
+        if (!students.length || activeTab !== 'report' || !reportClass) return [];
 
         let filtered = students;
 
@@ -1404,6 +1420,29 @@ const AttendanceManagement: React.FC = () => {
                                 >
                                     <Download size={18} /> Export CSV
                                 </button>
+
+                                {/* Time Range Chips */}
+                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    {(['thisMonth', 'lastMonth', 'lifeTime'] as const).map(range => (
+                                        <button
+                                            key={range}
+                                            onClick={() => setReportTimeRange(range)}
+                                            className={`btn ${reportTimeRange === range ? 'btn-primary' : ''}`}
+                                            style={{
+                                                fontSize: '0.75rem',
+                                                padding: '0.4rem 0.75rem',
+                                                borderRadius: '2rem',
+                                                whiteSpace: 'nowrap',
+                                                background: reportTimeRange === range ? 'var(--primary)' : 'rgba(203, 213, 225, 0.4)',
+                                                color: reportTimeRange === range ? 'white' : 'var(--text-muted)',
+                                                border: 'none',
+                                                fontWeight: 600
+                                            }}
+                                        >
+                                            {range === 'thisMonth' ? 'This Month' : range === 'lastMonth' ? 'Last Month' : 'Life Time'}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                             <div style={{
                                 display: 'grid',
@@ -1471,6 +1510,8 @@ const AttendanceManagement: React.FC = () => {
                                     <tbody>
                                         {loadingAllAttendance ? (
                                             <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading analytical records...</td></tr>
+                                        ) : !reportClass ? (
+                                            <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Please select a class to view the attendance report.</td></tr>
                                         ) : reportData.length === 0 ? (
                                             <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No records matching the filters.</td></tr>
                                         ) : reportData.map((row: any) => (
@@ -1503,6 +1544,8 @@ const AttendanceManagement: React.FC = () => {
                         <div className="report-cards-mobile" style={{ display: 'none', flexDirection: 'column', gap: '1rem' }}>
                             {loadingAllAttendance ? (
                                 <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading analytical records...</div>
+                            ) : !reportClass ? (
+                                <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Please select a class to view the attendance report.</div>
                             ) : reportData.length === 0 ? (
                                 <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>No records matching the filters.</div>
                             ) : reportData.map((row: any) => (
