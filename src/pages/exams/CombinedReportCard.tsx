@@ -248,9 +248,22 @@ const CombinedReportCard: React.FC = () => {
     // Get subjects for an exam (handles classRoutines)
     const getExamSubjects = (exam: any) => {
         if (!exam) return [];
-        const classRoutine = exam.classRoutines?.find((cr: any) =>
-            cr.classId === selectedClass || cr.className === getClassName(selectedClass)
-        );
+        const selectedClassName = getClassName(selectedClass);
+        const normalizedSelected = (selectedClassName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const resolvedSelected = resolveClassName(selectedClass, activeClasses);
+
+        const classRoutine = exam.classRoutines?.find((cr: any) => {
+            // Direct ID match
+            if (cr.classId === selectedClass) return true;
+            // Direct name match
+            if (cr.className === selectedClassName) return true;
+            // Resolved name match (handles legacy format IDs like 'class_class_1_...')
+            if (resolvedSelected && (cr.className === resolvedSelected || resolveClassName(cr.classId || '', activeClasses) === resolvedSelected)) return true;
+            // Normalized fuzzy match (ignores case, hyphens, spaces)
+            const normalizedCR = (cr.className || cr.classId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (normalizedCR && normalizedSelected && normalizedCR === normalizedSelected) return true;
+            return false;
+        });
         return (classRoutine && classRoutine.routine && classRoutine.routine.length > 0)
             ? classRoutine.routine
             : (exam.subjects || []);

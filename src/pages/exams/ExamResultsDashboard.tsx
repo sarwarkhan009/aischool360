@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { where } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import {
     Trophy,
@@ -77,13 +76,10 @@ const ExamResultsDashboard: React.FC = () => {
     const [showPrintConfig, setShowPrintConfig] = useState(false);
     const [showDeleteBtn, setShowDeleteBtn] = useState(false);
 
-    // marks_entries: filtered per selected exam — NOT the whole collection
-    // null constraint = useFirestore skips listener entirely (no data loaded)
-    const examMarksConstraints = useMemo(
-        () => selectedExamId ? [where('examId', '==', selectedExamId)] : null,
-        [selectedExamId]
-    );
-    const { data: marksEntries } = useFirestore<any>('marks_entries', examMarksConstraints);
+    // Load ALL marks_entries for this school — examId filtering is done client-side in examMarks useMemo
+    // (Previously used Firestore-level examId filter, but useFirestore's dependency tracking couldn't detect
+    //  when constraint VALUES changed, causing stale data when switching exams)
+    const { data: marksEntries } = useFirestore<any>('marks_entries');
 
     // Auto-select active academic year on first load
     React.useEffect(() => {
@@ -204,12 +200,35 @@ const ExamResultsDashboard: React.FC = () => {
         const selectedClassName = resolveClass(selectedClass);
         const normalizedSelected = normalizeClass(selectedClassName);
 
-        return marksEntries.filter((m: any) => {
+        const result = marksEntries.filter((m: any) => {
+            // Must match exam ID
+            if (m.examId !== selectedExamId) return false;
+
+            // Status check (allow most statuses)
             const statusMatch = !m.status || ['APPROVED', 'SUBMITTED', 'DRAFT', 'PUBLISHED', 'FINALIZED'].includes(String(m.status).toUpperCase());
+            if (!statusMatch) return false;
+
+            // Section check (only when specific section is selected)
             const sectionMatch = !selectedSection || m.sectionId === 'ALL' || m.sectionId === selectedSection || m.sectionName === selectedSection || normalizeClass(m.sectionId || '') === normalizeClass(selectedSection || '');
+            if (!sectionMatch) return false;
 
-            const rootClassMatch = m.classId === selectedClass || (selectedClassName && m.className === selectedClassName) || m.classId === selectedClassName || resolveClass(m.classId) === selectedClassName || normalizeClass(m.className || '') === normalizedSelected || normalizeClass(m.classId || '') === normalizedSelected;
+            // Class matching — try multiple fallback strategies
+            // Strategy 1: Root-level classId/className/class match
+            const rootClassMatch = m.classId === selectedClass ||
+                m.class === selectedClass ||
+                (selectedClassName && m.className === selectedClassName) ||
+                (selectedClassName && m.class === selectedClassName) ||
+                m.classId === selectedClassName ||
+                m.class === selectedClassName ||
+                resolveClass(m.classId) === selectedClassName ||
+                resolveClass(m.class) === selectedClassName ||
+                normalizeClass(m.className || '') === normalizedSelected ||
+                normalizeClass(m.classId || '') === normalizedSelected ||
+                normalizeClass(m.class || '') === normalizedSelected;
 
+            if (rootClassMatch) return true;
+
+            // Strategy 2: Legacy — class info stored inside marks array
             const legacyClassMatch = !!(m.marks && m.marks.length > 0 && (
                 m.marks[0].class === selectedClass ||
                 (selectedClassName && m.marks[0].class === selectedClassName) ||
@@ -217,10 +236,17 @@ const ExamResultsDashboard: React.FC = () => {
                 resolveClass(m.marks[0].class || '') === selectedClassName
             ));
 
-            const classMatch = rootClassMatch || legacyClassMatch;
+            if (legacyClassMatch) return true;
 
-            return m.examId === selectedExamId && classMatch && statusMatch && sectionMatch;
+            // Strategy 3: No class info anywhere — allow through (rely on student-level matching later)
+            const hasAnyClassInfo = m.classId || m.className || m.class;
+            const hasMarksClass = m.marks && m.marks.length > 0 && m.marks[0].class;
+            if (!hasAnyClassInfo && !hasMarksClass) return true;
+
+            return false;
         });
+
+        return result;
     }, [selectedExamId, selectedClass, selectedSection, marksEntries, activeClasses]);
 
     // Calculate Results
@@ -258,6 +284,7 @@ const ExamResultsDashboard: React.FC = () => {
             availableSubjects.forEach((sub: any) => {
                 const entry = findMarksEntry(student, sub, examMarks);
                 const studentMark = entry?.marks?.find((sm: any) => sm.studentId === student.id || (!sm.studentId && sm.admissionNo && (sm.admissionNo === student.admissionNumber || sm.admissionNo === student.admissionNo)));
+
                 const isAbsent = studentMark?.isAbsent || false;
                 const isNA = studentMark?.isNA || false;
 

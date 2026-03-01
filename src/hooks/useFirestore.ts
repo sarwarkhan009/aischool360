@@ -16,6 +16,9 @@ import {
 // Generic type for Firestore document data
 type DocumentData = Record<string, any>;
 
+// Stable empty array reference — prevents default [] from creating new references each render
+const EMPTY_CONSTRAINTS: QueryConstraint[] = [];
+
 // ─── Utility: get canWrite from localStorage (same source as AuthContext) ─────
 // We read from localStorage directly to avoid circular hook deps.
 const getCanWriteFromStorage = (): boolean => {
@@ -34,7 +37,7 @@ const getCanWriteFromStorage = (): boolean => {
 
 const WRITE_DENIED_MSG = '🔒 Access Denied: Your role has View-Only permissions. Contact the Administrator to enable write access.';
 
-export function useFirestore<T = DocumentData>(collectionName: string, constraints: QueryConstraint[] | null = [], options: { skipSchoolFilter?: boolean } = {}) {
+export function useFirestore<T = DocumentData>(collectionName: string, constraints: QueryConstraint[] | null = EMPTY_CONSTRAINTS, options: { skipSchoolFilter?: boolean } = {}) {
     const [data, setData] = useState<T[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
@@ -54,6 +57,8 @@ export function useFirestore<T = DocumentData>(collectionName: string, constrain
             setLoading(false);
             return;
         }
+
+        setLoading(true); // Reset loading when constraints change
 
         const finalConstraints = [...constraints];
 
@@ -81,7 +86,9 @@ export function useFirestore<T = DocumentData>(collectionName: string, constrain
         });
 
         return () => unsubscribe();
-    }, [collectionName, currentSchool?.id, options.skipSchoolFilter, constraints === null ? 'null' : constraints.length]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [collectionName, currentSchool?.id, options.skipSchoolFilter,
+        constraints === null ? 'null' : JSON.stringify(constraints)]);
 
     // ─── Settings / role collections are exempt from write guard ─────────────
     // These are used internally by the app (role save, module control, etc.)
