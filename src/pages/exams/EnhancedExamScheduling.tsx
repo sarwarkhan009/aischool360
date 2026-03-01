@@ -337,7 +337,7 @@ const EnhancedExamScheduling: React.FC = () => {
     };
 
     const handleSaveExam = async () => {
-        if (!newExam.name || !newExam.academicYearId || !newExam.assessmentTypeId || !newExam.targetClasses?.length || !currentSchool?.id) {
+        if (!newExam.name || !newExam.academicYearId || !newExam.assessmentTypeId || !currentSchool?.id) {
             alert('Please fill in all required fields');
             return;
         }
@@ -367,18 +367,63 @@ const EnhancedExamScheduling: React.FC = () => {
                 return newObj;
             };
 
-            // Only filter orphaned class IDs when schoolClasses has actually loaded.
-            // If schoolClasses is empty (still loading), skip the filter entirely —
-            // otherwise every stored ID looks "orphaned" and gets wiped on save.
+            // ─── CRITICAL SAFETY GUARD: Kabhi bhi data wipe nahi hogi ─────────────
+            // Agar React stale closure / race condition ki wajah se newExam state me
+            // targetClasses ya classRoutines empty ho gayi, to editingExam (original
+            // Firebase snapshot) se restore karo. NEVER overwrite with empty arrays.
+            const safeTargetClasses = (newExam.targetClasses?.length ?? 0) > 0
+                ? newExam.targetClasses!
+                : (editingExam?.targetClasses || []);
+
+            const safeClassRoutines = (newExam.classRoutines?.length ?? 0) > 0
+                ? newExam.classRoutines!
+                : (editingExam?.classRoutines || []);
+
+            // Validate: at least one class must be selected
+            if (safeTargetClasses.length === 0) {
+                alert('Please select at least one class for this exam.');
+                return;
+            }
+
+            // Debug log - console me dikhega ki kya save ho raha hai
+            console.log(`[ExamSave] ${editingExam ? 'UPDATE' : 'CREATE'} "${newExam.name}" | targetClasses: ${safeTargetClasses.length} | classRoutines: ${safeClassRoutines.length}`);
+            if (editingExam && (newExam.targetClasses?.length ?? 0) === 0) {
+                console.warn('[ExamSave] ⚠️ targetClasses was empty in state — restored from editingExam (stale closure protection)');
+            }
+            if (editingExam && (newExam.classRoutines?.length ?? 0) === 0 && (editingExam.classRoutines?.length ?? 0) > 0) {
+                console.warn('[ExamSave] ⚠️ classRoutines was empty in state — restored from editingExam (stale closure protection)');
+            }
+
             const examData = cleanData({
                 ...newExam,
-                targetClasses: newExam.targetClasses || [],
-                classRoutines: newExam.classRoutines || [], // Preserve ALL routines to prevent data loss when unchecking target classes
+                targetClasses: safeTargetClasses,
+                classRoutines: safeClassRoutines,
                 schoolId: currentSchool.id,
                 updatedAt: new Date().toISOString()
             });
 
             if (editingExam) {
+                // ─── AUTO-BACKUP: update se pehle purana snapshot save karo ───────
+                // Har update pe ek backup banta hai exam_backups collection me.
+                // Firebase me jaa ke exam_backups dhundh kar kabhi bhi restore kar sakte ho.
+                try {
+                    const { addDoc, collection: fbCol } = await import('firebase/firestore');
+                    const { db } = await import('../../lib/firebase');
+                    await addDoc(fbCol(db, 'exam_backups'), {
+                        examId: editingExam.id,
+                        examName: editingExam.name,
+                        schoolId: currentSchool.id,
+                        snapshot: cleanData({ ...editingExam }),
+                        targetClassesCount: (editingExam.targetClasses || []).length,
+                        classRoutinesCount: (editingExam.classRoutines || []).length,
+                        backedUpAt: new Date().toISOString(),
+                        backedUpBy: user?.username || user?.name || 'system'
+                    });
+                    console.log('[ExamBackup] ✅ Snapshot saved to exam_backups | classes:', (editingExam.targetClasses || []).length);
+                } catch (backupErr) {
+                    // Backup failure is non-critical — main save must continue
+                    console.warn('[ExamBackup] Backup failed (non-critical):', backupErr);
+                }
                 await updateDocument(editingExam.id, examData);
             } else {
                 await addDocument({
@@ -2550,6 +2595,47 @@ const EnhancedExamScheduling: React.FC = () => {
                                             </div>
                                         </div>
 
+                                        {/* ─── RECOVER BANNER: 0 classes wale exams ke liye ─── */}
+                                        {(exam.targetClasses || []).length === 0 && (
+                                            <div style={{
+                                                marginTop: '1rem',
+                                                padding: '0.75rem 1rem',
+                                                background: 'linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%)',
+                                                border: '1px solid #f59e0b60',
+                                                borderRadius: '0.75rem',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                gap: '1rem',
+                                                flexWrap: 'wrap'
+                                            }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    <AlertCircle size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#92400e' }}>
+                                                        Classes data missing — click to recover from marks entries
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleRecoverLostClasses(exam.id)}
+                                                    style={{
+                                                        fontSize: '0.8125rem',
+                                                        fontWeight: 700,
+                                                        padding: '0.5rem 1.25rem',
+                                                        borderRadius: '0.625rem',
+                                                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap',
+                                                        boxShadow: '0 2px 8px rgba(245,158,11,0.35)',
+                                                        flexShrink: 0
+                                                    }}
+                                                >
+                                                    🔄 Recover Classes
+                                                </button>
+                                            </div>
+                                        )}
+
                                         {/* Quick Status Updates */}
                                         {exam.status !== 'COMPLETED' && exam.status !== 'CANCELLED' && (
                                             <div style={{
@@ -2999,8 +3085,8 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         className="input-field"
                                                         placeholder="e.g. Unit Test 3"
                                                         value={newExam.displayName}
-                                                        onChange={(e) => setNewExam({ ...newExam, displayName: e.target.value })}
-                                                        onBlur={(e) => setNewExam({ ...newExam, displayName: toProperCase(e.target.value) })}
+                                                        onChange={(e) => setNewExam(prev => ({ ...prev, displayName: e.target.value }))}
+                                                        onBlur={(e) => setNewExam(prev => ({ ...prev, displayName: toProperCase(e.target.value) }))}
                                                         style={{ fontSize: '1rem', padding: '0.875rem 1rem', borderRadius: '0.75rem' }}
                                                     />
                                                 </div>
@@ -3016,13 +3102,13 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         value={newExam.academicYearId}
                                                         onChange={(e) => {
                                                             const year = schoolYears.find(y => y.id === e.target.value);
-                                                            setNewExam({
-                                                                ...newExam,
+                                                            setNewExam(prev => ({
+                                                                ...prev,
                                                                 academicYearId: e.target.value,
                                                                 academicYearName: year?.name || '',
                                                                 termId: '',
                                                                 termName: ''
-                                                            });
+                                                            }));
                                                         }}
                                                         style={{ padding: '0.875rem 1rem', borderRadius: '0.75rem' }}
                                                     >
@@ -3045,11 +3131,11 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         onChange={(e) => {
                                                             const year = schoolYears.find(y => y.id === newExam.academicYearId);
                                                             const term = year?.terms?.find((t: any) => t.id === e.target.value);
-                                                            setNewExam({
-                                                                ...newExam,
+                                                            setNewExam(prev => ({
+                                                                ...prev,
                                                                 termId: e.target.value,
                                                                 termName: term?.name || ''
-                                                            });
+                                                            }));
                                                         }}
                                                         disabled={!newExam.academicYearId}
                                                         style={{ padding: '0.875rem 1rem', borderRadius: '0.75rem' }}
@@ -3072,15 +3158,17 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         value={newExam.assessmentTypeId}
                                                         onChange={(e) => {
                                                             const assessment = schoolAssessments.find(a => a.id === e.target.value);
-                                                            const updatedSubjects = (newExam.subjects || []).map(sub => ({
-                                                                ...sub,
-                                                                passingMarks: assessment?.passingMarks ?? sub.passingMarks
-                                                            }));
-                                                            setNewExam({
-                                                                ...newExam,
-                                                                assessmentTypeId: e.target.value,
-                                                                assessmentTypeName: assessment?.name || '',
-                                                                subjects: updatedSubjects
+                                                            setNewExam(prev => {
+                                                                const updatedSubjects = (prev.subjects || []).map(sub => ({
+                                                                    ...sub,
+                                                                    passingMarks: assessment?.passingMarks ?? sub.passingMarks
+                                                                }));
+                                                                return {
+                                                                    ...prev,
+                                                                    assessmentTypeId: e.target.value,
+                                                                    assessmentTypeName: assessment?.name || '',
+                                                                    subjects: updatedSubjects
+                                                                };
                                                             });
                                                         }}
                                                         style={{ padding: '0.875rem 1rem', borderRadius: '0.75rem' }}
@@ -3102,7 +3190,7 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         type="date"
                                                         className="input-field"
                                                         value={newExam.startDate}
-                                                        onChange={(e) => setNewExam({ ...newExam, startDate: e.target.value })}
+                                                        onChange={(e) => setNewExam(prev => ({ ...prev, startDate: e.target.value }))}
                                                         style={{ padding: '0.8125rem 1rem', borderRadius: '0.75rem' }}
                                                     />
                                                 </div>
@@ -3117,10 +3205,10 @@ const EnhancedExamScheduling: React.FC = () => {
                                                         type="button"
                                                         onClick={() => {
                                                             const allSelected = newExam.targetClasses?.length === schoolClasses.length;
-                                                            setNewExam({
-                                                                ...newExam,
+                                                            setNewExam(prev => ({
+                                                                ...prev,
                                                                 targetClasses: allSelected ? [] : schoolClasses.map(c => c.id)
-                                                            });
+                                                            }));
                                                         }}
                                                         style={{
                                                             fontSize: '0.75rem',
@@ -3179,22 +3267,24 @@ const EnhancedExamScheduling: React.FC = () => {
                                                                     onChange={(e) => {
                                                                         if (e.target.checked) {
                                                                             // Add this class's current ID, replacing any old-format ID for same class
-                                                                            const filtered = (newExam.targetClasses || []).filter(storedId => {
-                                                                                if (storedId === cls.id) return false;
-                                                                                return resolveClassName(storedId).toLowerCase().replace(/[^a-z0-9]/g, '') !==
-                                                                                    (cls.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                                                            setNewExam(prev => {
+                                                                                const filtered = (prev.targetClasses || []).filter(storedId => {
+                                                                                    if (storedId === cls.id) return false;
+                                                                                    return resolveClassName(storedId).toLowerCase().replace(/[^a-z0-9]/g, '') !==
+                                                                                        (cls.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                                                                });
+                                                                                return { ...prev, targetClasses: [...filtered, cls.id] };
                                                                             });
-                                                                            setNewExam({ ...newExam, targetClasses: [...filtered, cls.id] });
                                                                         } else {
                                                                             // Remove any stored ID that resolves to this class name
-                                                                            setNewExam({
-                                                                                ...newExam,
-                                                                                targetClasses: (newExam.targetClasses || []).filter(storedId => {
+                                                                            setNewExam(prev => ({
+                                                                                ...prev,
+                                                                                targetClasses: (prev.targetClasses || []).filter(storedId => {
                                                                                     if (storedId === cls.id) return false;
                                                                                     return resolveClassName(storedId).toLowerCase().replace(/[^a-z0-9]/g, '') !==
                                                                                         (cls.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                                                                                 })
-                                                                            });
+                                                                            }));
                                                                         }
                                                                     }}
                                                                     style={{ width: '1.125rem', height: '1.125rem', accentColor: '#6366f1' }}
